@@ -1,0 +1,12 @@
+{
+  "name": "feature-ladder",
+  "description": "Orchestration ladder for adding features with Claude subagents",
+  "owner": { "name": "Jake McTigue", "url": "https://github.com/jakemctigue" },
+  "plugins": [
+    {
+      "name": "feature-ladder",
+      "source": "./plugins/feature-ladder",
+      "description": "Fable coordinates sparingly, Opus experts design, routed Sonnet/Haiku workers build, a deterministic selector gives each task only the skills it needs, Hindsight remembers."
+    }
+  ]
+}

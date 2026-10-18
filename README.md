@@ -1,0 +1,320 @@
+# feature-ladder
+
+**An orchestration ladder for adding features to your applications with Claude
+subagents.** A top-tier coordinator plans and verifies, but delegates
+everything it can. Each task is sent to the cheapest model that can do it
+correctly and given only the skills it needs. Both choices are made by
+deterministic scripts, never by a model's mood. Project memory from
+[Hindsight](https://github.com/vectorize-io/hindsight) carries lessons from
+one feature to the next.
+
+It works in **Claude Code** (as a plugin) and in the **Claude app** (as a skill).
+Both use the same scripts and rules.
+
+---
+
+## Scope of work
+
+**What it does**
+
+- Takes a feature request ("add rate limiting to /search, 100 req/min per key")
+  and runs it end to end in your repo: recall memory, scope, decompose into
+  task cards, design where needed, implement, verify, accept, remember.
+- Decides **which model and effort level** handles each task with a fixed
+  scoring function (`route.py`), from Haiku low for mechanical edits up to
+  Opus high for hard, designed work.
+- Decides **which skills** each worker gets with a fixed rule engine
+  (`select_skills.py`), and in Claude Code physically prevents workers from
+  loading any others.
+- Keeps the expensive model (Fable 5.1) on a short leash: at most three
+  inspection passes per feature, and one-step escalations with a written
+  justification.
+- Requires evidence: every worker returns real command output for its checks,
+  and acceptance checks are re-run by a separate cheap worker, not by the author.
+- Records durable lessons (decisions, pitfalls, interfaces, test gates) in
+  Hindsight after each task and each feature, using the cheapest model that
+  can summarize correctly.
+
+**What it does not do**
+
+- It does not push, deploy, open PRs or touch production. It works in your
+  checkout and reports what changed. Shipping is your call.
+- It does not invent a design when the request is ambiguous. Ambiguous or
+  risky tasks are escalated until a design is agreed.
+- It does not replace your tests. "Done" means your checks passed, quoted
+  verbatim.
+
+---
+
+## The ladder
+
+| Level | Agent | Model / effort | Daily job |
+|---|---|---|---|
+| T0 | `mechanic` | Haiku / low | Mechanical patches, docs drafts, fixtures, executing defined checks |
+| T1 | `evidence-collector` | Haiku / medium | Collect current sources, extract claims, prepare evidence |
+| T2–T3 | `implementer` | Sonnet 5.5 / medium–high | Bounded coding, regression tests, domain analysis |
+| T4–T5 | `senior-implementer` | Opus 5.5 / medium–high | Difficult implementation under an agreed design |
+| D | `domain-expert`, `domain-expert-high` | Opus 5.5 / medium–high | Design: options, trade-offs, interfaces, test plan |
+| M | `memory-scribe` | Haiku / low | Writes Hindsight memories for the expensive rungs |
+| F-Low | `second-opinion` | Fable 5.1 / low | Short, focused second opinions that save a larger handoff |
+| **F-Med** | **`coordinator`** | **Fable 5.1 / medium** | **Plan, direct workers, fact-check, inspect evidence, accept** |
+| F-High | `deep-verifier` | Fable 5.1 / high | Subtle bugs, conflicting evidence, cross-system correctness |
+| F-Extra | `architect-escalation` | Fable 5.1 / xhigh | Architecture or systemic problems unresolved after High |
+| F-Ultra | `ultra-investigator` | Fable 5.1 / max | Optional deep investigations (opt-in with `--ultra`) |
+
+### How a feature run flows
+
+1. **Recall.** The coordinator asks Hindsight for this project's conventions,
+   past decisions and pitfalls in the area.
+2. **Scope.** It reads only what it needs, and writes `FEATURE-REPORT.md`
+   with the goal, acceptance criteria and out-of-scope items.
+3. **Decompose and route.** Each task card is scored by `route.py`. The score
+   picks the rung. Hard flags (irreversible, ambiguous, cross-system plus
+   security, whole-app blast radius) force escalation instead.
+4. **Select skills.** `select_skills.py` picks the card's skills and their
+   full text is pasted into the card.
+5. **Design if needed.** Ambiguous or novel work goes to a domain expert
+   first. Opus implementation is refused until a design is accepted.
+6. **Execute.** Workers run in parallel where independent, each returning an
+   *Evidence Packet*: files changed, checks run with real output, claims and
+   how they were verified.
+7. **Verify.** A separate mechanic re-runs the "done when" checks. The
+   coordinator spot-checks claims against the diff.
+8. **Escalate only when warranted.** One rung at a time, each climb justified
+   in the report.
+9. **Accept and remember.** The coordinator finishes the report, and the
+   durable facts go to Hindsight.
+
+---
+
+## Features
+
+### Deterministic model routing
+
+`skills/complexity-router/scripts/route.py` is a pure function: task facts
+in, rung out. Points come from files, lines changed, modules touched, new
+dependencies, public API changes, persistence, security, concurrency,
+cross-system work, missing tests, ambiguity, novelty and blast radius. Score
+bands map to Haiku low (0–2), Sonnet medium (3–6), Sonnet high (7–9), Opus
+medium (10–13), Opus high (14–17), and escalate (18+). Run
+`route.py --table` for the full table. Workers never choose their own model.
+
+### Deterministic skill selection
+
+See [Skill selection](#skill-selection) below.
+
+### Hindsight memory
+
+- **Recall before work:** the coordinator and every worker query project memory first.
+- **Retain when each subagent finishes:** every rung ends its report with a
+  `Retained:` line. A `SubagentStop` hook sends a worker back once if that
+  line is missing.
+- **Cheapest model writes memories:** Haiku and Sonnet workers write their own
+  1–3 facts. Fable and Opus rungs hand a raw list to `memory-scribe`
+  (Haiku low) instead of spending their own tokens. A sample self-hosted
+  Hindsight config pins Hindsight's own extraction and consolidation to Haiku.
+- **Tagged and scoped:** memories are tagged `project:<name>`,
+  `feature:<slug>` and a kind (`decision`, `pitfall`, `interface`,
+  `test-strategy`, `convention`, `outcome`). Secrets and personal data are
+  never stored.
+- **Health check:** a `SessionStart` hook reports whether Hindsight is
+  reachable. If memory is down, work continues without it.
+
+### Evidence and escalation discipline
+
+- Task cards, evidence packets and design docs follow fixed formats
+  (`skills/orchestration-ladder/SKILL.md`).
+- Failed or blocked tasks move up **one** band at a time.
+- Escalation means "fix the task" (decide, design, or split), never "the
+  coordinator writes the code".
+
+---
+
+## Skill selection
+
+### Why
+
+A subagent normally starts with the description of every installed skill and
+can load any of them. With hundreds of skills installed, that wastes tokens
+and invites the wrong skill. feature-ladder makes skill choice explicit,
+repeatable and auditable.
+
+### How it works
+
+1. After routing, the coordinator runs
+   `skills/skill-selector/scripts/select_skills.py` with the task's `role`
+   (from the router), `kind`, `paths` (the card's scope), `text` (goal and
+   description) and router `flags`.
+2. The script scans the skills installed on that machine. That covers
+   personal skills, project `.claude/skills`, installed plugins, and in the
+   Claude app the synced account and plugin skills. It then applies the rules
+   in `skill-rules.json`.
+3. It returns at most `max_skills` skills (default 3) within `max_chars` of
+   skill text (default 60,000). Anything cut is reported, never silently
+   included.
+4. `--inject` prints those skills' full instructions. The coordinator pastes
+   them into the task card and logs the choice in `FEATURE-REPORT.md`.
+5. **Enforcement:**
+   - **Claude Code:** every ladder agent has `Skill` in `disallowedTools`, so
+     the injected skills are the only ones a worker can use. A worker that
+     needs another skill returns `blocked`. The coordinator re-dispatches with
+     an explicit, logged `add`.
+   - **Claude app:** subagents cannot have tools removed per call. The worker
+     prompt instructs them not to load other skills, and the selection is still
+     logged.
+
+Same task, same rules and same installed skills always give the same skills.
+
+### Rules
+
+A rule fires when **every** group in `when` matches (any value within a
+group), and nothing in `unless` matches:
+
+```json
+{"id": "bigquery", "skill": "data-agent-kit:bigquery-sql", "group": "sql", "priority": 80,
+ "when":   {"keywords": ["bigquery", "bq"], "roles": ["implementer", "senior-implementer"]},
+ "unless": {"keywords": ["prototype"]}}
+```
+
+| Group | Matches |
+|---|---|
+| `roles` | the router role / agent (`implementer`, `mechanic`, `domain-expert`, …) |
+| `kinds` | `code`, `docs`, `fixture`, `check`, `research`, `analysis` |
+| `globs` | each path in scope, or its file name (`*.sql`, `cdk.json`) |
+| `keywords` | whole words in the task text, case-insensitive |
+| `all_keywords` | every listed word must appear |
+| `flags` | router booleans (`security`, `persistence`, …) |
+
+- **Priority:** the highest priority wins. Ties keep file order.
+- **Groups of alternatives:** rules sharing a `group` are alternatives, and
+  only the highest-priority *installed* one is used. That is how one rules
+  file serves both environments: `superpowers:systematic-debugging` in Claude
+  Code, `engineering:debug` in the Claude app.
+- **Skill names:** personal and project skills use their own name
+  (`aws-cdk`). Plugin skills use `plugin:skill`
+  (`superpowers:test-driven-development`).
+
+Rules are merged in this order; a later file replaces a rule with the same
+`id`, and `"disable": ["id"]` removes one:
+
+1. `plugins/feature-ladder/skills/skill-selector/skill-rules.json`, the shipped defaults
+2. `~/.claude/feature-ladder/skill-rules.json`, your personal rules (survive plugin updates)
+3. `<repo>/.feature-ladder/skill-rules.json`, per-project rules
+
+The shipped defaults cover debugging, TDD, planning, code review, library
+docs (Context7), Figma, BigQuery/dbt/Dataform/Airflow/Spark, Python
+dependencies, notebooks, ML practice, data-loss prevention, the AWS family,
+Checkly, Railway, Cerebras, ComfyUI, front-end design, MCP servers and Office
+files. Rules that name skills you don't have are simply skipped.
+`--list` shows which ones those are.
+
+### Try it
+
+```
+/feature-ladder:skills Fix the crash when the S3 upload times out     # dry run
+/feature-ladder:skills --list                                          # what it sees, broken rules
+python3 select_skills.py '{"role":"implementer","kind":"code","paths":["src/Form.tsx"],"text":"Fix crash on empty submit"}'
+```
+
+---
+
+## Install
+
+### Claude Code
+
+```bash
+claude plugin marketplace add jakemctigue/feature-ladder
+claude plugin install feature-ladder@feature-ladder
+```
+
+Or inside a session: `/plugin marketplace add jakemctigue/feature-ladder`,
+then `/plugin install feature-ladder@feature-ladder`. To check the install,
+`/agents` should list the twelve `feature-ladder:*` agents, and `/mcp` should
+show `plugin:feature-ladder:hindsight`.
+
+Requirements: Python 3 on PATH (`python3` or `python`). On Windows, Git Bash
+for the hooks (Claude Code already requires it).
+
+### Claude app
+
+Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
+the start of a conversation it downloads `route.py`, `select_skills.py` and
+`skill-rules.json` from this repo, pinned to tag `v1.1.0`, so the app and
+Claude Code always run identical logic. The app session needs code execution
+and network access to GitHub.
+
+### Hindsight (memory)
+
+Use [Hindsight Cloud](https://ui.hindsight.vectorize.io) or self-host. Set
+these in the environment that launches Claude Code:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HINDSIGHT_MCP_URL` | `https://api.hindsight.vectorize.io/mcp/` | MCP endpoint (`http://localhost:8888/mcp/` when self-hosted) |
+| `HINDSIGHT_API_KEY` | *(empty)* | Your `hsk_…` Cloud key, or the server's API key if you enabled auth |
+| `HINDSIGHT_BANK_ID` | `feature-ladder` | Memory bank (sent as `X-Bank-Id`) |
+
+To self-host with the cheapest-adequate model per operation:
+`cd plugins/feature-ladder/hindsight && cp hindsight.env.example hindsight.env`,
+add your key, then run `./start-hindsight.sh` (Docker).
+`test-hindsight.ps1` runs a save-and-recall round trip with exactly the
+headers the plugin uses.
+
+In the Claude app, Hindsight works when it is added as a connector. Without
+one, the app skill skips memory and says so.
+
+---
+
+## Commands (Claude Code)
+
+| Command | What it does |
+|---|---|
+| `/feature-ladder:feature <request> [--ultra]` | Run a feature end to end |
+| `/feature-ladder:route <task or JSON>` | Dry-run the model router |
+| `/feature-ladder:skills <task, JSON or --list>` | Dry-run the skill selector |
+| `/feature-ladder:recall <topic>` | Ask Hindsight what it knows, without starting a run |
+
+## Where it works
+
+| Capability | Claude Code | Claude app |
+|---|---|---|
+| Deterministic model routing | ✅ plugin script | ✅ same script, fetched from this repo |
+| Deterministic skill selection | ✅ enforced (`Skill` tool removed from workers) | ✅ selected and injected; enforcement by instruction |
+| Twelve named ladder agents | ✅ | General-purpose subagents with role briefs |
+| Hindsight memory | ✅ plugin MCP server | ✅ if a Hindsight connector is added |
+| Retain gate and startup hooks | ✅ | — (no hooks in the app) |
+
+## Repository layout
+
+```
+.claude-plugin/marketplace.json        marketplace: feature-ladder
+plugins/feature-ladder/
+  .claude-plugin/plugin.json
+  .mcp.json                            Hindsight HTTP MCP server (env-driven)
+  agents/                              12 rungs
+  commands/                            feature, route, skills, recall
+  skills/orchestration-ladder/         protocol + handoff contracts
+  skills/complexity-router/            route.py
+  skills/skill-selector/               select_skills.py + skill-rules.json
+  skills/hindsight-memory/             recall / retain / reflect protocol
+  hooks/                               SessionStart check, SubagentStop retain gate
+  hindsight/                           self-host env, start script, round-trip test
+claude-app/model-ladder-router/        the Claude app skill
+```
+
+## Known limits
+
+- The `fable` model must be available on your account for the Fable rungs. If
+  it isn't, change those agents' `model:` lines.
+- Claude Code documents that preloaded agent skills are separate from the
+  `Skill` tool, so the protocol skills should still load with `Skill`
+  disabled. Confirm this on your first run by asking an agent whether its
+  orchestration protocol is in context.
+- Subagents have a fixed startup cost. For very small checks, running them
+  directly can be cheaper than delegating.
+- On Hindsight Cloud, Vectorize chooses the model for Hindsight's own
+  extraction. The per-operation model pinning applies to self-hosted servers.
+
+## License
+
+[MIT](LICENSE) © 2026 Jake McTigue

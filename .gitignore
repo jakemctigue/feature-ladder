@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+hindsight/hindsight.env
+.DS_Store
+FEATURE-REPORT.md
