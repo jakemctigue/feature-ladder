@@ -117,6 +117,24 @@ handles secrets (`update_bank` with the memory-defense policy, or via the UI).
 
 ## Bank and tags
 
-One bank per machine is fine (`HINDSIGHT_BANK_ID`, default `feature-ladder`);
-isolate projects with the `project:<name>` tag on every retain and recall. Use a
-separate bank only when two projects must never see each other's memories.
+Each repository gets its own bank, chosen deterministically by
+`scripts/resolve_bank.py` and applied by hooks; agents never choose a bank.
+
+- At session start the resolver finds the repository's bank or creates it:
+  a pinned id in `<repo>/.feature-ladder/hindsight.json` wins; otherwise the
+  first existing bank among `coding-agent::<project>`, `<owner>-<repo>` (from
+  the git remote) and `<project>`; otherwise it creates
+  `coding-agent::<project>`. `<project>` is the main worktree's folder name, so
+  linked worktrees share the bank. The result is cached per repository in
+  `~/.claude/feature-ladder/banks.json`.
+- A PreToolUse hook adds that `bank_id` to every Hindsight tool call. Do not
+  pass `bank_id` yourself, and do not call `create_bank` or `list_banks`.
+- Outside a git repository no per-repo bank is used; calls go to the default
+  bank (`HINDSIGHT_BANK_ID`).
+- Keep tagging every retain with `project:<name>` and `feature:<slug>`; tags
+  still scope recalls inside a bank and keep memories portable if banks are
+  merged later.
+
+To move a repository to a different bank, write
+`{"bank_id": "<id>"}` to `<repo>/.feature-ladder/hindsight.json`, or run
+`resolve_bank.py --refresh` after renaming.

@@ -1,14 +1,26 @@
 {
-  "description": "feature-ladder: report Hindsight reachability at session start; require every ladder subagent to retain memories (or say why not) before it finishes.",
+  "description": "feature-ladder: resolve this repository's Hindsight bank at session start (find existing or create), route every Hindsight tool call to it, and require every ladder subagent to retain memories (or say why not) before it finishes.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/check_hindsight.sh\"",
-            "timeout": 10,
-            "statusMessage": "Checking Hindsight memory"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/resolve_bank.py\" --session-start",
+            "timeout": 30,
+            "statusMessage": "Resolving Hindsight bank for this repository"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__plugin_feature-ladder_hindsight__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/resolve_bank.py\" --pretooluse",
+            "timeout": 30
           }
         ]
       }

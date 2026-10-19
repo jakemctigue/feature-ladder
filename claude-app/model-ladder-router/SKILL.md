@@ -31,19 +31,19 @@ architecture problems, fable/max only if the user opts in.
 
 ## 1. Fetch the scripts (once per conversation)
 
-If `.feature-ladder/v1.1.0/` does not exist in the working directory, run:
+If `.feature-ladder/v1.2.0/` does not exist in the working directory, run:
 
 ```bash
-FL=.feature-ladder/v1.1.0
-B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.1.0/plugins/feature-ladder/skills
-for f in complexity-router/scripts/route.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json; do
+FL=.feature-ladder/v1.2.0
+B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.2.0/plugins/feature-ladder/skills
+for f in complexity-router/scripts/route.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py; do
   mkdir -p "$FL/$(dirname "$f")" && curl -fsSL "$B/$f" -o "$FL/$f" || break
 done
 python3 "$FL/complexity-router/scripts/route.py" --table >/dev/null && echo FETCH_OK
 ```
 
 If that does not print `FETCH_OK`, try
-`git clone --depth 1 --branch v1.1.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
+`git clone --depth 1 --branch v1.2.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
 and use `.feature-ladder/repo/plugins/feature-ladder/skills` as the base path.
 If both fail, tell the user the scripts could not be downloaded and stop; do not
 route by judgment. Never edit the downloaded files.
@@ -54,7 +54,7 @@ Look at the actual files or material first. Estimate `files`, `loc` and
 `modules` from what you read, not from the request. Then:
 
 ```bash
-python3 .feature-ladder/v1.1.0/complexity-router/scripts/route.py '<task json>'
+python3 .feature-ladder/v1.2.0/complexity-router/scripts/route.py '<task json>'
 ```
 
 Fields: `kind` (code, docs, fixture, check, research, analysis), `files`,
@@ -71,7 +71,7 @@ The result gives `agent` (the role), `model` and `effort`.
 ## 3. Select the task's skills
 
 ```bash
-python3 .feature-ladder/v1.1.0/skill-selector/scripts/select_skills.py --inject '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
+python3 .feature-ladder/v1.2.0/skill-selector/scripts/select_skills.py --inject '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
 ```
 
 It returns at most three skills (within a size budget) chosen by rules, with
@@ -129,9 +129,28 @@ Acceptance: the "done when" checks are re-run by a separate mechanic
 
 ## Memory (Hindsight), when connected
 
-If this session has Hindsight tools (names ending in `recall` and `retain`
-from a Hindsight connector), recall project conventions and past pitfalls
-before scoping, and after acceptance have a haiku/low subagent write one
-`retain` per durable fact (decision and why, pitfall, interface, test gate),
-tagged `project:<name>`. If no Hindsight tools are present, skip memory and say
-so once; do not invent recalled context.
+Each repository has its own Hindsight bank, chosen deterministically. If this
+session has Hindsight tools from a connector pointed at the multi-bank endpoint
+(`.../mcp/`, so `list_banks` and `create_bank` exist):
+
+1. In the project's directory run
+   `python3 .feature-ladder/v1.2.0/hindsight-memory/scripts/resolve_bank.py --candidates`.
+   It prints the project name, the git owner/repo, and the candidate bank ids
+   in priority order. If it reports `"is_git": false`, use the connector's
+   default bank and skip to step 5.
+2. Call `list_banks` with `query` set to the project name (and again with the
+   repo name if it differs). Save the combined results to
+   `.feature-ladder/banks.json` as `{"banks": [...]}`.
+3. Run `python3 .feature-ladder/v1.2.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
+   It returns `bank_id` and `action` (`pinned`, `existing` or `create`).
+4. If `action` is `create`, call `create_bank` with that `bank_id`, a `name`
+   of `owner/repo` (or the project name), and a `mission` describing the
+   codebase's engineering memory.
+5. Pass that `bank_id` on every Hindsight call. Recall conventions and past
+   pitfalls before scoping; after acceptance have a haiku/low subagent write one
+   `retain` per durable fact (decision and why, pitfall, interface, test gate),
+   tagged `project:<name>` and `feature:<slug>`.
+
+If the connector is single-bank (no `list_banks` tool), use it as is. If no
+Hindsight tools are present, skip memory and say so once; do not invent
+recalled context.

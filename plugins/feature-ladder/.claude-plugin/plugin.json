@@ -1,7 +1,7 @@
 {
   "name": "feature-ladder",
-  "version": "1.1.0",
-  "description": "Orchestration ladder for adding features: Fable 5.1 coordinates and verifies sparingly, Opus 5.5 experts design and do hard implementation, Sonnet/Haiku workers do routed coding; deterministic model routing, deterministic per-task skill selection, Hindsight memory.",
+  "version": "1.2.0",
+  "description": "Orchestration ladder for adding features: Fable 5.1 coordinates and verifies sparingly, Opus 5.5 experts design and do hard implementation, Sonnet/Haiku workers do routed coding; deterministic model routing, deterministic per-task skill selection, per-repository Hindsight memory banks.",
   "author": {
     "name": "Jake McTigue",
     "url": "https://github.com/jakemctigue"

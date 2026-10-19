@@ -117,8 +117,18 @@ See [Skill selection](#skill-selection) below.
   `feature:<slug>` and a kind (`decision`, `pitfall`, `interface`,
   `test-strategy`, `convention`, `outcome`). Secrets and personal data are
   never stored.
-- **Health check:** a `SessionStart` hook reports whether Hindsight is
-  reachable. If memory is down, work continues without it.
+- **One bank per repository, found or created deterministically:** at session
+  start, `resolve_bank.py` identifies the repo (main worktree folder name plus
+  the `origin` owner/repo). It uses a bank pinned in
+  `.feature-ladder/hindsight.json` if there is one. Otherwise it reuses the first
+  bank that already exists among `coding-agent::<project>` (the naming used by
+  Hindsight's own coding-agents integration), `<owner>-<repo>` and `<project>`.
+  Only if none exists does it create `coding-agent::<project>`. The choice is
+  cached per repo, and a `PreToolUse` hook adds that `bank_id` to every
+  Hindsight call, so agents never pick a bank. Folders that aren't git repos
+  (and your home folder) use the default bank.
+- **Health check:** the same session-start step reports the bank in use, or
+  that Hindsight is unreachable. If memory is down, work continues without it.
 
 ### Evidence and escalation discipline
 
@@ -238,8 +248,8 @@ for the hooks (Claude Code already requires it).
 ### Claude app
 
 Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
-the start of a conversation it downloads `route.py`, `select_skills.py` and
-`skill-rules.json` from this repo, pinned to tag `v1.1.0`, so the app and
+the start of a conversation it downloads `route.py`, `select_skills.py`,
+`skill-rules.json` and `resolve_bank.py` from this repo, pinned to a release tag (currently `v1.2.0`), so the app and
 Claude Code always run identical logic. The app session needs code execution
 and network access to GitHub.
 
@@ -252,7 +262,7 @@ these in the environment that launches Claude Code:
 |---|---|---|
 | `HINDSIGHT_MCP_URL` | `https://api.hindsight.vectorize.io/mcp/` | MCP endpoint (`http://localhost:8888/mcp/` when self-hosted) |
 | `HINDSIGHT_API_KEY` | *(empty)* | Your `hsk_…` Cloud key, or the server's API key if you enabled auth |
-| `HINDSIGHT_BANK_ID` | `feature-ladder` | Memory bank (sent as `X-Bank-Id`) |
+| `HINDSIGHT_BANK_ID` | `feature-ladder` | Fallback bank for folders that aren't git repos (per-repo banks are chosen automatically) |
 
 To self-host with the cheapest-adequate model per operation:
 `cd plugins/feature-ladder/hindsight && cp hindsight.env.example hindsight.env`,
@@ -281,7 +291,7 @@ one, the app skill skips memory and says so.
 | Deterministic model routing | ✅ plugin script | ✅ same script, fetched from this repo |
 | Deterministic skill selection | ✅ enforced (`Skill` tool removed from workers) | ✅ selected and injected; enforcement by instruction |
 | Twelve named ladder agents | ✅ | General-purpose subagents with role briefs |
-| Hindsight memory | ✅ plugin MCP server | ✅ if a Hindsight connector is added |
+| Hindsight memory | ✅ plugin MCP server, per-repo bank via hooks | ✅ if a Hindsight connector is added; per-repo bank via the same resolver |
 | Retain gate and startup hooks | ✅ | — (no hooks in the app) |
 
 ## Repository layout
@@ -296,8 +306,8 @@ plugins/feature-ladder/
   skills/orchestration-ladder/         protocol + handoff contracts
   skills/complexity-router/            route.py
   skills/skill-selector/               select_skills.py + skill-rules.json
-  skills/hindsight-memory/             recall / retain / reflect protocol
-  hooks/                               SessionStart check, SubagentStop retain gate
+  skills/hindsight-memory/             recall / retain protocol + resolve_bank.py
+  hooks/                               session-start bank resolution, per-call bank routing, retain gate
   hindsight/                           self-host env, start script, round-trip test
 claude-app/model-ladder-router/        the Claude app skill
 ```
