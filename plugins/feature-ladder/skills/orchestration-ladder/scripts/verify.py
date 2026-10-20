@@ -70,6 +70,13 @@ def repo_root(cwd):
     return Path(out.strip()) if code == 0 and out.strip() else None
 
 
+def main_checkout(root):
+    """The main checkout for a linked worktree (where run.json and the evidence live); else root."""
+    code, out = sh(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], root)
+    common = Path(out.strip()) if code == 0 and out.strip() else None
+    return common.parent if common and common.name == ".git" else Path(root)
+
+
 def load_run(root):
     p = Path(root) / ".feature-ladder" / "run.json"
     if p.is_file():
@@ -173,7 +180,8 @@ def save(root, task_id, data):
 def verify(card, cwd, timeout):
     cwd = Path(cwd).resolve()
     root = repo_root(cwd)
-    run = load_run(root or cwd)
+    home = main_checkout(root) if root else cwd  # evidence and run.json live in the main checkout
+    run = load_run(home)
     checks = [run_check(c, cwd, timeout, run) for c in card.get("checks") or []]
     result = {"task": card.get("id") or "task", "at": now(), "cwd": str(cwd), "checks": checks,
               "git": bool(root), "scope": card.get("scope") or [], "claimed": card.get("changed") or []}
@@ -201,7 +209,7 @@ def verify(card, cwd, timeout):
         result["verdict"], code = "scope-or-claim-mismatch", 2
     else:
         result["verdict"], code = "passed", 0
-    result["evidence"] = str(save(root or cwd, result["task"], result))
+    result["evidence"] = str(save(home, result["task"], result))
     return result, code
 
 
@@ -256,8 +264,8 @@ def main(argv):
         return 3
     cwd = a.get("--cwd") or os.getcwd()
     if cmd == "show":
-        root = repo_root(cwd) or Path(cwd)
-        p = evidence_path(root, a.get("--id") or "task")
+        root = repo_root(cwd)
+        p = evidence_path(main_checkout(root) if root else Path(cwd), a.get("--id") or "task")
         if not p.is_file():
             print(f"verify.py: no evidence at {p}", file=sys.stderr)
             return 3

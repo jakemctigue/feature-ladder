@@ -146,3 +146,16 @@ class Checks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Worktrees(unittest.TestCase):
+    def test_evidence_lands_in_the_main_checkout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(tmp)
+            wt = Path(tmp) / "wt"
+            git(root, "worktree", "add", "-q", str(wt), "-b", "task")
+            (wt / "a.py").write_text("x = 3\n", encoding="utf-8")
+            code, out, err = run(wt, "run", "--id", "W1", "--check", f"{PY} -c pass", "--scope", "a.py", "--changed", "a.py")
+            self.assertEqual(code, 0, out + err)
+            self.assertTrue((root / ".feature-ladder" / "evidence" / "W1.json").is_file())
+            self.assertFalse((wt / ".feature-ladder").exists())
