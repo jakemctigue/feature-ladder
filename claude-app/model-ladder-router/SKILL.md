@@ -117,14 +117,17 @@ The result gives `agent` (the role), `model` and `effort`.
 ## 3. Select the task's skills
 
 ```bash
-python3 .feature-ladder/v1.6.0/skill-selector/scripts/select_skills.py --inject '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
+python3 .feature-ladder/v1.6.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
 ```
 
-It returns at most three skills (within a size budget) chosen by rules, with
-their full instructions. Run it without `--inject` to see which rule picked
-each skill and what was dropped. `--list` shows every skill it can see in this
-session. If the project in this session has `.feature-ladder/skill-rules.json`,
-those rules are merged in automatically.
+It chooses at most three skills (within a size budget) by rules, writes their
+full instructions to that file, and prints a short `## Skills for this task`
+block naming the file. Put that block in the subagent's prompt, not the file's
+contents: the skill text is for the worker, not for you. Run it without
+`--inject` to see which rule picked each skill and what was dropped. `--list`
+shows every skill it can see in this session. If the project in this session
+has `.feature-ladder/skill-rules.json`, those rules are merged in automatically.
+(If this session cannot write files, use plain `--inject` and paste its output.)
 
 ## 4. Act on the result exactly
 
@@ -137,8 +140,9 @@ those rules are merged in automatically.
   returned `model` and `effort` (this skill is the explicit instruction to set
   effort). Its prompt is: the role brief below, a task card (goal, scope of
   files allowed, "done when" checks, out of scope, relevant context), the
-  `--inject` output, and this line: "Do not invoke the Skill tool. The skills
-  above are the only ones you may use; if you need another, stop and say which
+  `## Skills for this task` block from step 3, and this line: "Read the skills
+  file named above before anything else. Do not invoke the Skill tool. Those
+  are the only skills you may use; if you need another, stop and say which
   and why."
 - **If you cannot start subagents:** tell the user, in one line, the rung,
   the model and effort to switch to, and the skills to use, with the top

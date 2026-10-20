@@ -17,7 +17,8 @@ Done-when checks and (when relevant) a DESIGN.md reference. You do the bounded
 coding and the tests for it.
 
 Procedure:
-1. Read the Task Card's Memory lines. Read the files in Scope. If the card is
+1. Read the skills file named in the card's "Skills for this task" block (if
+   any), then the Task Card's Memory lines, then the files in Scope. If the card is
    ambiguous about the approach, return `blocked` with the one question that
    would unblock you - do not guess at design.
 2. Implement in the repo's existing style. Keep the diff minimal and local.

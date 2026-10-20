@@ -13,7 +13,7 @@ function of the task facts, the rule files and what is installed.
 ## Run it
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-selector/scripts/select_skills.py --inject '{
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{
   "role": "implementer",
   "kind": "code",
   "paths": ["src/upload.py", "tests/test_upload.py"],
@@ -22,6 +22,16 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-selector/scripts/select_skills.py --i
 }'
 ```
 
+With `--out` the skills' full text is written to that file and the command
+prints a three-line `## Skills for this task` block naming the file by its
+absolute path. Paste that block at the end of the Task Card; the worker reads
+the file first. The skill text never enters the coordinator's context or its
+output, which is where most of a run's expensive tokens used to go. The file is
+git-ignored under `.feature-ladder/`.
+
+Without `--out`, `--inject` prints the full block itself (for dry runs and for
+callers that cannot write files).
+
 - `role`: the router's `agent` value (or the agent you are about to dispatch).
 - `paths`: the card's Scope, exactly as written there.
 - `text`: the card's goal line plus its description; keywords match this.
@@ -29,7 +39,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-selector/scripts/select_skills.py --i
 - `add` / `exclude`: explicit coordinator overrides; use only when a worker
   returned `blocked` for a missing skill, and record why in FEATURE-REPORT.md.
 
-Without `--inject` it prints JSON: chosen skills with the rule and matches that
+Without `--inject` or `--out` it prints JSON: chosen skills with the rule and matches that
 selected each, skills dropped for `max_skills` / `max_chars`, and names that are
 not installed. `--list` prints every skill it can resolve and every rule that
 points at a skill that is not installed.

@@ -36,8 +36,9 @@ Both use the same scripts and rules.
   scoring function (`route.py`), from Haiku low for mechanical edits up to
   Opus high for hard, designed work.
 - Decides **which skills** each worker gets with a fixed rule engine
-  (`select_skills.py`), and in Claude Code physically prevents workers from
-  loading any others.
+  (`select_skills.py`), writes their text to a file the worker reads (so it
+  never passes through the coordinator), and in Claude Code physically
+  prevents workers from loading any others.
 - Keeps the expensive model (Fable 5.1) on a short leash: at most three
   inspection passes per feature, and one-step escalations with a written
   justification.
@@ -95,8 +96,9 @@ Both use the same scripts and rules.
 3. **Decompose and route.** Each task card is scored by `route.py`. The score
    picks the rung. Hard flags (ambiguous, cross-system plus security,
    whole-app blast radius) force escalation instead.
-4. **Select skills.** `select_skills.py` picks the card's skills and their
-   full text is pasted into the card.
+4. **Select skills.** `select_skills.py` picks the card's skills, writes
+   their full text to `.feature-ladder/cards/<task>-skills.md`, and the card
+   tells the worker to read that file first.
 5. **Design if needed.** Ambiguous or novel work goes to a domain expert
    first. Opus implementation is refused until a design is accepted.
 6. **Execute.** Workers run in parallel where independent, each returning an
@@ -331,8 +333,14 @@ repeatable and auditable.
 3. It returns at most `max_skills` skills (default 3) within `max_chars` of
    skill text (default 60,000). Anything cut is reported, never silently
    included.
-4. `--inject` prints those skills' full instructions. The coordinator pastes
-   them into the task card and logs the choice in `FEATURE-REPORT.md`.
+4. `--inject --out .feature-ladder/cards/<task>-skills.md` writes those
+   skills' full instructions to that file and prints a three-line block that
+   names it. The coordinator pastes the block into the task card and logs the
+   choice in `FEATURE-REPORT.md`; the worker reads the file before it starts.
+   The skill text (up to 60,000 characters per card) therefore never enters
+   the coordinator's context or its output, which is where a large share of a
+   run's Fable tokens went before. Plain `--inject` still prints the full text
+   for dry runs.
 5. **Enforcement:**
    - **Claude Code:** every ladder agent has `Skill` in `disallowedTools`, so
      the injected skills are the only ones a worker can use. A worker that

@@ -9,9 +9,17 @@ No model is consulted.
 
 Usage
   python3 select_skills.py '<task json>'            selection as JSON
-  python3 select_skills.py --inject '<task json>'   markdown block to paste into the Task Card
-  python3 select_skills.py --file task.json [--inject]
+  python3 select_skills.py --inject '<task json>'   markdown block with the skills' full text
+  python3 select_skills.py --inject --out PATH '<task json>'
+                                                    write that block to PATH and print only the
+                                                    short "Skills" line for the Task Card
+  python3 select_skills.py --file task.json [--inject] [--out PATH]
   python3 select_skills.py --list                   every resolvable skill + rule problems
+
+--out is the normal way to use the selector from a coordinator: the skill text
+(up to max_chars) goes straight to a file the worker reads, so it never passes
+through the coordinator's context or its output. The printed line names the
+file by its absolute path (workers in a git worktree have a different cwd).
 
 Task fields (all optional)
   role     router role or agent name: mechanic, evidence-collector, implementer,
@@ -279,6 +287,41 @@ def inject(result):
     return "\n".join(out) + "\n"
 
 
+def write_out(result, out):
+    """Write the inject block to `out`; return the short Task Card line.
+
+    Nothing is written when no skill was selected. A file under a .feature-ladder
+    folder is git-ignored there (same mechanism as the other run files)."""
+    out = Path(out).expanduser()
+    if not result["skills"]:
+        return "## Skills for this task\nNone selected. Work from the task card alone.\n"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(inject(result), encoding="utf-8")
+    _ignore_in_feature_ladder(out)
+    names = ", ".join(s["skill"] for s in result["skills"])
+    return ("## Skills for this task\n"
+            f"Read `{out.resolve()}` before you start. It holds the only skills you have "
+            f"({names}; {result['total_chars']:,} chars), selected deterministically by "
+            "skill-selector. The Skill tool is disabled; if you need another skill, return "
+            "`blocked` naming it.\n")
+
+
+def _ignore_in_feature_ladder(path):
+    path = path.resolve()
+    for d in path.parents:
+        if d.name == ".feature-ladder":
+            try:
+                rel = path.relative_to(d).parts[0]
+                entry = rel + "/" if len(path.relative_to(d).parts) > 1 else rel
+                gi = d / ".gitignore"
+                lines = gi.read_text(encoding="utf-8").splitlines() if gi.is_file() else []
+                if entry not in lines:
+                    gi.write_text("\n".join(lines + [entry]) + "\n", encoding="utf-8")
+            except OSError:
+                pass
+            return
+
+
 def list_all(settings, rules, used, inv):
     print(f"Rule files: {', '.join(used) or 'none'}")
     print(f"Settings: {settings}")
@@ -306,13 +349,27 @@ def main(argv):
         list_all(settings, rules, used, inv)
         return 0
     want_inject = "--inject" in argv
-    args = [a for a in argv if a != "--inject"]
+    out = None
+    args = []
+    it = iter(argv)
+    for a in it:
+        if a == "--inject":
+            continue
+        if a == "--out":
+            out = next(it, None)
+            if not out:
+                print("--out needs a path", file=sys.stderr)
+                return 2
+            continue
+        args.append(a)
     if args and args[0] == "--file":
         task = json.loads(Path(args[1]).read_text(encoding="utf-8-sig"))
     else:
         task = json.loads(args[0])
     result = select(task, settings, rules, inv)
-    if want_inject:
+    if out:
+        sys.stdout.write(write_out(result, out))
+    elif want_inject:
         sys.stdout.write(inject(result))
     else:
         result["rule_files"] = used

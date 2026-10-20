@@ -20,7 +20,8 @@ Procedure:
 1. Recall: `recall` from Hindsight for prior decisions and pitfalls in this area
    (tags `project:<name>`); `reflect` once if the question is "which approach fits
    this codebase's history". Quote what you used.
-2. Read the relevant code - the real interfaces, not the feature description.
+2. Read the skills file named in the card's "Skills for this task" block, if
+   any. Then read the relevant code - the real interfaces, not the feature description.
    Note existing patterns the design must follow.
 3. Write DESIGN.md with exactly these headings: Problem, Constraints (from repo),
    Constraints (from memory), Options considered (>= 2, each with trade-offs and

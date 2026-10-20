@@ -120,10 +120,13 @@ Do not: <things explicitly out of scope>
 Memory: <1-3 relevant Hindsight recall snippets, verbatim>
 Secrets: <NAME -> ENV_VAR, ... | none>   (Google Secret Manager names; never values)
 Return: Evidence Packet
-<skill-selector --inject output, verbatim: the only skills this worker has>
+<the "## Skills for this task" block printed by select_skills.py --inject --out:
+ it names the file holding the only skills this worker has>
 ```
-Workers cannot invoke the Skill tool. If a worker needs a skill it was not
-given, it returns `blocked` naming the skill and why; it does not improvise.
+The skill text itself lives in `.feature-ladder/cards/<task-id>-skills.md`
+(absolute path in the card); the worker reads it before starting. Workers
+cannot invoke the Skill tool. If a worker needs a skill it was not given, it
+returns `blocked` naming the skill and why; it does not improvise.
 
 **Secrets rule for every worker.** A command that needs an API key or other
 secret is run as

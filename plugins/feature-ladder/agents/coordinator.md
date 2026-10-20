@@ -59,15 +59,18 @@ the router's `agent` as `role`, the card's Scope as `paths`, its goal and
 description as `text`, and the router flags:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-selector/scripts/select_skills.py --inject '{"role":"<agent>","kind":"<kind>","paths":[...],"text":"...","flags":{...}}'
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent>","kind":"<kind>","paths":[...],"text":"...","flags":{...}}'
 ```
 
-Paste its output verbatim at the end of the Task Card, and record the selected
-skill names in FEATURE-REPORT.md next to the card. Workers cannot load any
-other skill. Then dispatch with exactly the returned `agent`, `model`, `effort`:
+It writes the skills' text to that file and prints a short `## Skills for this
+task` block naming it. Paste that block (not the file's contents) at the end
+of the Task Card, and record the selected skill names in FEATURE-REPORT.md next
+to the card. Never read or quote the skills file yourself: your tokens are the
+expensive ones, and the worker reads it. Workers cannot load any other skill.
+Then dispatch with exactly the returned `agent`, `model`, `effort`:
 
 ```
-Agent(subagent_type="feature-ladder:<agent>", model="<model>", effort="<effort>", prompt="<Task Card + injected skills>")
+Agent(subagent_type="feature-ladder:<agent>", model="<model>", effort="<effort>", prompt="<Task Card>")
 ```
 
 Router says ESCALATE -> you fix ambiguity (decide, or send a `domain-expert` /
