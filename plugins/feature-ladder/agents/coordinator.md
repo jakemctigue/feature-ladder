@@ -130,11 +130,13 @@ and the union of router flags. If adversarial is ENABLED, dispatch it again in
 `adversarial` mode afterwards.
 
 Use the output to find real bugs, not to collect opinions:
-1. **Verify first.** For every critical/high/medium finding, dispatch a
-   `mechanic` (haiku/low) with the exact check that would prove it (run the
-   failing input, the test, the query). A finding with no reproducible check
-   is sent to `second-opinion` (fable/low) with the code excerpt and Codex's
-   claim; its answer decides.
+1. **Verify first, in one dispatch.** The script has already dropped `low`
+   and duplicate findings and written a verification card
+   (`.feature-ladder/reviews/<slug>-codex-verify-card.md`, path in the
+   packet). Dispatch ONE `mechanic` (haiku/low) with that card; it runs each
+   finding's repro and returns one verdict line per finding. `not reproduced`
+   or `unclear` on a behavioural claim goes to `second-opinion` (fable/low)
+   with the code excerpt and Codex's claim; its answer decides.
 2. **Fix what is confirmed.** One fix Task Card per confirmed bug, routed
    through the router like any other task, with the reproduction as its
    "Done when" check. Then re-run `review` on the fixed diff.

@@ -48,20 +48,30 @@ Results are saved to `.feature-ladder/reviews/<slug>-codex-<mode>.json`.
 
 ## Triage (coordinator)
 
-For each Codex finding, decide using the evidence, not deference to either
-model. Verify first, then fix:
+The script has already trimmed the output with no model tokens: `low` findings
+are kept in the JSON record but not printed, duplicates (same file and title,
+or same file and line) are collapsed, and the rest is sorted by severity. Each
+finding carries a `repro` command when Codex could name one. When anything
+remains, the script writes
+`.feature-ladder/reviews/<slug>-codex-verify-card.md`: one Task Card that has a
+single `mechanic` run every finding's repro and return one verdict line per
+finding (`confirmed`, `not reproduced` or `unclear`).
 
-0. **Verify every critical/high/medium finding** with a check, not a read:
-   a `mechanic` (haiku/low) runs the input, test or query that would show the
-   bug (Codex's `detail` usually names it). Confirmed -> fix. Not reproducible
-   and the claim is about behaviour -> `second-opinion` (fable/low) with the
-   code excerpt and Codex's claim decides. Record the check in the report.
+For each finding, decide using the evidence, not deference to either model.
+Verify first, then fix:
+
+0. **Verify every remaining finding in one dispatch**: send the verification
+   card to one `mechanic` (haiku/low), not one mechanic per finding. Confirmed
+   -> fix. `not reproduced` or `unclear` on a claim about behaviour ->
+   `second-opinion` (fable/low) with the code excerpt and Codex's claim
+   decides. Record the checks in the report.
 1. **critical / high (confirmed)**: must be resolved before acceptance. Route
    a fix Task Card through the router like any other task (the finding's
    file, line, suggested fix and the reproducing check go in the card), then
    re-run `review`.
 2. **medium (confirmed)**: fix; otherwise record why not in FEATURE-REPORT.md.
-3. **low**: list in the report; no automatic fix.
+3. **low**: already set aside by the script; list them in the report from the
+   JSON record. No automatic fix.
 4. **Disputed** (you believe Codex is wrong): send the single question to
    `second-opinion` (fable/low) with the code excerpt and Codex's claim. Its
    answer decides. Record the dispute and outcome.
