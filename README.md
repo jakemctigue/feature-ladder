@@ -456,9 +456,9 @@ for the hooks (Claude Code already requires it).
 
 Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
 the start of a conversation it downloads `route.py`, `intake.py`,
-`pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `select_skills.py`,
-`skill-rules.json` and `resolve_bank.py` from this repo, pinned to a release
-tag (currently `v1.6.0`), so the app and
+`pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
+`select_skills.py`, `skill-rules.json` and `resolve_bank.py` from this repo, pinned to a release
+tag (currently `v1.7.0`), so the app and
 Claude Code always run identical logic. The app session needs code execution
 and network access to GitHub.
 
