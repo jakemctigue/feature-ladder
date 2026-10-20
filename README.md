@@ -113,9 +113,9 @@ Both use the same scripts and rules.
    second opinion.
 9. **Escalate only when warranted.** One rung at a time, each climb justified
    in the report.
-10. **Accept and remember.** The coordinator finishes the report, the
-   durable facts go to Hindsight, and the final PR opens on top of any
-   checkpoint PRs.
+10. **Accept and remember.** The coordinator finishes the report (including
+   the per-rung token table from the ledger), the durable facts go to
+   Hindsight, and the final PR opens on top of any checkpoint PRs.
 
 Throughout, nothing stops for you. Non-critical choices are decided and
 listed under Assumptions. A **critical decision** (costly to undo, could go
@@ -233,6 +233,22 @@ rejected or left for you, is listed in a table in `FEATURE-REPORT.md`.
 ### Deterministic skill selection
 
 See [Skill selection](#skill-selection) below.
+
+### Token ledger
+
+Every run records what each rung cost, with no model tokens spent. When a
+subagent stops, the `SubagentStop` hook (`hooks/scripts/ledger.py`) reads its
+transcript, sums input, cache-read, cache-write and output tokens, parses the
+rung, model, effort and task id from its Task Card, and appends one line to
+`.feature-ladder/runs/<slug>/usage.jsonl`. A subagent bounced by the retain
+gate replaces its earlier line rather than counting twice.
+
+`ledger.py report` prints a table by rung and model (agents, turns, tokens by
+kind, each rung's share of output tokens). The coordinator pastes it into
+`FEATURE-REPORT.md` at acceptance, and `/feature-ladder:feature` prints the
+complete table after the coordinator has finished, so the coordinator's own
+cost is included. The ledger is what the router bands, skill budgets and rung
+choices get tuned against; without it those are guesses.
 
 ### Hindsight memory
 
@@ -475,6 +491,7 @@ one, the app skill skips memory and says so.
 | Codex second opinion and adversarial tests | ✅ via your local Codex CLI | — (needs your local Codex sign-in) |
 | Intake (ask once, up front) | ✅ scoper agent + question cards | ✅ same script; questions asked in chat |
 | Branches and checkpoint PRs | ✅ plus guard hook | ✅ only when the work is a git repo with `gh` |
+| Token ledger per rung | ✅ `SubagentStop` hook, table in the report | — (no hooks in the app) |
 
 ## Repository layout
 
@@ -490,7 +507,7 @@ plugins/feature-ladder/
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/hindsight-memory/             recall / retain protocol + resolve_bank.py
   skills/cross-model-review/           codex_review.py (Codex review + adversarial tests)
-  hooks/                               bank resolution, per-call bank routing, retain gate, irreversible-command guard
+  hooks/                               bank resolution, per-call bank routing, retain gate, token ledger, irreversible-command guard
   hindsight/                           self-host env, start script, round-trip test
 claude-app/model-ladder-router/        the Claude app skill
 ```

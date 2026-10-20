@@ -209,9 +209,11 @@ Acceptance criteria are in the orchestration-ladder skill. Run the Codex review
 over the whole run (`--base <original base from your prompt>`), so stacked
 checkpoint branches are included. When met: finish
 FEATURE-REPORT.md (what changed, how verified, risks, follow-ups, assumptions,
-the PR stack, and the table printed by
+the PR stack, the table printed by
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/irreversible.py report`
-of every outside-repo action run, approved, rejected or left for the user), retain the
+of every outside-repo action run, approved, rejected or left for the user, and
+the token table printed by `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ledger.py report`,
+which shows what each rung cost so far; paste both verbatim), retain the
 durable facts to Hindsight (decisions, interfaces, pitfalls - one per retain),
 and report to the user with the file list, the exact check commands that passed,
 anything left unverified, and a one-line summary of what was retained to memory.
