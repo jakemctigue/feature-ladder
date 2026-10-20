@@ -17,7 +17,7 @@ Run `/mcp` once to confirm the server shows as connected before trusting memory.
 If the server is unreachable, say so in the Evidence Packet and proceed from the
 repo alone; never fabricate "recalled" context.
 
-## Recall (start of every coordinator run; start of every worker task)
+## Recall (start of every coordinator run; workers only when the card has no Memory lines)
 
 ```
 recall(query="<project name> <feature area> conventions, pitfalls, prior decisions",
@@ -26,7 +26,8 @@ recall(query="<project name> <feature area> conventions, pitfalls, prior decisio
 ```
 Ask 2-3 narrow queries rather than one broad one: conventions for the module,
 prior decisions about the same feature area, known pitfalls / failed approaches.
-Quote the useful snippets verbatim into the Task Card so workers do not re-query.
+Quote the useful snippets verbatim into the Task Card so workers do not re-query:
+a worker runs its own `recall` only when the card's `Memory:` line is `none`.
 
 ## Reflect (domain experts only)
 

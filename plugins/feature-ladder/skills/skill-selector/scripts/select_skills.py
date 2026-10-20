@@ -9,9 +9,17 @@ No model is consulted.
 
 Usage
   python3 select_skills.py '<task json>'            selection as JSON
-  python3 select_skills.py --inject '<task json>'   markdown block to paste into the Task Card
-  python3 select_skills.py --file task.json [--inject]
+  python3 select_skills.py --inject '<task json>'   markdown block with the skills' full text
+  python3 select_skills.py --inject --out PATH '<task json>'
+                                                    write that block to PATH and print only the
+                                                    short "Skills" line for the Task Card
+  python3 select_skills.py --file task.json [--inject] [--out PATH]
   python3 select_skills.py --list                   every resolvable skill + rule problems
+
+--out is the normal way to use the selector from a coordinator: the skill text
+(up to max_chars) goes straight to a file the worker reads, so it never passes
+through the coordinator's context or its output. The printed line names the
+file by its absolute path (workers in a git worktree have a different cwd).
 
 Task fields (all optional)
   role     router role or agent name: mechanic, evidence-collector, implementer,
@@ -22,6 +30,11 @@ Task fields (all optional)
   flags    router booleans, e.g. {"security": true, "persistence": true}
   add      skill names the coordinator adds explicitly (logged as such)
   exclude  skill names to drop
+
+Budgets: at most max_skills skills and max_chars characters of skill text per
+task; max_chars_by_role (keyed by router role) overrides max_chars for that
+role, so a mechanic gets no skill text and a senior implementer gets more than
+an implementer. Anything cut is reported, never silently included.
 
 Rules are merged from, in order (later wins on the same rule id):
   1. <plugin>/skills/skill-selector/skill-rules.json   (shipped defaults)
@@ -56,7 +69,7 @@ def load_rules():
     sources = [SKILL_DIR / "skill-rules.json",
                Path.home() / ".claude" / "feature-ladder" / "skill-rules.json",
                _project_rules_file()]
-    settings = {"max_skills": 3, "max_chars": 60000}
+    settings = {"max_skills": 3, "max_chars": 20000, "max_chars_by_role": {}}
     rules, used = [], []
     for f in sources:
         if not f or not Path(f).is_file():
@@ -66,6 +79,8 @@ def load_rules():
         for k in ("max_skills", "max_chars"):
             if k in data:
                 settings[k] = int(data[k])
+        for role, v in (data.get("max_chars_by_role") or {}).items():
+            settings["max_chars_by_role"][str(role).lower()] = int(v)
         for rid in data.get("disable", []):
             rules = [r for r in rules if r.get("id") != rid]
         for r in data.get("rules", []):
@@ -217,7 +232,15 @@ def _valid(rule):
     return bool(rule.get("skill")) and any(rule.get("when", {}).get(g) for g in GROUPS)
 
 
+def budget(task, settings):
+    """Character budget for this task's role: max_chars_by_role wins over max_chars."""
+    role = str(task.get("role", "")).split(":")[-1].lower()
+    by_role = settings.get("max_chars_by_role") or {}
+    return int(by_role.get(role, settings["max_chars"]))
+
+
 def select(task, settings, rules, inv):
+    max_chars = budget(task, settings)
     picked = {}  # skill -> (priority, order, reasons)
     for order, r in enumerate(rules):
         if not _valid(r):
@@ -252,8 +275,8 @@ def select(task, settings, rules, inv):
         size = len(body)
         if len(chosen) >= settings["max_skills"]:
             dropped.append({"skill": name, "reason": "over max_skills"})
-        elif total + size > settings["max_chars"]:
-            dropped.append({"skill": name, "reason": f"over max_chars ({size} chars)"})
+        elif total + size > max_chars:
+            dropped.append({"skill": name, "reason": f"over max_chars for this role ({size} chars, budget {max_chars})"})
         else:
             total += size
             if group:
@@ -261,7 +284,7 @@ def select(task, settings, rules, inv):
             chosen.append({"skill": name, "priority": pri, "chars": size,
                            "path": str(path), "why": why})
     return {"skills": chosen, "dropped": dropped, "unresolved": unresolved,
-            "total_chars": total, "settings": settings}
+            "total_chars": total, "max_chars": max_chars, "settings": settings}
 
 
 def inject(result):
@@ -277,6 +300,41 @@ def inject(result):
                 f"Base directory: {Path(s['path']).parent}",
                 f"Selected because: {'; '.join(s['why'])}", "", body.rstrip(), ""]
     return "\n".join(out) + "\n"
+
+
+def write_out(result, out):
+    """Write the inject block to `out`; return the short Task Card line.
+
+    Nothing is written when no skill was selected. A file under a .feature-ladder
+    folder is git-ignored there (same mechanism as the other run files)."""
+    out = Path(out).expanduser()
+    if not result["skills"]:
+        return "## Skills for this task\nNone selected. Work from the task card alone.\n"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(inject(result), encoding="utf-8")
+    _ignore_in_feature_ladder(out)
+    names = ", ".join(s["skill"] for s in result["skills"])
+    return ("## Skills for this task\n"
+            f"Read `{out.resolve()}` before you start. It holds the only skills you have "
+            f"({names}; {result['total_chars']:,} chars), selected deterministically by "
+            "skill-selector. The Skill tool is disabled; if you need another skill, return "
+            "`blocked` naming it.\n")
+
+
+def _ignore_in_feature_ladder(path):
+    path = path.resolve()
+    for d in path.parents:
+        if d.name == ".feature-ladder":
+            try:
+                rel = path.relative_to(d).parts[0]
+                entry = rel + "/" if len(path.relative_to(d).parts) > 1 else rel
+                gi = d / ".gitignore"
+                lines = gi.read_text(encoding="utf-8").splitlines() if gi.is_file() else []
+                if entry not in lines:
+                    gi.write_text("\n".join(lines + [entry]) + "\n", encoding="utf-8")
+            except OSError:
+                pass
+            return
 
 
 def list_all(settings, rules, used, inv):
@@ -306,13 +364,27 @@ def main(argv):
         list_all(settings, rules, used, inv)
         return 0
     want_inject = "--inject" in argv
-    args = [a for a in argv if a != "--inject"]
+    out = None
+    args = []
+    it = iter(argv)
+    for a in it:
+        if a == "--inject":
+            continue
+        if a == "--out":
+            out = next(it, None)
+            if not out:
+                print("--out needs a path", file=sys.stderr)
+                return 2
+            continue
+        args.append(a)
     if args and args[0] == "--file":
         task = json.loads(Path(args[1]).read_text(encoding="utf-8-sig"))
     else:
         task = json.loads(args[0])
     result = select(task, settings, rules, inv)
-    if want_inject:
+    if out:
+        sys.stdout.write(write_out(result, out))
+    elif want_inject:
         sys.stdout.write(inject(result))
     else:
         result["rule_files"] = used

@@ -1,6 +1,6 @@
 {
   "name": "feature-ladder",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Orchestration ladder for adding features: a Sonnet intake scout settles every routing variable and asks only what matters, then the run goes to completion on its own branch (critical decisions and irreversible steps become draft PRs). Fable 5.1 coordinates and verifies sparingly, Opus 5.5 designs and does hard implementation, Sonnet/Haiku workers do routed coding; deterministic model routing and skill selection, per-repository Hindsight memory, and an OpenAI Codex second opinion with optional adversarial tests.",
   "author": {
     "name": "Jake McTigue",

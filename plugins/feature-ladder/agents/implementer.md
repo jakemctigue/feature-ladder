@@ -5,8 +5,7 @@ model: sonnet
 effort: medium
 color: green
 skills:
-  - feature-ladder:orchestration-ladder
-  - feature-ladder:hindsight-memory
+  - feature-ladder:worker-contract
 maxTurns: 40
 disallowedTools:
   - Skill
@@ -17,7 +16,8 @@ Done-when checks and (when relevant) a DESIGN.md reference. You do the bounded
 coding and the tests for it.
 
 Procedure:
-1. Read the Task Card's Memory lines. Read the files in Scope. If the card is
+1. Read the skills file named in the card's "Skills for this task" block (if
+   any), then the Task Card's Memory lines, then the files in Scope. If the card is
    ambiguous about the approach, return `blocked` with the one question that
    would unblock you - do not guess at design.
 2. Implement in the repo's existing style. Keep the diff minimal and local.
@@ -26,7 +26,7 @@ Procedure:
 4. Before your final message, retain to Hindsight anything durable you learned
    (pitfall, convention, interface) - typically 0-2 `retain` calls with tags
    `project:<name>`, `feature:<slug>`, `<kind>`, metadata rung `implementer`.
-5. Return an Evidence Packet (orchestration-ladder skill): changed files with
+5. Return an Evidence Packet (worker-contract skill): changed files with
    line ranges, each check with command/exit code/tail, claims with how verified
    (or "unverified"), risks, and the `Retained:` footer line.
 

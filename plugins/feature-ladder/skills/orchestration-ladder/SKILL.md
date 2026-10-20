@@ -120,10 +120,13 @@ Do not: <things explicitly out of scope>
 Memory: <1-3 relevant Hindsight recall snippets, verbatim>
 Secrets: <NAME -> ENV_VAR, ... | none>   (Google Secret Manager names; never values)
 Return: Evidence Packet
-<skill-selector --inject output, verbatim: the only skills this worker has>
+<the "## Skills for this task" block printed by select_skills.py --inject --out:
+ it names the file holding the only skills this worker has>
 ```
-Workers cannot invoke the Skill tool. If a worker needs a skill it was not
-given, it returns `blocked` naming the skill and why; it does not improvise.
+The skill text itself lives in `.feature-ladder/cards/<task-id>-skills.md`
+(absolute path in the card); the worker reads it before starting. Workers
+cannot invoke the Skill tool. If a worker needs a skill it was not given, it
+returns `blocked` naming the skill and why; it does not improvise.
 
 **Secrets rule for every worker.** A command that needs an API key or other
 secret is run as
@@ -160,9 +163,32 @@ Independent tasks are launched in one message with multiple Agent calls. Tasks
 that touch the same files are serialized. Use `isolation: worktree` for Opus
 implementation tasks so a bad run never dirties the main tree.
 
+## Acceptance checks without a model
+
+`scripts/verify.py` re-runs a card's "Done when" checks for acceptance, so no
+mechanic subagent is started for them:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> \
+    --check "<done-when command>" [--check ...] --scope <path> [--scope ...] \
+    --changed <file the packet says it changed> [--changed ...] [--base <ref>]
+```
+
+It runs each command exactly as written, records exit code and output tail,
+lists what actually changed in the repo, and flags files outside the card's
+Scope or a `Changed:` claim that does not match. Evidence goes to
+`.feature-ladder/evidence/<task-id>.json`; the printed summary is a few lines.
+Exit 0 is green; 1 means a check failed (or was refused: a check that would
+touch production data or print a secret is never run); 2 means the checks
+passed but the scope or the claim is wrong. A `mechanic` is dispatched for
+acceptance only when a check's output needs interpretation (a flaky suite, an
+environment quirk) or the card's checks are not shell commands.
+
 ## Acceptance criteria (coordinator's final gate)
 
 - Every Task Card has a matching Evidence Packet with status `done`.
-- All "Done when" checks were run by `mechanic` (not by the implementer who wrote the code) and are green.
+- All "Done when" checks were re-run by `verify.py` (not by the implementer who
+  wrote the code) with exit 0, or by `mechanic` where the card says a check
+  needs interpretation.
 - No unverified claim survives in anything user-visible without being labelled.
 - FEATURE-REPORT.md written; outcome retained to Hindsight with tags `project:<name>`, `feature:<slug>`.

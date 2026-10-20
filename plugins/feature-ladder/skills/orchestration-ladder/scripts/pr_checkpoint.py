@@ -72,7 +72,7 @@ def save(root, run):
     p.parent.mkdir(parents=True, exist_ok=True)
     gi = p.parent / ".gitignore"
     lines = gi.read_text(encoding="utf-8").splitlines() if gi.is_file() else []
-    for e in ("intake/", "reviews/", "adversarial/", "checkpoints/", "run.json"):
+    for e in ("intake/", "reviews/", "adversarial/", "checkpoints/", "cards/", "evidence/", "runs/", "run.json"):
         if e not in lines:
             lines.append(e)
     gi.write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -59,15 +59,18 @@ the router's `agent` as `role`, the card's Scope as `paths`, its goal and
 description as `text`, and the router flags:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-selector/scripts/select_skills.py --inject '{"role":"<agent>","kind":"<kind>","paths":[...],"text":"...","flags":{...}}'
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent>","kind":"<kind>","paths":[...],"text":"...","flags":{...}}'
 ```
 
-Paste its output verbatim at the end of the Task Card, and record the selected
-skill names in FEATURE-REPORT.md next to the card. Workers cannot load any
-other skill. Then dispatch with exactly the returned `agent`, `model`, `effort`:
+It writes the skills' text to that file and prints a short `## Skills for this
+task` block naming it. Paste that block (not the file's contents) at the end
+of the Task Card, and record the selected skill names in FEATURE-REPORT.md next
+to the card. Never read or quote the skills file yourself: your tokens are the
+expensive ones, and the worker reads it. Workers cannot load any other skill.
+Then dispatch with exactly the returned `agent`, `model`, `effort`:
 
 ```
-Agent(subagent_type="feature-ladder:<agent>", model="<model>", effort="<effort>", prompt="<Task Card + injected skills>")
+Agent(subagent_type="feature-ladder:<agent>", model="<model>", effort="<effort>", prompt="<Task Card>")
 ```
 
 Router says ESCALATE -> you fix ambiguity (decide, or send a `domain-expert` /
@@ -87,11 +90,21 @@ Evidence Packet; a worker that returns `blocked` or fails its checks twice is
 re-routed one band up (never more).
 
 ## 4. Inspect (inspection pass 2 of 3)
-For each Evidence Packet:
-- Confirm the "Done when" checks were run by a `mechanic` (haiku/low) *not* the
-  author. If not, dispatch one now with the exact commands.
-- Spot-check claims against the diff. Re-run only the checks you doubt.
-- Any claim labelled unverified that matters to acceptance -> dispatch a check.
+For each Evidence Packet, re-run its card's "Done when" checks with no model:
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> --check "<cmd>" ... --scope <card scope> ... --changed <files from the packet's Changed: line> ...
+```
+(the worktree's path as `--cwd` when the worker ran in one). Exit 0: accept the
+checks. Exit 1: a check failed; the summary quotes its tail, so treat it as a
+failed task (re-route one band up after the second failure). Exit 2: the checks
+pass but a file outside Scope changed or the `Changed:` claim is wrong; bounce
+the packet to its worker with the summary. Dispatch a `mechanic` (haiku/low)
+only for a check whose output needs interpretation or that is not a shell
+command.
+- Spot-check the packet's other claims against the diff. Re-run only the
+  checks you doubt.
+- Any claim labelled unverified that matters to acceptance -> a `verify.py`
+  check if it is a command, otherwise a `mechanic`.
 
 ## 5. Escalate only when it is the right rung
 - Conflicting evidence, a bug nobody isolated, cross-system correctness ->
@@ -206,9 +219,11 @@ Acceptance criteria are in the orchestration-ladder skill. Run the Codex review
 over the whole run (`--base <original base from your prompt>`), so stacked
 checkpoint branches are included. When met: finish
 FEATURE-REPORT.md (what changed, how verified, risks, follow-ups, assumptions,
-the PR stack, and the table printed by
+the PR stack, the table printed by
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/irreversible.py report`
-of every outside-repo action run, approved, rejected or left for the user), retain the
+of every outside-repo action run, approved, rejected or left for the user, and
+the token table printed by `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ledger.py report`,
+which shows what each rung cost so far; paste both verbatim), retain the
 durable facts to Hindsight (decisions, interfaces, pitfalls - one per retain),
 and report to the user with the file list, the exact check commands that passed,
 anything left unverified, and a one-line summary of what was retained to memory.
@@ -237,7 +252,8 @@ or an approval before the final one.
   because it needs a skill gets it via the task's `add` field on re-dispatch,
   and the addition is recorded in FEATURE-REPORT.md. If the same addition
   recurs, propose a rule for skill-rules.json in the report.
-- Never report "done" over a failing or unrun check.
+- Never report "done" over a failing or unrun check; "run" means `verify.py`
+  exit 0 (or a mechanic's quoted output where the card needed one).
 - Never ask the user mid-run. Outside-repo steps run under the intake policy
   and the guard; a production data overwrite needs one Fable verdict first.
 - Never merge PRs, push to the base branch, or force-push.

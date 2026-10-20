@@ -31,19 +31,19 @@ architecture problems, fable/max only if the user opts in.
 
 ## 1. Fetch the scripts (once per conversation)
 
-If `.feature-ladder/v1.6.0/` does not exist in the working directory, run:
+If `.feature-ladder/v1.7.0/` does not exist in the working directory, run:
 
 ```bash
-FL=.feature-ladder/v1.6.0
-B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.6.0/plugins/feature-ladder/skills
-for f in complexity-router/scripts/route.py complexity-router/scripts/intake.py orchestration-ladder/scripts/pr_checkpoint.py orchestration-ladder/scripts/irreversible.py orchestration-ladder/scripts/with_secrets.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py; do
+FL=.feature-ladder/v1.7.0
+B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.7.0/plugins/feature-ladder/skills
+for f in complexity-router/scripts/route.py complexity-router/scripts/intake.py orchestration-ladder/scripts/pr_checkpoint.py orchestration-ladder/scripts/irreversible.py orchestration-ladder/scripts/with_secrets.py orchestration-ladder/scripts/verify.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py; do
   mkdir -p "$FL/$(dirname "$f")" && curl -fsSL "$B/$f" -o "$FL/$f" || break
 done
 python3 "$FL/complexity-router/scripts/route.py" --table >/dev/null && echo FETCH_OK
 ```
 
 If that does not print `FETCH_OK`, try
-`git clone --depth 1 --branch v1.6.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
+`git clone --depth 1 --branch v1.7.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
 and use `.feature-ladder/repo/plugins/feature-ladder/skills` as the base path.
 If both fail, tell the user the scripts could not be downloaded and stop; do not
 route by judgment. Never edit the downloaded files.
@@ -54,14 +54,14 @@ Before delegating anything, settle the facts for the whole job and ask the user
 only what is uncertain and matters. After that, do not stop to ask again.
 
 1. If the work is in a folder or repo here, run
-   `python3 .feature-ladder/v1.6.0/complexity-router/scripts/intake.py scan "<request>" --cwd <folder> > .feature-ladder/proposal.json`.
+   `python3 .feature-ladder/v1.7.0/complexity-router/scripts/intake.py scan "<request>" --cwd <folder> > .feature-ladder/proposal.json`.
    Otherwise start from `{"request": "...", "slug": "...", "fields": {}, "open_decisions": []}`.
 2. Read the actual files or material. For every field write
    `{"value": ..., "confidence": "high|medium|low", "evidence": [...]}` into
    `fields`, and list up to 4 `open_decisions` (choices a worker would
    otherwise guess; each with `id`, `header`, `question`, 2-4 `options`,
    recommended first).
-3. `python3 .feature-ladder/v1.6.0/complexity-router/scripts/intake.py decide .feature-ladder/proposal.json`
+3. `python3 .feature-ladder/v1.7.0/complexity-router/scripts/intake.py decide .feature-ladder/proposal.json`
    lists the questions: fields that are uncertain **and** change the model,
    plus the open decisions. Ask them all in one go (the question tool if this
    session has one, otherwise one short numbered message). If the user said to
@@ -73,7 +73,7 @@ only what is uncertain and matters. After that, do not stop to ask again.
 Then route each task:
 
 ```bash
-python3 .feature-ladder/v1.6.0/complexity-router/scripts/route.py '<task json>'
+python3 .feature-ladder/v1.7.0/complexity-router/scripts/route.py '<task json>'
 ```
 
 Fields: `kind` (code, docs, fixture, check, research, analysis), `files`,
@@ -88,7 +88,7 @@ rungs require `design_agreed: true`.
 `irreversible` means effects outside the files being edited (real data,
 deploys, publishing, messages or payments sent to outside services). It adds
 risk points but never stops the run. Before running such a command, classify
-it: `python3 .feature-ladder/v1.6.0/orchestration-ladder/scripts/irreversible.py classify "<command>"`.
+it: `python3 .feature-ladder/v1.7.0/orchestration-ladder/scripts/irreversible.py classify "<command>"`.
 `mundane` (non-production targets, deploys, exports, dry runs): run it and log
 it. `risky` (overwrites or deletes production data): get one fable/low verdict
 on the exact command (`VERDICT: APPROVE` or `REJECT`), then run or skip it.
@@ -102,7 +102,7 @@ puts each decision in its own draft PR while work continues on the next branch.
 
 **Secrets.** The intake's `secrets.names` lists the Google Secret Manager
 secrets the feature reads (names only). A command that needs one is run as
-`python3 .feature-ladder/v1.6.0/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`,
+`python3 .feature-ladder/v1.7.0/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`,
 which fetches the value with the user's gcloud sign-in and masks it in the
 output. Never print, echo, log, commit or quote a secret value.
 
@@ -117,14 +117,17 @@ The result gives `agent` (the role), `model` and `effort`.
 ## 3. Select the task's skills
 
 ```bash
-python3 .feature-ladder/v1.6.0/skill-selector/scripts/select_skills.py --inject '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
+python3 .feature-ladder/v1.7.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
 ```
 
-It returns at most three skills (within a size budget) chosen by rules, with
-their full instructions. Run it without `--inject` to see which rule picked
-each skill and what was dropped. `--list` shows every skill it can see in this
-session. If the project in this session has `.feature-ladder/skill-rules.json`,
-those rules are merged in automatically.
+It chooses at most three skills (within a per-role size budget) by rules, writes their
+full instructions to that file, and prints a short `## Skills for this task`
+block naming the file. Put that block in the subagent's prompt, not the file's
+contents: the skill text is for the worker, not for you. Run it without
+`--inject` to see which rule picked each skill and what was dropped. `--list`
+shows every skill it can see in this session. If the project in this session
+has `.feature-ladder/skill-rules.json`, those rules are merged in automatically.
+(If this session cannot write files, use plain `--inject` and paste its output.)
 
 ## 4. Act on the result exactly
 
@@ -137,8 +140,9 @@ those rules are merged in automatically.
   returned `model` and `effort` (this skill is the explicit instruction to set
   effort). Its prompt is: the role brief below, a task card (goal, scope of
   files allowed, "done when" checks, out of scope, relevant context), the
-  `--inject` output, and this line: "Do not invoke the Skill tool. The skills
-  above are the only ones you may use; if you need another, stop and say which
+  `## Skills for this task` block from step 3, and this line: "Read the skills
+  file named above before anything else. Do not invoke the Skill tool. Those
+  are the only skills you may use; if you need another, stop and say which
   and why."
 - **If you cannot start subagents:** tell the user, in one line, the rung,
   the model and effort to switch to, and the skills to use, with the top
@@ -147,8 +151,13 @@ those rules are merged in automatically.
   judgment. Re-route on failure one band at a time (T2 to T3 to T4 to T5);
   after T5 fails, escalate to fable/high to diagnose, not to implement.
 
-Acceptance: the "done when" checks are re-run by a separate mechanic
-(haiku/low), not by the worker who wrote the code.
+Acceptance: the "done when" checks are re-run without a model:
+`python3 .feature-ladder/v1.7.0/orchestration-ladder/scripts/verify.py run --id <task> --check "<cmd>" ... --scope <paths> ... --changed <files the worker claims>`
+runs them exactly as written, saves the evidence under
+`.feature-ladder/evidence/`, and flags files changed outside scope or a wrong
+claim (exit 0 green, 1 a check failed, 2 scope or claim mismatch). When a
+check's output needs interpreting, a separate mechanic (haiku/low) re-runs it
+instead. Never the worker who wrote the code.
 
 ## Role briefs (put at the top of the subagent prompt)
 
@@ -180,14 +189,14 @@ session has Hindsight tools from a connector pointed at the multi-bank endpoint
 (`.../mcp/`, so `list_banks` and `create_bank` exist):
 
 1. In the project's directory run
-   `python3 .feature-ladder/v1.6.0/hindsight-memory/scripts/resolve_bank.py --candidates`.
+   `python3 .feature-ladder/v1.7.0/hindsight-memory/scripts/resolve_bank.py --candidates`.
    It prints the project name, the git owner/repo, and the candidate bank ids
    in priority order. If it reports `"is_git": false`, use the connector's
    default bank and skip to step 5.
 2. Call `list_banks` with `query` set to the project name (and again with the
    repo name if it differs). Save the combined results to
    `.feature-ladder/banks.json` as `{"banks": [...]}`.
-3. Run `python3 .feature-ladder/v1.6.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
+3. Run `python3 .feature-ladder/v1.7.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
    It returns `bank_id` and `action` (`pinned`, `existing` or `create`).
 4. If `action` is `create`, call `create_bank` with that `bank_id`, a `name`
    of `owner/repo` (or the project name), and a `mission` describing the
