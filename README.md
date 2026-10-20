@@ -182,6 +182,12 @@ access`, `cat .env`, `printenv`, `echo $X_KEY`). Deleting, disabling or
 re-sharing a secret is on the never-list; creating one on production is a
 risky step. Values never reach a report, PR, commit, memory or Codex prompt.
 
+The guard classifies the command after `--` exactly as if it ran on its own.
+Most commands that need a key (deploys, dev or staging targets, reads) run at
+once with no Fable call. One that deletes or overwrites production data gets
+the same single Fable verdict it would get without the wrapper, and anything
+on the never-list is still left for you.
+
 ### Run to completion: branches and checkpoint PRs
 
 `skills/orchestration-ladder/scripts/pr_checkpoint.py` handles the branches.
