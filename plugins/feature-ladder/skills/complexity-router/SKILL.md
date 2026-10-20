@@ -41,11 +41,14 @@ delegated (driven by the `scoper` agent and `/feature-ladder:feature`):
    for every field; candidate files; test command; git state.
 2. The scoper reads the code and corrects each field (value, confidence,
    evidence, optional range) and lists open decisions.
-3. `decide PROPOSAL --mode default|auto|ask-all` - asks a field only if its
+3. `decide PROPOSAL --mode default|auto` - asks a field only if its
    confidence is not high **and** flipping it changes the rung (one field at a
    time, plus a joint check for several small guesses that add up). Open
-   decisions are always asked so the run never has to stop for them later.
-   `auto` asks nothing; `ask-all` confirms everything.
+   decisions are always asked so the run never has to stop for them later,
+   and so is the outside-repo policy when a production target is detected
+   (`.firebaserc` aliases, or the scout flagged `irreversible`).
+   `auto` asks nothing. `find "<request>"` returns a saved, confirmed intake
+   for the same request so it is not asked twice.
 4. `apply PROPOSAL ANSWERS` - writes the confirmed intake
    (`.feature-ladder/intake/<slug>.json`): values, the source of each (user or
    scout + confidence), answered decisions, and the route.
@@ -68,7 +71,7 @@ It is not a request for Fable to write code. The coordinator does one of:
 3. If the task is inherently consequential (blast radius 3), keep it on the Opus rung but add a `deep-verifier` (Fable High) review of the Evidence Packet before acceptance.
 
 `irreversible` (effects outside the repo) is a +3 risk weight, not a stop: the
-step is written but never run, and goes into a checkpoint PR.
+step runs under the intake's outside-repo policy (orchestration-ladder skill).
 
 ## Re-routing after failure
 

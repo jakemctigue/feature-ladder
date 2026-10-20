@@ -1,81 +1,74 @@
 #!/usr/bin/env python3
 """
-PreToolUse(Bash) guard for feature-ladder runs.
+PreToolUse(Bash) guard for feature-ladder runs. Costs no model tokens.
 
-While a ladder run is active in this repository (.feature-ladder/run.json has
-"active": true), commands that cannot be undone are denied. The agent is told
-to prepare the step (script, migration file, command in the PR body) and park
-it in a checkpoint PR instead of running it. Outside a run, it does nothing.
-
-It is a safety net, not the only control: the coordinator and workers are
-instructed never to run irreversible steps. Patterns are deliberately narrow so
-normal development (tests, local builds, git commit) is never blocked.
+Only active while .feature-ladder/run.json in this repo says "active": true.
+Each command is classified by skills/orchestration-ladder/scripts/irreversible.py:
+mundane outside-repo commands run and are logged; commands that overwrite or
+delete production data need one Fable verdict (irreversible.py approve) first;
+a short never-list and anything outside the intake policy are denied and
+logged as left for the user. Ordinary development commands pass untouched.
 """
 import json
-import re
+import os
+import subprocess
 import sys
 from pathlib import Path
 
-PATTERNS = [
-    (r"\bgit\s+push\b[^\n;&|]*(\s--force\b|\s-f\b|\s--force-with-lease\b|\s\+\S)", "force push"),
-    (r"\bgit\s+push\b[^\n;&|]*\s(origin\s+)?(main|master|production|prod|release)\b(?!-)", "push to a protected branch"),
-    (r"\bgit\s+reset\s+--hard\b", "git reset --hard"),
-    (r"\bgit\s+clean\s+-[a-z]*f", "git clean -f"),
-    (r"\bgit\s+branch\s+-D\b", "force-delete a branch"),
-    (r"\bgh\s+pr\s+merge\b", "merging a PR"),
-    (r"\bgh\s+release\s+(create|delete)\b", "publishing a release"),
-    (r"\bgh\s+repo\s+delete\b", "deleting a repository"),
-    (r"\brm\s+-[a-z]*r[a-z]*f?[a-z]*\s+(/|~|\$HOME|\.\.|[A-Za-z]:\\)(\s|$)", "recursive delete outside the repo"),
-    (r"\b(drop\s+(table|database|schema)|truncate\s+table)\b", "dropping or truncating data"),
-    (r"\bdelete\s+from\s+\w+\s*(;|$|\")", "DELETE without WHERE"),
-    (r"\bterraform\s+(apply|destroy)\b", "terraform apply/destroy"),
-    (r"\bpulumi\s+(up|destroy)\b", "pulumi up/destroy"),
-    (r"\bkubectl\s+(delete|apply|replace|scale|rollout\s+restart)\b", "changing a Kubernetes cluster"),
-    (r"\bhelm\s+(install|upgrade|uninstall|delete)\b", "changing a Helm release"),
-    (r"\b(prisma\s+migrate\s+deploy|rails\s+db:migrate\s+RAILS_ENV=production)\b", "migrating a deployed database"),
-    (r"\b(npm|pnpm|yarn)\s+publish\b|\bcargo\s+publish\b|\btwine\s+upload\b|\bgem\s+push\b", "publishing a package"),
-    (r"\bdocker\s+push\b", "pushing an image"),
-    (r"\b(vercel|netlify|fly|railway|wrangler)\s+(deploy|--prod|up)\b", "deploying"),
-    (r"\baws\s+\S+\s+(delete|terminate|remove|rm|rb)\S*", "deleting cloud resources"),
-    (r"\b(az|gcloud)\b[^\n]*\s(delete|destroy)\b", "deleting cloud resources"),
-    (r"\bssh\s+\S+", "running commands on another machine"),
-]
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent.parent / "skills" / "orchestration-ladder" / "scripts"))
 
 
-def run_active(cwd):
+def find_run(cwd):
+    """run.json lives in the main checkout; linked worktrees must find it there too."""
     p = Path(cwd).resolve()
     for d in [p, *p.parents]:
         f = d / ".feature-ladder" / "run.json"
         if f.is_file():
-            try:
-                return bool(json.loads(f.read_text(encoding="utf-8")).get("active"))
-            except (OSError, ValueError):
-                return False
+            return d, f
         if (d / ".git").exists():
-            return False
-    return False
+            try:
+                r = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                   cwd=str(d), capture_output=True, text=True, timeout=10)
+                common = Path(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
+            except (OSError, subprocess.SubprocessError):
+                common = None
+            if common and common.name == ".git":
+                f = common.parent / ".feature-ladder" / "run.json"
+                if f.is_file():
+                    return common.parent, f
+            return None, None
+    return None, None
 
 
 def main():
     try:
-        payload = json.loads(sys.stdin.read().lstrip("﻿"))
+        payload = json.loads(sys.stdin.read().lstrip("\ufeff"))
     except ValueError:
         return 0
     if payload.get("tool_name") != "Bash":
         return 0
     cmd = str((payload.get("tool_input") or {}).get("command", ""))
-    if not cmd or not run_active(payload.get("cwd") or "."):
+    root, f = find_run(payload.get("cwd") or os.getcwd())
+    if not cmd or not f:
         return 0
-    for pat, what in PATTERNS:
-        if re.search(pat, cmd, re.IGNORECASE):
-            reason = (f"feature-ladder: blocked ({what}) while a ladder run is active. Irreversible "
-                      "steps are never run by the ladder. Prepare it instead (script, migration file, or the exact "
-                      "command), then park it with pr_checkpoint.py checkpoint --kind irreversible and keep working "
-                      "on the next branch. The user runs it after approving the PR.")
-            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                                     "permissionDecision": "deny",
-                                                     "permissionDecisionReason": reason}}))
-            return 0
+    try:
+        run = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not run.get("active"):
+        return 0
+    from irreversible import gate
+    allowed, reason, changed = gate(cmd, run)
+    if changed:
+        try:
+            f.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+    if not allowed:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                                 "permissionDecision": "deny",
+                                                 "permissionDecisionReason": reason}}))
     return 0
 
 

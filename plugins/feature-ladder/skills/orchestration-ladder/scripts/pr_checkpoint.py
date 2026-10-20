@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-feature-ladder branch and PR checkpoints: run a feature to completion without
-stopping, and park critical decisions and irreversible steps in draft PRs.
+feature-ladder branches and PRs: run a feature to completion without
+stopping. Critical design decisions are parked in draft PRs while work
+continues. Commands with effects outside the repo are handled by
+irreversible.py and the guard hook, not by branches.
 
-  start      --slug S [--base B] [--workspace include|stash] [--no-pr]
-             Create branch feature-ladder/<S> from the current branch (or B).
+  start      --slug S [--workspace include|stash] [--intake FILE]
+             Create branch feature-ladder/<S> from the current branch.
              Uncommitted changes are committed first as a separate commit
              marked as the user's (include, default) or stashed (stash).
-             Writes .feature-ladder/run.json, which also switches on the
-             irreversible-command guard hook for this repo.
+             Writes .feature-ladder/run.json (with the intake's outside-repo
+             policy and environments), which switches on the guard hook.
 
-  checkpoint --kind decision|irreversible --title T --body-file F
-             Commit everything on the current branch, push it, open a DRAFT PR
+  checkpoint --title T --body-file F
+             For a critical decision: commit everything, push, open a DRAFT PR
              (base = the previous branch in the stack) whose body is F, then
-             create the next branch (feature-ladder/<S>-pt<N>) from that commit
-             and switch to it, so work continues immediately. Nothing
-             irreversible is ever run by this script.
+             create the next branch (feature-ladder/<S>-pt<N>) and switch to
+             it, so work continues immediately.
 
   finish     --title T --body-file F [--draft]
              Commit the rest, push, open the final PR (base = previous branch,
@@ -24,7 +25,10 @@ stopping, and park critical decisions and irreversible steps in draft PRs.
 
   status     Print run.json.
 
-Without a git remote, the gh CLI, or with --no-pr, everything still happens on
+  abort      Mark the run inactive (turns the guard off) without opening PRs.
+             Branches and commits are kept. Use after a run that died midway.
+
+Without a git remote or the gh CLI, everything still happens on
 local branches and each PR body is saved to .feature-ladder/checkpoints/ for
 the user instead. Exit 0 ok, 1 error, 2 not a git repository.
 """
@@ -108,9 +112,7 @@ def free_branch(root, name):
     return cand
 
 
-def pr_ready(root, no_pr):
-    if no_pr:
-        return False, "disabled with --no-pr"
+def pr_ready(root):
     if sh(["git", "remote", "get-url", "origin"], root, check=False)[0] != 0:
         return False, "no git remote 'origin'"
     try:
@@ -163,27 +165,44 @@ def with_stack(body_file, run, root):
 # ------------------------------------------------------------------ commands --
 def cmd_start(root, a):
     slug = a.get("--slug") or "feature"
-    _, cur = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], root)
-    if cur == "HEAD":
-        cur = sh(["git", "rev-parse", "HEAD"], root)[1]
-    base = a.get("--base") or cur
-    if base != cur:
-        sh(["git", "checkout", "-q", base], root)
+    code, base = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], root, check=False)
+    if code != 0 or not base:  # no commits yet: an EMPTY root commit so branches have a base
+        sh(["git"] + ident(root) + ["commit", "-q", "--allow-empty", "-m", "feature-ladder: initial commit"], root)
+        _, base = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], root)
+    if base == "HEAD":  # detached: anchor the stack on the commit itself
+        base = sh(["git", "rev-parse", "HEAD"], root)[1]
     workspace = a.get("--workspace") or "include"
     _, st = sh(["git", "status", "--porcelain"], root)
     dirty = [l for l in st.splitlines() if l.strip() and ".feature-ladder/" not in l]
     branch = free_branch(root, f"feature-ladder/{slug}")
     stashed = None
     if dirty and workspace == "stash":
-        sh(["git", "stash", "push", "-u", "-q", "-m", f"feature-ladder {slug}: pre-run changes"], root)
+        sh(["git", "stash", "push", "-u", "-q", "-m", f"feature-ladder {slug}: pre-run changes",
+            "--", ".", ":(exclude).feature-ladder"], root)
         stashed = "stash@{0} (feature-ladder " + slug + ": pre-run changes)"
     sh(["git", "checkout", "-q", "-b", branch], root)
     pre = None
     if dirty and workspace != "stash":
         commit_all(root, "Pre-existing uncommitted changes (made by the user, not by feature-ladder)", user_only=True)
         pre = sh(["git", "rev-parse", "--short", "HEAD"], root)[1]
-    ok, why = pr_ready(root, "--no-pr" in a)
-    run = {"slug": slug, "base": base, "branch": branch, "stack_base": base,
+    ok, why = pr_ready(root)
+    intake = {}
+    if a.get("--intake") and Path(a["--intake"]).is_file():
+        try:
+            intake = json.loads(Path(a["--intake"]).read_text(encoding="utf-8-sig"))
+        except ValueError:
+            intake = {}
+    environments = intake.get("environments") or {}
+    if not environments:  # no intake: still learn the deployment targets from the repo
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "complexity-router" / "scripts"))
+            from intake import scan as _scan
+            environments = _scan("", str(root)).get("environments", {})
+        except Exception:  # noqa: BLE001 - best effort
+            environments = {}
+    run = {"outside_policy": intake.get("outside_policy", "all"),
+           "environments": environments,
+           "slug": slug, "base": base, "branch": branch, "stack_base": base,
            "active": True, "started": now(), "pr_enabled": ok,
            "pr_disabled_reason": why or None, "pre_existing_commit": pre,
            "stash": stashed, "checkpoints": []}
@@ -193,7 +212,7 @@ def cmd_start(root, a):
 
 def cmd_checkpoint(root, a):
     run = load(root)
-    kind = a.get("--kind", "decision")
+    kind = "decision"
     title = a.get("--title") or kind
     body = a.get("--body-file")
     if not body or not Path(body).is_file():
@@ -201,7 +220,7 @@ def cmd_checkpoint(root, a):
     n = len(run["checkpoints"]) + 1
     head, base = run["branch"], run["stack_base"]
     commit_all(root, f"feature-ladder checkpoint {n} ({kind}): {title}", allow_empty=True)
-    label = "Decision needed" if kind == "decision" else "Irreversible step: approve before running"
+    label = "Decision needed"
     entry = {"n": n, "kind": kind, "title": title, "branch": head, "base": base,
              "commit": sh(["git", "rev-parse", "--short", "HEAD"], root)[1], "at": now()}
     run["checkpoints"].append(entry)
@@ -237,6 +256,13 @@ def cmd_finish(root, a):
             "stash": run.get("stash"), "warnings": run.get("warnings", [])}
 
 
+def cmd_abort(root, a):
+    run = load(root)
+    run["active"], run["aborted"] = False, now()
+    save(root, run)
+    return {"aborted": True, "branch": run.get("branch"), "stash": run.get("stash")}
+
+
 def parse(argv):
     a, i = {}, 0
     while i < len(argv):
@@ -262,7 +288,7 @@ def main(argv):
     a = parse(argv[1:])
     try:
         fn = {"start": cmd_start, "checkpoint": cmd_checkpoint, "finish": cmd_finish,
-              "status": lambda r, _a: load(r)}[argv[0]]
+              "status": lambda r, _a: load(r), "abort": cmd_abort}[argv[0]]
         print(json.dumps(fn(root, a), indent=2))
         return 0
     except KeyError:

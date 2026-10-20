@@ -60,15 +60,33 @@ keeps it safe:
   changes are committed first as their own commit, or stashed, as chosen at
   intake) and switches on the guard hook that denies irreversible shell
   commands while the run is active.
-- `checkpoint --kind decision|irreversible` commits, pushes and opens a draft PR
-  for a critical decision (assumption made, alternatives, how to switch) or an
-  irreversible step (written, never run; exact commands to run after
-  approval), then continues on `feature-ladder/<slug>-ptN`, stacked on it.
+- `checkpoint` commits, pushes and opens a draft PR for a critical design
+  decision (assumption made, alternatives, how to switch), then continues on
+  `feature-ladder/<slug>-ptN`, stacked on it.
 - `finish` opens the final PR on top of the stack and prints the merge order.
+- `abort` marks a run inactive (guard off) after one died midway; branches stay.
 
 Without a remote or the `gh` CLI the same happens on local branches and the PR
-bodies are saved in `.feature-ladder/checkpoints/`. Code on a branch is never
-irreversible; only effects outside the repo are.
+bodies are saved in `.feature-ladder/checkpoints/`.
+
+## Changes outside the repo
+
+Code on a branch is always reversible. Steps with effects outside the repo
+(Firestore or database writes, migrations, deploys, publishing, outside
+services) are run by the workers like any other step, under the policy chosen
+at intake (`outside_policy`: `all`, `nonprod` or `none`). `scripts/irreversible.py`
+classifies each shell command with no model tokens, and the guard hook applies
+it:
+
+| Tier | Examples | What happens |
+|---|---|---|
+| mundane | emulator or dev/staging targets, `firebase deploy`, index builds, exports, dry runs | runs at once, logged |
+| risky | `firestore:delete`, `firestore import`, destructive SQL, migration or backfill scripts on production | denied once; one `second-opinion` (fable/low) verdict, then `irreversible.py approve`, then it runs |
+| never | delete a project/database/repo, weaken database protection, merge PRs, push to the base branch, force-push or delete main, delete backups | left for the user, logged |
+
+`irreversible.py classify "<cmd>"` shows the tier; `irreversible.py report`
+prints the table for FEATURE-REPORT.md. Nobody writes undo scripts or
+rehearsals for these steps: the tokens go to the feature.
 
 ## Rules that keep Fable sparse
 

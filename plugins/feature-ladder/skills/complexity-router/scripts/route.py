@@ -30,7 +30,7 @@ Input fields (all optional; missing = 0 / false)
   security          bool  touches auth, secrets, permissions, crypto, input trust boundary
   concurrency       bool  async/threads/locks/queues/race-prone code
   cross_system      bool  spans >1 service, repo, process, or external system
-  irreversible      bool  effects outside the repo (real data, deploys, publishing, external calls); +3, never run by the ladder
+  irreversible      bool  effects outside the repo (real data, deploys, publishing, external calls); +3, run under the intake policy
   no_tests          bool  area has no existing tests to lean on
   ambiguity         0-3   0 fully specified ... 3 goal only, approach unknown
   novelty           0-3   0 pattern exists in repo ... 3 nothing like it anywhere here
@@ -40,6 +40,7 @@ Input fields (all optional; missing = 0 / false)
 Output: JSON {rung, agent, model, effort, score, hard_flags, breakdown, reason}
 """
 import json
+import re
 import sys
 
 # ---- Scoring table (edit here; keep it monotonic) ---------------------------
@@ -56,7 +57,7 @@ POINTS = {
     "no_tests":     lambda v: 1 if v else 0,
     # Effects outside the repo (real data, deploys, publishing, external calls).
     # Code on a branch is always reversible, so this is a risk weight, not a stop:
-    # the step is written but never run, and is parked in a checkpoint PR.
+    # the step runs under the intake's outside-repo policy (see irreversible.py).
     "irreversible": lambda v: 3 if v else 0,
     "ambiguity":    lambda v: [0, 1, 3, 5][max(0, min(3, int(v)))],
     "novelty":      lambda v: [0, 1, 2, 4][max(0, min(3, int(v)))],
@@ -100,7 +101,42 @@ KEYWORDS = {
 }
 
 
+NUMERIC = {"files", "loc", "modules", "ambiguity", "novelty", "blast_radius"}
+
+
+def _num(v):
+    """Tolerate null, strings and bools from hand-written JSON."""
+    if v is None or v == "":
+        return 0
+    if isinstance(v, bool):
+        return int(v)
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _flag(v):
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "yes", "y", "1")
+    return bool(v)
+
+
+def clean(task: dict) -> dict:
+    out = dict(task)
+    for k in NUMERIC:
+        if k in out:
+            out[k] = _num(out[k])
+    for k in POINTS:
+        if k not in NUMERIC and k in out:
+            out[k] = _flag(out[k])
+    if "design_agreed" in out:
+        out["design_agreed"] = _flag(out["design_agreed"])
+    return out
+
+
 def score(task: dict):
+    task = clean(task)
     breakdown = {}
     for k, fn in POINTS.items():
         v = task.get(k, 0)
@@ -110,22 +146,23 @@ def score(task: dict):
     total = sum(breakdown.values())
 
     flags = []
-    if int(task.get("ambiguity", 0)) >= 2:
+    if _num(task.get("ambiguity", 0)) >= 2:
         flags.append(HARD_FLAGS["ambiguity>=2"])
     if task.get("cross_system") and task.get("security"):
         flags.append(HARD_FLAGS["cross_system+security"])
-    if int(task.get("blast_radius", 0)) >= 3:
+    if _num(task.get("blast_radius", 0)) >= 3:
         flags.append(HARD_FLAGS["blast_radius=3"])
     return total, breakdown, flags
 
 
 def route(task: dict) -> dict:
-    kind = (task.get("kind") or "code").lower()
+    task = clean(task)
+    kind = str(task.get("kind") or "code").lower()
     total, breakdown, flags = score(task)
 
     if kind in NON_CODE_KINDS and not flags:
         agent, model, effort, label = NON_CODE_KINDS[kind]
-        if kind == "analysis" and int(task.get("novelty", 0)) >= 2:
+        if kind == "analysis" and _num(task.get("novelty", 0)) >= 2:
             agent, effort, label = "domain-expert-high", "high", "T5 Opus High - domain analysis, novel area"
         return _out(label, agent, model, effort, total, flags, breakdown,
                     f"kind={kind} routes by kind, not score")
@@ -159,12 +196,26 @@ def _out(label, agent, model, effort, total, flags, breakdown, reason):
     }
 
 
+PREFIX_KEYWORDS = {"serializ", "concurren", "install", "upgrade", "sanitize"}  # match as word prefixes
+
+
+def keyword_hit(text: str, words):
+    """Whole-word match, so 'author' is not 'auth' and 'stable' is not 'table'."""
+    t = text.lower()
+    for w in words:
+        w = w.strip()
+        pat = r"(?<![a-z0-9])" + re.escape(w) + ("" if w in PREFIX_KEYWORDS else r"(?![a-z0-9])")
+        if re.search(pat, t):
+            return w
+    return None
+
+
 def describe(text: str) -> dict:
     """Keyword pre-fill. The coordinator must review the result; this only sets flags."""
     t = text.lower()
     task = {"kind": "code", "_prefilled_from": text}
     for flag, words in KEYWORDS.items():
-        if any(w in t for w in words):
+        if keyword_hit(t, words):
             task[flag] = True
     task["ambiguity"] = 2 if len(t.split()) < 8 else 1
     return task
@@ -200,7 +251,7 @@ def main(argv):
         print(json.dumps(result, indent=2))
         return 0
     if argv[0] == "--file":
-        with open(argv[1], encoding="utf-8") as fh:
+        with open(argv[1], encoding="utf-8-sig") as fh:
             task = json.load(fh)
     else:
         task = json.loads(argv[0])

@@ -125,32 +125,50 @@ Never stop to ask. For each open question that arises:
   it could reasonably go either way, or new evidence contradicts the intake):
   pick the recommended option, then checkpoint:
   ```
-  python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/pr_checkpoint.py checkpoint --kind decision --title "<question in <=8 words>" --body-file <file>
+  python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/pr_checkpoint.py checkpoint --title "<question in <=8 words>" --body-file <file>
   ```
   The body file states: the question, each option with its consequence, which
   option you assumed and why, and what to do if the user prefers another
   (the branch to restart from and a ready-to-paste `/feature-ladder:feature`
   request). Then keep working on the new branch the script switched to.
-- **Irreversible step** (effects outside the repo: migrating or deleting real
-  data, deploying, publishing, outside services, rewriting shared history):
-  have a worker *write* it (migration file, script, exact command) but never
-  run it; a guard hook blocks such commands during the run anyway. Prefer code
-  that works both before and after the step is applied. Checkpoint with
-  `--kind irreversible`; the body gives the exact commands, their order,
-  preconditions, how to verify, and how to roll back. Continue on the new
-  branch.
+- **Steps with effects outside the repo** (data migrations, Firestore/DB
+  writes, deploys, publishing, outside services): the worker runs them as part
+  of its task. The intake's policy (`outside_policy` in the intake file) and a
+  guard hook decide what happens, with no tokens spent:
+  - *mundane* (emulator or non-production targets, deploys, index builds,
+    exports, dry runs, anything that doesn't destroy production data): runs
+    at once and is logged.
+  - *risky* (overwrites or deletes production data): the hook denies the
+    first attempt and names the step. Send `second-opinion` (fable/low) the
+    exact command, what it changes and why it is correct; it answers
+    `VERDICT: APPROVE` or `VERDICT: REJECT`. Save the answer to a file, run
+    ```
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/irreversible.py approve --cmd "<exact command>" --verdict-file <file>
+    ```
+    then the worker runs the same command. One verdict per command. REJECT
+    means skip it, note it in the report, and keep going.
+  - *never-list* (deleting a project, database or repo, weakening database
+    protection, merging PRs, pushing to the base branch, force-pushing or
+    deleting main, deleting backups) and anything the policy excludes: the
+    hook denies it; note it under "Left for you" in FEATURE-REPORT.md and
+    continue.
+  Keep the step cheap: no undo scripts, no backups beyond what the service
+  already does, no rehearsals. If the step itself fails, treat it like any
+  failed check.
 
 Checkpoints commit everything on the current branch, so dispatch them only
 between tasks (never while a worker is editing). Not a git repo (no run
-branch): skip the script, record decisions under Assumptions and irreversible
-steps under "To run after review" in FEATURE-REPORT.md.
+branch): skip the script, record decisions under Assumptions; outside-repo
+steps then run without the hook, so apply the same three tiers yourself.
 
 ## 6. Accept (inspection pass 3 of 3)
 Acceptance criteria are in the orchestration-ladder skill. Run the Codex review
 over the whole run (`--base <original base from your prompt>`), so stacked
 checkpoint branches are included. When met: finish
 FEATURE-REPORT.md (what changed, how verified, risks, follow-ups, assumptions,
-the PR stack), retain the
+the PR stack, and the table printed by
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/irreversible.py report`
+of every outside-repo action run, approved, rejected or left for the user), retain the
 durable facts to Hindsight (decisions, interfaces, pitfalls - one per retain),
 and report to the user with the file list, the exact check commands that passed,
 anything left unverified, and a one-line summary of what was retained to memory.
@@ -180,7 +198,8 @@ or an approval before the final one.
   and the addition is recorded in FEATURE-REPORT.md. If the same addition
   recurs, propose a rule for skill-rules.json in the report.
 - Never report "done" over a failing or unrun check.
-- Never ask the user mid-run and never run an irreversible step; checkpoint instead.
+- Never ask the user mid-run. Outside-repo steps run under the intake policy
+  and the guard; a production data overwrite needs one Fable verdict first.
 - Never merge PRs, push to the base branch, or force-push.
 - Do not retain secrets, credentials, or personal data to memory.
 - Every subagent must end with a `Retained:` footer; if a packet lacks one, the

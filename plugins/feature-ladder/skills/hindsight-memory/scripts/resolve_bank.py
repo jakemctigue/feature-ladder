@@ -78,9 +78,15 @@ def _slug(s):
 
 
 def candidates(ident):
-    out = [PREFIX + ident["project"]]
+    """Search order for existing banks. With a remote, the owner/repo form comes
+    first so two clones that share a folder name never share a bank; the
+    folder-name forms stay in the list so banks made by earlier versions are
+    still found."""
+    out = []
     if ident["owner"] and ident["repo"]:
+        out.append(PREFIX + _slug(f"{ident['owner']}-{ident['repo']}"))
         out.append(_slug(f"{ident['owner']}-{ident['repo']}"))
+    out.append(PREFIX + ident["project"])
     out.append(ident["project"])
     seen, uniq = set(), []
     for c in out:
@@ -94,7 +100,7 @@ def pinned(ident):
     f = Path(ident["root"]) / ".feature-ladder" / "hindsight.json"
     if f.is_file():
         try:
-            b = json.loads(f.read_text(encoding="utf-8")).get("bank_id")
+            b = json.loads(f.read_text(encoding="utf-8-sig")).get("bank_id")
             return b or None
         except (ValueError, OSError):
             return None
@@ -193,7 +199,7 @@ def server_banks(mcp, ident):
 # --------------------------------------------------------------- cache ----
 def _load_cache():
     try:
-        return json.loads(CACHE.read_text(encoding="utf-8"))
+        return json.loads(CACHE.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return {}
 
@@ -297,7 +303,7 @@ def main(argv):
                           "create_as": candidates(ident)[0]}, indent=2))
         return 0
     if "--choose" in argv:
-        raw = json.loads(Path(argv[argv.index("--choose") + 1]).read_text(encoding="utf-8"))
+        raw = json.loads(Path(argv[argv.index("--choose") + 1]).read_text(encoding="utf-8-sig"))
         bank, action = choose(ident, _bank_list(raw) if isinstance(raw, dict) else raw)
         print(json.dumps({"bank_id": bank, "action": action, "project": ident["project"]}, indent=2))
         return 0

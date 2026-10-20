@@ -22,11 +22,12 @@ later. You estimate; the user confirms what is uncertain. You change no code.
 
 1. **Scan.** From the repo root, run:
    ```
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/intake.py" scan "<the feature request>" > .feature-ladder/intake/<slug>-scan.json
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/intake.py" scan --save "<the feature request>"
    ```
-   (`python` if `python3` is missing; create `.feature-ladder/intake/` first.
-   The slug is in the output.) It gives a first guess for every field, the
-   candidate files, the test command and the git state.
+   (`python` if `python3` is missing.) It prints the scan and saves it to
+   `.feature-ladder/intake/<slug>-scan.json` (`written_to` and `slug` are in
+   the output). It gives a first guess for every field, the candidate files,
+   the test command, the deployment targets and the git state.
 
 2. **Recall.** One Hindsight `recall` for this feature area: prior decisions,
    pitfalls, how similar features were built. It feeds `novelty` and the open
@@ -44,8 +45,9 @@ later. You estimate; the user confirms what is uncertain. You change no code.
      the code or the request. `high` means you saw it.
    - `irreversible`: true only if some step has effects **outside the repo**
      (migrating or deleting real data, deploying, publishing, calling an
-     outside service, rewriting shared git history). Code on a branch is never
-     irreversible. Such steps will be written but never run.
+     outside service). Code on a branch is never irreversible. Such steps run
+     under the policy the user picks at intake, so say in the evidence what
+     they are (e.g. "backfill of the monsters collection on bossforge-prod").
    - `ambiguity`: 0 if the request plus the code leave one obvious approach;
      1 if small gaps you can fill with the repo's conventions; 2+ if a worker
      would have to choose between real alternatives.

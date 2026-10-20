@@ -26,9 +26,12 @@ Both use the same scripts and rules.
   would change which model does the work, plus the design choices a worker
   would otherwise guess. After that the run goes to completion without
   stopping.
-- **Works on its own branch.** A critical decision that comes up mid-run, or
-  a step with effects outside the repo, becomes a draft PR with the
-  assumption or the exact commands, and work continues on a stacked branch.
+- **Works on its own branch and finishes the job.** A critical design decision
+  that comes up mid-run becomes a draft PR with the assumption, and work
+  continues on a stacked branch. Changes outside the repo (Firestore or
+  database writes, migrations, deploys) are run too, under a policy you pick
+  once at intake: routine ones at once, production data overwrites after one
+  Fable verdict, and a short never-list left for you.
 - Decides **which model and effort level** handles each task with a fixed
   scoring function (`route.py`), from Haiku low for mechanical edits up to
   Opus high for hard, designed work.
@@ -46,11 +49,12 @@ Both use the same scripts and rules.
 
 **What it does not do**
 
-- It does not merge, push to your base branch, deploy or touch production.
-  It pushes its own `feature-ladder/...` branches and opens PRs for you to
-  review. Steps with effects outside the repo (migrating real data,
-  deploying, publishing, calling outside services) are written but never
-  run; a guard hook blocks them while a run is active. Shipping is your call.
+- It does not merge, push to your base branch, or force-push. It pushes its
+  own `feature-ladder/...` branches and opens PRs for you to review. It never
+  deletes a project, database, repo or backup, and never weakens database
+  protection; a guard hook enforces that list while a run is active.
+- It does not write undo scripts, backups or rehearsals for live changes.
+  Tokens go to the feature; the services' own safeguards are relied on.
 - It does not invent a design when the request is ambiguous. It asks at
   intake, or escalates to a design step if you'd rather it chose.
 - It does not replace your tests. "Done" means your checks passed, quoted
@@ -114,9 +118,9 @@ Both use the same scripts and rules.
 Throughout, nothing stops for you. Non-critical choices are decided and
 listed under Assumptions. A **critical decision** (costly to undo, could go
 either way) is decided with the recommended option and parked in a draft PR
-that explains how to switch. An **irreversible step** (effects outside the
-repo) is written but not run, and parked in a draft PR with the exact
-commands. Either way, work continues on the next stacked branch.
+that explains how to switch, and work continues on the next stacked branch.
+Steps with effects outside the repo run under the intake policy (next
+section); none of them stops the run.
 
 ---
 
@@ -145,11 +149,17 @@ medium (10–13), Opus high (14–17), and escalate (18+). Run
   flipping it changes the rung. It also checks whether several small guesses
   together would change the rung. Open design decisions are always asked.
   Uncommitted changes in your checkout get one question: include them as their
-  own commit, stash them, or stop.
+  own commit, stash them, or stop. If a production target is detected
+  (`.firebaserc` aliases, for instance), you get one more: how far live
+  changes may go (all, non-production only, nothing outside the repo).
 
 `--auto` asks nothing and takes the scout's values and recommended options.
-`--ask-all` confirms every variable. `/feature-ladder:scope` runs intake alone
-and saves it, so `/feature-ladder:feature --intake <file>` can build it later.
+`/feature-ladder:scope` runs intake alone and saves it; the next
+`/feature-ladder:feature` with the same request text reuses it without asking.
+
+Those are the only switches: `--auto`, `--adversarial` (attack tests; on by
+itself when the intake says the feature touches security) and `--ultra`.
+The branch, PR availability and review scope are detected.
 
 ### Run to completion: branches and checkpoint PRs
 
@@ -157,19 +167,36 @@ and saves it, so `/feature-ladder:feature --intake <file>` can build it later.
 
 | Step | What it does |
 |---|---|
-| `start` | Creates `feature-ladder/<slug>` from your branch and turns on the guard hook for this repo |
-| `checkpoint --kind decision` | Commits, pushes and opens a **draft PR** saying what was assumed and how to switch, then continues on `feature-ladder/<slug>-pt2` |
-| `checkpoint --kind irreversible` | Same, with the exact commands to run after you approve; the ladder never runs them |
+| `start` | Creates `feature-ladder/<slug>` from your branch, records the intake policy, and turns on the guard hook for this repo |
+| `checkpoint` | Commits, pushes and opens a **draft PR** saying what was assumed and how to switch, then continues on `feature-ladder/<slug>-pt2` |
 | `finish` | Opens the final PR on top of the stack and prints the merge order |
+| `abort` | Turns the guard off after a run died midway; branches and commits stay |
 
 Without a remote or the `gh` CLI (or with `--no-pr`), the same branches are
 made locally and each PR description is saved in `.feature-ladder/checkpoints/`.
 
+### Changes outside the repo
+
 Code on a branch is always reversible, so `irreversible` only means effects
-outside the repo. In routing it is a +3 risk weight, not a stop. While a run
-is active, a `PreToolUse` guard denies commands such as force pushes, pushes to
-`main`/`master`, `gh pr merge`, `DROP`/`TRUNCATE`, `terraform apply`,
-`kubectl delete`, package publishing and deploys.
+outside the repo (in routing it is a +3 risk weight, not a stop). Those steps
+are run, not parked. `skills/orchestration-ladder/scripts/irreversible.py`
+classifies every shell command during a run, with no model tokens, and the
+`PreToolUse` guard applies the result:
+
+| Tier | Examples | What happens |
+|---|---|---|
+| **mundane** | emulator, dev or staging targets; `firebase deploy`; index builds; exports; dry runs; anything that doesn't destroy production data | runs at once, logged |
+| **risky** | `firestore:delete`, `firestore import`, destructive SQL, migration/backfill scripts against production | denied once; the coordinator gets one `second-opinion` (Fable low) verdict on the exact command, approves it with `irreversible.py approve`, and it runs |
+| **never** | deleting a project, database, repo or backups; weakening database protection; merging PRs; pushing to your base branch; force-pushing or deleting `main` | left for you, logged |
+
+The intake policy narrows this: *non-production only* leaves every production
+action for you; *nothing outside the repo* leaves all of them. Production is
+recognised from `.firebaserc` aliases, `--project` flags and words like
+`prod`/`staging` in the command; an unknown target on a real cloud tool is
+treated as production. Only the executable part of a command is classified
+(quoted strings, heredocs and comments are stripped), so a commit message or a
+`grep` that mentions `DROP TABLE` is not a command. Every action, approved,
+rejected or left for you, is listed in a table in `FEATURE-REPORT.md`.
 
 ### Deterministic skill selection
 
@@ -383,9 +410,9 @@ one, the app skill skips memory and says so.
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto \| --ask-all] [--adversarial] [--ultra] [--no-pr] [--base <branch>] [--intake <file>]` | Intake, then run a feature to completion on its own branch |
-| `/feature-ladder:scope <request> [--ask-all]` | Intake only: settle the variables and save them for a later run |
-| `/feature-ladder:codex-review [--base <ref>] [--uncommitted] [--adversarial]` | Codex second opinion (and adversarial tests) on demand |
+| `/feature-ladder:feature <request> [--auto] [--adversarial] [--ultra]` | Intake, then run a feature to completion on its own branch and open PRs |
+| `/feature-ladder:scope <request>` | Intake only; the next `/feature-ladder:feature` with the same request reuses it |
+| `/feature-ladder:codex-review [--adversarial]` | Codex second opinion on the commits since main, or your uncommitted work |
 | `/feature-ladder:route <task or JSON>` | Dry-run the model router |
 | `/feature-ladder:skills <task, JSON or --list>` | Dry-run the skill selector |
 | `/feature-ladder:recall <topic>` | Ask Hindsight what it knows, without starting a run |
@@ -431,8 +458,9 @@ claude-app/model-ladder-router/        the Claude app skill
   disabled. Confirm this on your first run by asking an agent whether its
   orchestration protocol is in context.
 - The guard hook matches command patterns; it's a safety net behind the
-  agents' instructions, not a sandbox. A step hidden inside a script it can't
-  see into isn't caught by it.
+  agents' instructions, not a sandbox. A production write hidden inside a
+  script whose name doesn't look like a migration isn't caught by it, and a
+  step on a target it can't recognise is treated as production.
 - Checkpoint PRs stack: merge them in the order the final report lists.
   GitHub retargets the next PR when you merge one and delete its branch.
 - Subagents have a fixed startup cost. For very small checks, running them

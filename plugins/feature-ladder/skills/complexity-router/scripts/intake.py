@@ -5,13 +5,15 @@ work is delegated, and ask the user only where it matters.
 
 Three deterministic steps (the scoper agent fills the judgment in between):
 
-  scan    "<request>" [--cwd DIR]
-          Read-only repo scan. Prints a proposal skeleton: every router field
+  scan    "<request>" [--cwd DIR] [--save]
+          Read-only repo scan (--save also writes it to
+          .feature-ladder/intake/<slug>-scan.json and reports the path).
+          Prints a proposal skeleton: every router field
           with a value, a confidence (high/medium/low) and the evidence, plus
           candidate files and the repo's test command. The scoper agent then
           reads the candidate code and corrects the values.
 
-  decide  PROPOSAL.json [--mode default|auto|ask-all] [--max N]
+  decide  PROPOSAL.json [--mode default|auto] [--max N]
           Picks the questions to ask. A field is asked when its confidence is
           not high AND flipping it would change the rung (model/effort/agent)
           the router picks. Open design decisions the scoper listed (choices a
@@ -24,6 +26,11 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           Merges the user's answers ({"field": value, ..., "decisions":
           {"<id>": "<chosen option>"}}) into the final, user-confirmed intake,
           routes it, and writes .feature-ladder/intake/<slug>.json (git-ignored).
+
+  find    "<request>" [--cwd DIR]
+          Prints the path of a confirmed, not-yet-used intake for exactly this
+          request text (from /feature-ladder:scope or an aborted run) and marks
+          it used; prints nothing if there is none.
 
 Exit 0 on success, 1 on bad input.
 """
@@ -95,7 +102,7 @@ QUESTION_TEXT = {
     "cross_system": ("Other systems", "Does it talk to another service, repo or third-party API?"),
     "new_dependency": ("New package", "Will it need a new library or package?"),
     "no_tests": ("Tests", "Is this area untested today (no existing tests to run)?"),
-    "irreversible": ("Irreversible", "Does any step have effects outside the repo (migrate or delete real data, deploy, publish, call an outside service)? Such steps are written but never run; they go into a PR for you."),
+    "irreversible": ("Live changes", "Does any step have effects outside the repo (migrate or delete real data, deploy, publish, call an outside service)? They run under the policy you pick; production data overwrites get a Fable check first."),
     "ambiguity": ("Approach", "How precisely is the approach specified?"),
     "novelty": ("Novelty", "Has this repo done something like this before?"),
     "blast_radius": ("Blast radius", "If this is wrong, what breaks?"),
@@ -253,7 +260,7 @@ def scan(text, cwd):
                               f"candidate files span top-level folders: {', '.join(tops) or '(repo root)'}")
 
     for flag in ("public_api", "persistence", "security", "concurrency", "cross_system"):
-        kw = next((w for w in router.KEYWORDS.get(flag, []) if w in tl), None)
+        kw = router.keyword_hit(tl, router.KEYWORDS.get(flag, []))
         in_c = area_cand.get(flag, [])
         in_r = area_repo.get(flag, [])
         if kw and in_c:
@@ -266,7 +273,7 @@ def scan(text, cwd):
         else:
             fields[flag] = field(False, "low", f"repo has {flag.replace('_', ' ')} code (e.g. {in_r[0]}) but nothing ties it to this request yet")
 
-    kw = next((w for w in router.KEYWORDS["new_dependency"] if w in tl), None)
+    kw = router.keyword_hit(tl, router.KEYWORDS["new_dependency"])
     fields["new_dependency"] = field(bool(kw), "medium" if kw else "low",
                                      f'request mentions "{kw.strip()}"' if kw else "no dependency mentioned")
 
@@ -278,15 +285,34 @@ def scan(text, cwd):
     else:
         fields["no_tests"] = field(False, "low", f"repo has {len(tests)} test files, none obviously for this area")
 
-    kw = next((w for w in router.KEYWORDS["irreversible"] if w in tl), None)
+    kw = router.keyword_hit(tl, router.KEYWORDS["irreversible"])
     fields["irreversible"] = field(bool(kw), "medium" if kw else "low",
-                                   f'request mentions "{kw.strip()}"' if kw else "nothing destructive mentioned")
+                                   f'request mentions "{kw}"' if kw else "nothing outside the repo mentioned")
 
     words = len(text.split())
     fields["ambiguity"] = field(2 if words < 8 else 1, "low", f"request is {words} words; approach not yet checked")
     fields["novelty"] = field(1, "low", "not yet checked against the repo or memory")
     fields["blast_radius"] = field(1, "low", "not yet checked")
     fields["design_agreed"] = field(False, "low", "no accepted design yet")
+
+    # Deployment targets the outside-repo gate needs: Firebase aliases, env names.
+    environments = {"aliases": {}, "production": [], "nonproduction": [], "default": None}
+    frc = root / ".firebaserc"
+    if frc.is_file():
+        try:
+            projects = json.loads(frc.read_text(encoding="utf-8-sig")).get("projects", {})
+            environments["aliases"] = dict(projects)
+            environments["default"] = projects.get("default")
+            for alias, pid in projects.items():
+                a = f"{alias} {pid}".lower()
+                if re.search(r"(dev|devel|development|test|testing|staging|stage|qa|sandbox|local|demo)(\b|[-_])", a):
+                    environments["nonproduction"].append(pid)
+                else:
+                    environments["production"].append(pid)
+        except (OSError, ValueError):
+            pass
+    if not environments["production"] and any(f == "firebase.json" or f.startswith("functions/") for f in files):
+        environments["production"].append("(firebase project, alias unknown)")
 
     git = {}
     if is_git:
@@ -300,6 +326,7 @@ def scan(text, cwd):
         "request": text,
         "slug": slugify(text),
         "git": git,
+        "environments": environments,
         "repo_root": str(root),
         "is_git": is_git,
         "repo": {"files": len(files), "test_files": len(tests), "test_command": test_command(root),
@@ -336,6 +363,8 @@ def _alternatives(name, f):
         reps = [b[0] for b in COUNT_BUCKETS[name]]
         idx = min(range(len(reps)), key=lambda i: abs(reps[i] - int(v)))
         return [reps[i] for i in (idx - 1, idx + 1) if 0 <= i < len(reps)]
+    if name == "kind":
+        return [k for k, _ in KIND_OPTIONS if k != v]
     return []
 
 
@@ -384,9 +413,7 @@ def decide(prop, mode="default", max_q=8):
             if _key(r) != _key(base):
                 flips.append((alt, _label(r)))
         reason = None
-        if mode == "ask-all":
-            reason = "you asked to confirm every field"
-        elif mode != "auto" and conf != "high" and flips:
+        if mode != "auto" and conf != "high" and flips:
             reason = "uncertain and it changes the model: " + "; ".join(f"{name}={alt} -> {lab}" for alt, lab in flips[:2])
         if reason:
             why_map[name] = reason
@@ -400,10 +427,13 @@ def decide(prop, mode="default", max_q=8):
     if mode == "default":
         unsure = [a for a in assumed if a["confidence"] != "high" and a["field"] not in ("kind",)]
         worst = dict(vals)
+        base_score = router.score(vals)[0]
         for a in unsure:
             alts = _alternatives(a["field"], prop["fields"][a["field"]])
             if alts:
-                worst[a["field"]] = max(alts, key=lambda x: router.score(dict(vals, **{a["field"]: x}))[0])
+                best_alt = max(alts, key=lambda x: router.score(dict(vals, **{a["field"]: x}))[0])
+                if router.score(dict(vals, **{a["field"]: best_alt}))[0] > base_score:
+                    worst[a["field"]] = best_alt  # only alternatives that raise the score
         if unsure and _key(router.route(worst)) != _key(base):
             deltas = []
             for a in unsure:
@@ -436,8 +466,20 @@ def decide(prop, mode="default", max_q=8):
                                          {"label": "Stash them", "description": "git stash; you get them back with git stash pop"},
                                          {"label": "Stop", "description": "Do not start; I will commit them myself"}]})
 
+    # Outside-repo policy: asked once when the feature may touch real data or
+    # deployments (a production target is known, or the scout flagged it).
+    env = prop.get("environments") or {}
+    touches_outside = bool(env.get("production")) or bool((prop["fields"].get("irreversible") or {}).get("value"))
+    if touches_outside and mode != "auto":
+        prod = ", ".join(str(p) for p in env.get("production", [])[:3]) or "the production target"
+        decisions.append({"id": "outside_policy", "header": "Live changes",
+                          "question": f"This may change things outside the repo (data, deploys, {prod}). How far may it go on its own?",
+                          "options": [{"label": "All of it (Recommended)", "description": "Routine changes run at once; production data overwrites/deletes get one Fable check first; a short never-list is left for you"},
+                                      {"label": "Non-production only", "description": "Emulator, dev and staging targets run; anything on production is left for you"},
+                                      {"label": "Nothing outside the repo", "description": "Code only; every outside step is listed for you to run"}]})
+
     asks.sort(key=lambda a: (a[0], ALL_FIELDS.index(a[1])))
-    budget = max_q if mode != "ask-all" else len(ALL_FIELDS) + 4
+    budget = max_q
     budget_left = max(0, budget - len(decisions))
     questions = []
     for _, name, flips, reason in asks[:budget_left]:
@@ -497,14 +539,18 @@ def apply(prop, answers):
             first = opts[0] if isinstance(opts[0], str) else opts[0].get("label")
             decisions[did] = first
             assumed_decisions[did] = first
-    if decisions:
-        unresolved = [k for k, v in decisions.items()
-                      if k != "workspace" and k not in assumed_decisions
-                      and (not v or str(v).lower().startswith("you decide"))]
-        answered = [k for k in decisions if k != "workspace" and k not in assumed_decisions]
-        if answered and not unresolved and not assumed_decisions and final.get("ambiguity", 0) >= 2:
-            final["ambiguity"] = 1
-            sources["ambiguity"] = "user (open decisions answered)"
+    # Answering every design decision the scout raised removes the ambiguity
+    # that would otherwise escalate. Built-in questions (workspace, policy) are
+    # not design decisions, and an explicit user answer for ambiguity stands.
+    builtin = {"workspace", "outside_policy"}
+    scout_ids = {d.get("id") or slugify(d.get("question", "decision")) for d in prop.get("open_decisions", [])}
+    answered = [k for k in decisions if k in scout_ids and k not in assumed_decisions]
+    unresolved = [k for k in answered if not decisions[k] or str(decisions[k]).lower().startswith("you decide")]
+    if (scout_ids and answered and not unresolved and not assumed_decisions
+            and sources.get("ambiguity") != "user" and final.get("ambiguity", 0) >= 2):
+        final["ambiguity"] = 1
+        sources["ambiguity"] = "user (open decisions answered)"
+    decisions = {k: v for k, v in decisions.items() if k in scout_ids or k in builtin}
     r = router.route(final)
     return {
         "request": prop.get("request"),
@@ -519,6 +565,10 @@ def apply(prop, answers):
         "workspace": ("stash" if str(decisions.get("workspace", "")).lower().startswith("stash")
                       else "stop" if str(decisions.get("workspace", "")).lower().startswith("stop")
                       else "include"),
+        "outside_policy": ("nonprod" if str(decisions.get("outside_policy", "")).lower().startswith("non")
+                           else "none" if str(decisions.get("outside_policy", "")).lower().startswith("nothing")
+                           else "all"),
+        "environments": prop.get("environments", {}),
         "test_command": (prop.get("repo") or {}).get("test_command"),
         "candidate_files": prop.get("candidate_files", []),
         "route": r,
@@ -562,11 +612,45 @@ def main(argv):
     try:
         if cmd == "scan":
             cwd = opt("--cwd", os.getcwd())
+            save_it = "--save" in rest
+            if save_it:
+                rest.remove("--save")
             text = " ".join(rest).strip()
             if not text:
                 print("scan needs the feature request text", file=sys.stderr)
                 return 1
-            print(json.dumps(scan(text, cwd), indent=2))
+            result = scan(text, cwd)
+            if save_it:  # write <root>/.feature-ladder/intake/<slug>-scan.json and print its path
+                root = result["repo_root"]
+                _ensure_ignore(root)
+                out = Path(root) / ".feature-ladder" / "intake" / f"{result['slug']}-scan.json"
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+                result["written_to"] = str(out)
+            print(json.dumps(result, indent=2))
+            return 0
+        if cmd == "find":
+            cwd = opt("--cwd", os.getcwd())
+            text = " ".join(rest).strip()
+            root, _ = repo_root(cwd)
+            d = root / ".feature-ladder" / "intake"
+            best = None
+            if text and d.is_dir():
+                for f in d.glob("*.json"):
+                    if f.name.endswith(("-proposal.json", "-answers.json", "-scan.json")):
+                        continue
+                    try:
+                        saved = _load(f)
+                    except (OSError, ValueError):
+                        continue
+                    if " ".join(str(saved.get("request", "")).split()) == " ".join(text.split()) \
+                            and not saved.get("used") and saved.get("confirmed_at"):
+                        if best is None or saved["confirmed_at"] > best[1].get("confirmed_at", ""):
+                            best = (f, saved)
+            if best:
+                best[1]["used"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                best[0].write_text(json.dumps(best[1], indent=2) + "\n", encoding="utf-8")
+                print(str(best[0]))
             return 0
         if cmd == "decide":
             mode = opt("--mode", "default")

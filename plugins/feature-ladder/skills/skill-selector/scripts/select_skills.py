@@ -61,7 +61,7 @@ def load_rules():
     for f in sources:
         if not f or not Path(f).is_file():
             continue
-        data = json.loads(Path(f).read_text(encoding="utf-8"))
+        data = json.loads(Path(f).read_text(encoding="utf-8-sig"))
         used.append(str(f))
         for k in ("max_skills", "max_chars"):
             if k in data:
@@ -144,7 +144,7 @@ def inventory():
     ip = home / "plugins" / "installed_plugins.json"
     if ip.is_file():
         try:
-            data = json.loads(ip.read_text(encoding="utf-8"))
+            data = json.loads(ip.read_text(encoding="utf-8-sig"))
             for key in sorted(data.get("plugins", {})):
                 entries = data["plugins"][key]
                 entry = entries[0] if isinstance(entries, list) and entries else entries
@@ -159,7 +159,7 @@ def inventory():
     if synced.is_dir():
         for manifest in sorted(synced.glob("*/*/.claude-plugin/plugin.json")):
             try:
-                pname = json.loads(manifest.read_text(encoding="utf-8")).get("name")
+                pname = json.loads(manifest.read_text(encoding="utf-8-sig")).get("name")
             except (ValueError, OSError):
                 continue
             if pname:
@@ -308,7 +308,7 @@ def main(argv):
     want_inject = "--inject" in argv
     args = [a for a in argv if a != "--inject"]
     if args and args[0] == "--file":
-        task = json.loads(Path(args[1]).read_text(encoding="utf-8"))
+        task = json.loads(Path(args[1]).read_text(encoding="utf-8-sig"))
     else:
         task = json.loads(args[0])
     result = select(task, settings, rules, inv)

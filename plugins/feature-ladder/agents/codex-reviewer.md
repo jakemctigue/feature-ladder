@@ -22,9 +22,11 @@ and hand back what Codex found, verbatim.
 1. Run the command from the Task Card, from the repository root, with a Bash
    timeout of 600000 ms. It is one of:
    ```
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/cross-model-review/scripts/codex_review.py" review --base <ref> --slug <slug> --tier <tier> --flags <a,b>
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/cross-model-review/scripts/codex_review.py" adversarial --base <ref> --slug <slug>
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/cross-model-review/scripts/codex_review.py" review --slug <slug> [--base <ref>] [--tier <tier>] [--flags <a,b>]
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/cross-model-review/scripts/codex_review.py" adversarial --slug <slug> [--base <ref>]
    ```
+   Without `--base` the script reviews the commits since `origin/main`
+   (or `main`/`master`), or the uncommitted changes if there are none.
    Use `python` if `python3` is not available. Run it once. Do not retry on
    findings; retry once only if it timed out.
 2. Exit code 3 means Codex is unavailable (not installed or not signed in).

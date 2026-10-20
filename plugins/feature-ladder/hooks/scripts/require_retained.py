@@ -48,7 +48,7 @@ def last_assistant_text(transcript_path: str) -> str:
 
 def main() -> int:
     try:
-        payload = json.load(sys.stdin)
+        payload = json.loads(sys.stdin.read().lstrip("\ufeff"))
     except Exception:
         return 0  # malformed input: never block on hook failure
 

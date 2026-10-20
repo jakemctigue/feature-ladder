@@ -34,8 +34,8 @@ import tempfile
 import time
 from pathlib import Path
 
-RISK_FLAGS = {"security", "persistence", "concurrency", "cross_system", "public_api"}
-HIGH_TIERS = {"T4", "T5", "ESC", "D"}
+RISK_FLAGS = {"security", "persistence", "concurrency", "cross_system", "public_api", "irreversible"}
+HIGH_TIERS = ("T4", "T5", "ESC", "D")  # matched by prefix: route.py emits "T4 ...", "ESCALATE ..."
 TIMEOUT = int(os.environ.get("FEATURE_LADDER_CODEX_TIMEOUT", "570"))  # Claude Code caps a Bash call at 600 s
 CACHE_MARKERS = ("__pycache__/", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "node_modules/.cache/", ".hypothesis/")
 
@@ -132,7 +132,7 @@ def effort_for(mode, tier, flags):
     env = os.environ.get("FEATURE_LADDER_CODEX_EFFORT")
     if env:
         return env
-    if (tier or "").upper() in HIGH_TIERS or (set(flags) & RISK_FLAGS):
+    if (tier or "").upper().startswith(HIGH_TIERS) or (set(flags) & RISK_FLAGS):
         return "high"
     return "medium"
 
@@ -156,8 +156,24 @@ def default_base(root):
 
 
 def porcelain(root):
+    """Dirty/untracked paths with a content fingerprint, so edits to files that
+    were already dirty before Codex ran are detected too."""
+    import hashlib
     r = run(["git", "status", "--porcelain", "--untracked-files=all"], root)
-    return set(l[3:].strip().strip('"').replace("\\", "/") for l in r.stdout.splitlines() if l.strip())
+    out = set()
+    for l in r.stdout.splitlines():
+        if not l.strip():
+            continue
+        p = l[3:].strip().strip('"').replace("\\", "/")
+        if " -> " in p:
+            p = p.split(" -> ", 1)[1]
+        fp = Path(root) / p
+        try:
+            digest = hashlib.sha1(fp.read_bytes()).hexdigest()[:12] if fp.is_file() else "dir-or-missing"
+        except OSError:
+            digest = "unreadable"
+        out.add(f"{p}@{digest}")
+    return out
 
 
 def codex_cmd(exe, mode, root, effort, schema_file, out_file):
@@ -242,7 +258,7 @@ def main(argv):
         result = {"unparsed_output": raw[-4000:], "stderr": r.stderr[-2000:]}
 
     after = porcelain(root)
-    stray = sorted(p for p in (after - before)
+    stray = sorted(p.rsplit("@", 1)[0] for p in (after - before)
                    if not p.startswith(outdir_rel) and not p.startswith(".feature-ladder/")
                    and not any(m in p or p.rstrip("/") + "/" == m for m in CACHE_MARKERS)
                    and not p.endswith((".pyc", ".pyo")))
