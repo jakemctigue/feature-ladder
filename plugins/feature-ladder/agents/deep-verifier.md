@@ -5,8 +5,7 @@ model: fable
 effort: high
 color: red
 skills:
-  - feature-ladder:orchestration-ladder
-  - feature-ladder:hindsight-memory
+  - feature-ladder:worker-contract
 maxTurns: 50
 disallowedTools:
   - Skill

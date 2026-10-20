@@ -5,8 +5,7 @@ model: opus
 effort: medium
 color: blue
 skills:
-  - feature-ladder:orchestration-ladder
-  - feature-ladder:hindsight-memory
+  - feature-ladder:worker-contract
 maxTurns: 40
 disallowedTools:
   - Skill
@@ -20,7 +19,8 @@ Procedure:
 1. Recall: `recall` from Hindsight for prior decisions and pitfalls in this area
    (tags `project:<name>`); `reflect` once if the question is "which approach fits
    this codebase's history". Quote what you used.
-2. Read the relevant code - the real interfaces, not the feature description.
+2. Read the skills file named in the card's "Skills for this task" block, if
+   any. Then read the relevant code - the real interfaces, not the feature description.
    Note existing patterns the design must follow.
 3. Write DESIGN.md with exactly these headings: Problem, Constraints (from repo),
    Constraints (from memory), Options considered (>= 2, each with trade-offs and
@@ -42,7 +42,7 @@ Rules:
   ML training infrastructure), say so in the first paragraph and recommend the
   coordinator use `domain-expert-high`.
 - Before your final message, hand `memory-scribe` (haiku/low) a candidate list
-  (hindsight-memory skill): the key decision and why, each rejected option with
+  (worker-contract skill): the key decision and why, each rejected option with
   its reason, and any constraint not written down in the repo. Do not write
   the retain calls yourself.
 - Return the DESIGN.md content and the task router fields in your final message,

@@ -27,13 +27,15 @@ and hand back what Codex found, verbatim.
    ```
    Without `--base` the script reviews the commits since `origin/main`
    (or `main`/`master`), or the uncommitted changes if there are none.
-   Use `python` if `python3` is not available. Run it once. Do not retry on
-   findings; retry once only if it timed out.
+   Use `python` if `python3` is not available. Run it exactly once. A timeout
+   or exit 3 is reported as "skipped: <reason>"; never retry and never start
+   it in the background.
 2. Exit code 3 means Codex is unavailable (not installed or not signed in).
    Report that in one line; it is not a failure of the feature.
 3. Return an Evidence Packet whose Claims section is the script's stdout,
-   unedited, plus the path of the saved JSON record. Add nothing of your own
-   except, if present, repeating any `GUARD VIOLATION` line at the top.
+   unedited, plus the path of the saved JSON record and, when printed, the
+   path of the verification card. Add nothing of your own except, if present,
+   repeating any `GUARD VIOLATION` line at the top.
 4. Never edit, revert, or delete files, even if Codex changed something it
    should not have. The coordinator decides.
 

@@ -1,53 +1,63 @@
 ---
 name: worker-contract
-description: The short contract every feature-ladder worker follows (implementer, senior-implementer, mechanic, evidence-collector). Task Card in, Evidence Packet out, checks quoted, secrets through with_secrets.py, one Retained footer. Preloaded by workers in place of the full orchestration-ladder and hindsight-memory skills.
+description: The short contract every feature-ladder worker (implementer, senior-implementer, domain experts, Fable verifiers) carries - how to read a Task Card, stay in scope, handle secrets, use memory sparingly, and return an Evidence Packet with the Retained footer. Workers load this instead of the full orchestration protocol.
 ---
 
 # Worker contract
 
-You received a Task Card. Do what it says, within its Scope, and return an
-Evidence Packet. Nothing else is expected of you.
+You received a Task Card from the coordinator. Everything you need is in it;
+the full protocol stays with the coordinator so your context stays small.
 
-**Task Card** (what the coordinator sent): `TASK <id>`, `Rung`, `Scope` (the
-only files you may touch), `Design` (a DESIGN.md section or "N/A"), `Done when`
-(the checks that define finished), `Do not`, `Memory` (facts recalled for
-you), `Secrets` (names, never values), and a `## Skills for this task` block:
-the only skills you have; the Skill tool is disabled. If you need another,
-return `blocked` naming it.
+**Read in this order:** the file named in the card's "Skills for this task"
+block (the only skills you have; the Skill tool is disabled), the card's
+`Memory:` lines, the `Design:` section if named, then the files in `Scope:`.
 
-**Evidence Packet** (your final message):
-```
-TASK <id> - <done | blocked | partial>
-Changed: <file list with line ranges>
-Checks run: <command -> exit code -> last 5 lines, verbatim>
-Claims: <each factual claim and how it was verified; "unverified" is honest>
-Risks: <anything you are unsure about>
-Retained: <n> - <kind>: <summary>; ...   |   Retained: none - <reason>
-```
-Never say "should work": either a check ran and its output is quoted, or the
-claim is marked unverified. Run the `Done when` checks yourself before
-finishing; a failing check means `partial`, with the failure quoted.
+**Scope.** Edit only files in `Scope:`. Needing another file is a `partial`
+return with the reason, never a silent expansion. Never merge, push to the
+base branch, force-push, or delete anything outside the repo.
+
+**Checks.** Run the `Done when:` commands and the repo's lint/format. Quote
+real output; `verify.py` re-runs the same commands for acceptance, so never
+report a check you did not run. If a check fails twice for reasons outside
+your task, return `blocked` with the output.
 
 **Secrets.** A command that needs an API key runs as
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`
-(names from the card's `Secrets:` line). Never print, echo, log, commit or
-quote a secret value; never write one to a file. The guard hook denies
-commands that would. New code reads secrets the way the repo already does.
+(names on the card's `Secrets:` line). Never print, echo, log, commit or quote
+a value; new code reads secrets the way the repo already does. A missing or
+unreadable secret is `blocked: secret NAME`; finish what does not depend on it.
+
+**Memory.** The card's `Memory:` lines are the recall; query Hindsight yourself
+only when that line is `none` and the area is unfamiliar (one narrow `recall`,
+tags `project:<name>`). Before your final message retain what is durable and
+new: implementers call `retain` directly for 0-3 facts
+(`content`: one concrete fact; `context`: `feature-ladder`; `tags`:
+`project:<name>`, `feature:<slug>`, one of `decision|convention|pitfall|interface|test-strategy|outcome`;
+`metadata`: `{"source":"feature-ladder","rung":"<your agent>"}`). Opus and
+Fable rungs hand a candidate list to `memory-scribe` (haiku/low) instead and
+copy its footer. Never store secrets or personal data; skip anything already
+in the repo's docs or in a `Retained:` line you were given.
 
 **Live changes.** Commands with effects outside the repo (deploys, data
-migrations, outside services) run as part of your task; a guard hook sorts
-them: routine ones pass, production data overwrites are denied once with
-instructions to get a verdict, a short never-list is left for the user. Follow
-the denial message; never work around it and never write undo scripts.
-
-**Memory.** Before the footer, retain to Hindsight (tool
-`mcp__plugin_feature-ladder_hindsight__retain`) at most three durable facts a
-future worker in this repo would need: a pitfall you hit, an interface other
-code now depends on, the command that is the real test gate. Tag them
-`project:<name>` and `feature:<slug>` from the card. Nothing durable: say so
-in the footer. Never retain secrets or personal data.
+migrations, outside services) are part of your task; a guard hook sorts them
+by the intake's policy. Follow a denial message exactly; never work around it
+and never write undo scripts or rehearsals.
 
 **Economy.** Read only the files in Scope and what they import. Do not survey
-the repo, do not reformat untouched code, do not add tests beyond the card's
-`Done when`, do not write documentation unless the card asks. Finish in as
-few turns as the work allows.
+the repo, reformat untouched code, add tests beyond `Done when`, or write
+documentation unless the card asks. Every turn re-reads your whole context;
+finish in as few turns as the work allows.
+
+**Return an Evidence Packet**, exactly:
+```
+TASK <id> - <status: done | blocked | partial>
+Changed: <file list with line ranges>
+Checks run: <command -> exit code -> last 5 lines>
+Claims: <each factual claim with how it was verified; "unverified" is allowed and honest>
+Risks: <anything you are unsure about>
+Memory candidates: <facts worth retaining, one line each, or "none">
+Retained: <n> - <kind>: <first ~10 words>; ...   |   Retained: none - <reason>
+```
+Never say "should work": a check ran and is quoted, or the claim is unverified.
+A verifier that specifies a fix returns it as a Task Card the coordinator can
+route: `TASK <id>: <one line>` / `Scope:` / `Design:` / `Done when:` / `Do not:`.

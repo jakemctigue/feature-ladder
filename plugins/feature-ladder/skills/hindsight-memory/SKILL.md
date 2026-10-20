@@ -17,7 +17,7 @@ Run `/mcp` once to confirm the server shows as connected before trusting memory.
 If the server is unreachable, say so in the Evidence Packet and proceed from the
 repo alone; never fabricate "recalled" context.
 
-## Recall (start of every coordinator run; start of every worker task)
+## Recall (start of every coordinator run; workers only when the card has no Memory lines)
 
 ```
 recall(query="<project name> <feature area> conventions, pitfalls, prior decisions",
@@ -26,7 +26,8 @@ recall(query="<project name> <feature area> conventions, pitfalls, prior decisio
 ```
 Ask 2-3 narrow queries rather than one broad one: conventions for the module,
 prior decisions about the same feature area, known pitfalls / failed approaches.
-Quote the useful snippets verbatim into the Task Card so workers do not re-query.
+Quote the useful snippets verbatim into the Task Card so workers do not re-query:
+a worker runs its own `recall` only when the card's `Memory:` line is `none`.
 
 ## Reflect (domain experts only)
 
@@ -40,7 +41,9 @@ DESIGN.md under *Constraints (from memory)* and mark it as reflect-derived.
 makes sure what it learned *in its own run* is retained, and ends its final
 message with a `Retained:` line listing what was stored (or `Retained: none -
 <reason>`). A `SubagentStop` hook bounces any subagent whose final message lacks
-that line, so do it before you write the Evidence Packet, not after.
+that line, so do it before you write the Evidence Packet, not after. `mechanic`,
+`codex-reviewer` and `memory-scribe` are exempt from the bounce (their footer is
+always `none`, or written by design); they still write the line.
 
 **B. The coordinator, at acceptance.** It ensures the feature-level facts are
 retained (accepted design decision and why, interfaces other code now depends

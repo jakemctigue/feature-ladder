@@ -41,13 +41,14 @@ CACHE_MARKERS = ("__pycache__/", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/
 
 FINDING = {
     "type": "object", "additionalProperties": False,
-    "required": ["severity", "file", "line", "title", "detail", "suggested_fix", "confidence"],
+    "required": ["severity", "file", "line", "title", "detail", "suggested_fix", "confidence", "repro"],
     "properties": {
         "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
         "file": {"type": "string"}, "line": {"type": "integer"},
         "title": {"type": "string"}, "detail": {"type": "string"},
         "suggested_fix": {"type": "string"},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "repro": {"type": "string"},
     },
 }
 REVIEW_SCHEMA = {
@@ -87,7 +88,10 @@ and read the surrounding code you need. Review only those changes. Report real p
 correctness bugs, unhandled edge cases, error handling gaps, security issues,
 data loss or migration risks, concurrency problems, broken contracts with callers,
 and tests that pass without actually proving the behaviour.
-For each finding give the exact file and line, why it is wrong, and a concrete fix.
+For each finding give the exact file and line, why it is wrong, a concrete fix, and
+`repro`: one shell command run from the repository root that demonstrates the problem
+(a test invocation, an existing script, or a one-line python/node snippet), or an
+empty string when no practical command exists.
 Use severity critical/high only for issues that would cause wrong results, data
 loss, security exposure, or crashes in normal use. Do not modify any files.
 If the change is sound, return verdict "approve" with an empty findings list."""
@@ -103,6 +107,60 @@ Your job is to break them. Steps:
 4. Run only your tests with the repository's own test runner and record the results.
 For every test report whether a failure shows a real bug in the change (real_bug) or a
 problem with the test itself. Do not fix the code under test."""
+
+
+# ------------------------------------------------------------- triage ------
+SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
+def _key(f):
+    """Two findings are the same bug when they name the same file and the same
+    problem (title, normalised) or the same file and line."""
+    title = " ".join(str(f.get("title", "")).lower().split())
+    return str(f.get("file", "")), title
+
+
+def triage(findings):
+    """Deterministic trim before anything reaches the coordinator: drop `low`
+    (listed in the record, never acted on), collapse duplicates, sort by
+    severity then file and line. Returns {"actionable", "low", "duplicates"}."""
+    seen_keys, seen_lines, actionable, low, dup = set(), set(), [], [], 0
+    ordered = sorted(findings, key=lambda x: (SEVERITY_ORDER.get(x.get("severity"), 9),
+                                              str(x.get("file", "")), int(x.get("line") or 0)))
+    for f in ordered:
+        k = _key(f)
+        at = (str(f.get("file", "")), int(f.get("line") or 0))
+        if k in seen_keys or (at[1] and at in seen_lines):
+            dup += 1
+            continue
+        seen_keys.add(k)
+        if at[1]:
+            seen_lines.add(at)
+        (low if f.get("severity") == "low" else actionable).append(f)
+    return {"actionable": actionable, "low": low, "duplicates": dup}
+
+
+def verify_card(slug, actionable, record_rel):
+    """One Task Card that lets a single mechanic verify every finding in one
+    dispatch, instead of one subagent per finding."""
+    lines = [f"TASK codex-verify-{slug}: confirm or refute {len(actionable)} Codex finding(s)",
+             "Rung: mechanic (haiku/low)   Router score: n/a   Flags: none",
+             "Scope: no file edits; run commands only",
+             "Design: N/A - mechanical",
+             "Done when: every finding below has a verdict line",
+             "Do not: fix anything; do not edit, create or delete files; do not re-run with different flags",
+             f"Memory: none (Codex record: {record_rel})",
+             "Secrets: none",
+             "Return: Evidence Packet whose Claims section has, per finding, exactly one line:",
+             "  <n>. <confirmed | not reproduced | unclear> - <command run> -> <exit code> - <last line of output>",
+             "  (`unclear` means the command ran but its output does not settle the claim; say why in one clause)",
+             "", "Findings to check (run each `repro` from the repository root; if it is empty, run the",
+             "most direct existing test or command for that file and say which):"]
+    for i, f in enumerate(actionable, 1):
+        lines.append(f"{i}. [{f.get('severity')}/{f.get('confidence')}] {f.get('file')}:{f.get('line')} {f.get('title')}")
+        lines.append(f"   claim: {f.get('detail')}")
+        lines.append(f"   repro: {f.get('repro') or '(none given)'}")
+    return "\n".join(lines) + "\n"
 
 
 def run(cmd, cwd, timeout=60, stdin=None):
@@ -278,11 +336,16 @@ def main(argv):
     if mode == "review" and stray:
         print("Review mode is read-only, so these changes did not come from the review; verify before acting.")
     if mode == "review" and "findings" in result:
-        f = result["findings"]
-        print(f"Verdict: **{result.get('verdict')}** - {len(f)} finding(s). {result.get('summary', '')}")
-        order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-        for x in sorted(f, key=lambda x: (order.get(x["severity"], 9), x["file"], x["line"])):
+        t = triage(result["findings"])
+        act, low = t["actionable"], t["low"]
+        print(f"Verdict: **{result.get('verdict')}** - {len(act)} finding(s) to verify"
+              f" ({len(low)} low listed in the record only, {t['duplicates']} duplicate(s) dropped). {result.get('summary', '')}")
+        for x in act:
             print(f"- [{x['severity']}/{x['confidence']}] {x['file']}:{x['line']} {x['title']} - {x['detail']} Fix: {x['suggested_fix']}")
+        if act:
+            card = reviews / f"{slug}-codex-verify-card.md"
+            card.write_text(verify_card(slug, act, str(dest.relative_to(root))), encoding="utf-8")
+            print(f"Verification card for ONE mechanic dispatch: {card.relative_to(root)}")
     elif mode == "adversarial" and "tests" in result:
         t = result["tests"]
         bugs = [x for x in t if x["real_bug"]]

@@ -41,10 +41,11 @@ user -> /feature-ladder:feature "<description>"
                            routes it and picks its skills in one call)
   2. worker (T0-T3)        does the whole feature, runs the Done-when checks itself,
                            returns an Evidence Packet with the output quoted
-  3. coordinator (F-Med)   reads the packet, accepts, retains one line, opens the PR
+  3. coordinator (F-Med)   re-runs the checks with verify.py (no model), accepts,
+                           retains one line, opens the PR
   -- that is the whole flow for size S and M (about a dozen coordinator turns) --
   size L only:             design (domain-expert) if not agreed; split into cards;
-                           a mechanic re-runs Opus-tier checks; Codex review once;
+                           Codex review once with a scripted triage card;
                            one scribe at the end; escalation one rung at a time
                            (deep-verifier -> architect-escalation -> ultra, opt-in)
 ```
@@ -55,11 +56,11 @@ The intake's `budget` (from the router's `size`) is binding. It exists because
 cost scales with agents x turns x context: every turn of every agent re-reads
 its whole context, so one extra subagent costs more than its output suggests.
 
-| Size | Score | Workers | Design | Independent check | Codex | Scribe |
+| Size | Score | Workers | Design | Check re-run | Codex | Scribe |
 |---|---|---|---|---|---|---|
-| S | 0-9 | 1 | no | no | no | no |
-| M | 10-19 | 1-2 | no | no | `--codex` only | no |
-| L | 20+ or hard flag | <=4 | if not agreed | yes | once | one |
+| S | 0-9 | 1 | no | verify.py (no model) | no | no |
+| M | 10-19 | 1-2 | no | verify.py (no model) | `--codex` only | no |
+| L | 20+ or hard flag | <=4 | if not agreed | verify.py; a mechanic only for Codex repros | once | one |
 
 Adversarial tests: only with `--adversarial`, at any size.
 
@@ -132,10 +133,13 @@ Do not: <things explicitly out of scope>
 Memory: <1-3 relevant Hindsight recall snippets, verbatim>
 Secrets: <NAME -> ENV_VAR, ... | none>   (Google Secret Manager names; never values)
 Return: Evidence Packet
-<skill-selector --inject output, verbatim: the only skills this worker has>
+<the "## Skills for this task" block printed by select_skills.py --inject --out:
+ it names the file holding the only skills this worker has>
 ```
-Workers cannot invoke the Skill tool. If a worker needs a skill it was not
-given, it returns `blocked` naming the skill and why; it does not improvise.
+The skill text itself lives in `.feature-ladder/cards/<task-id>-skills.md`
+(absolute path in the card); the worker reads it before starting. Workers
+cannot invoke the Skill tool. If a worker needs a skill it was not given, it
+returns `blocked` naming the skill and why; it does not improvise.
 
 **Secrets rule for every worker.** A command that needs an API key or other
 secret is run as
@@ -172,9 +176,32 @@ Independent tasks are launched in one message with multiple Agent calls. Tasks
 that touch the same files are serialized. Use `isolation: worktree` for Opus
 implementation tasks so a bad run never dirties the main tree.
 
+## Acceptance checks without a model
+
+`scripts/verify.py` re-runs a card's "Done when" checks for acceptance, so no
+mechanic subagent is started for them:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> \
+    --check "<done-when command>" [--check ...] --scope <path> [--scope ...] \
+    --changed <file the packet says it changed> [--changed ...] [--base <ref>]
+```
+
+It runs each command exactly as written, records exit code and output tail,
+lists what actually changed in the repo, and flags files outside the card's
+Scope or a `Changed:` claim that does not match. Evidence goes to
+`.feature-ladder/evidence/<task-id>.json`; the printed summary is a few lines.
+Exit 0 is green; 1 means a check failed (or was refused: a check that would
+touch production data or print a secret is never run); 2 means the checks
+passed but the scope or the claim is wrong. A `mechanic` is dispatched for
+acceptance only when a check's output needs interpretation (a flaky suite, an
+environment quirk) or the card's checks are not shell commands.
+
 ## Acceptance criteria (coordinator's final gate)
 
 - Every Task Card has a matching Evidence Packet with status `done`.
-- All "Done when" checks were run by `mechanic` (not by the implementer who wrote the code) and are green.
+- All "Done when" checks were re-run by `verify.py` (not by the implementer who
+  wrote the code) with exit 0, or by `mechanic` where the card says a check
+  needs interpretation.
 - No unverified claim survives in anything user-visible without being labelled.
 - FEATURE-REPORT.md written; outcome retained to Hindsight with tags `project:<name>`, `feature:<slug>`.

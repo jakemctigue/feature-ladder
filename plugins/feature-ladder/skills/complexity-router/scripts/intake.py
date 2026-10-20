@@ -34,10 +34,11 @@ Three deterministic steps (the scoper agent fills the judgment in between):
 
   card    '<task json>'
           Route one task AND select its skills in one call. The JSON takes
-          the router fields plus "paths" (files in scope), "text" (goal and
-          description), optional "add"/"exclude" skill names. Prints the route
-          JSON, a blank line, then the "## Skills for this task" block to paste
-          into the Task Card.
+          the router fields plus "id" (task id), "paths" (files in scope),
+          "text" (goal and description), optional "add"/"exclude" skill names.
+          Prints the route JSON, a blank line, then the short "## Skills for
+          this task" block to paste into the Task Card; the skill text itself
+          goes to .feature-ladder/cards/<id>-skills.md for the worker to read.
 
   find    "<request>" [--cwd DIR]
           Prints the path of a confirmed, not-yet-used intake for exactly this
@@ -770,7 +771,11 @@ def main(argv):
             print(json.dumps(r, indent=2))
             print()
             selector = Path(__file__).resolve().parents[2] / "skill-selector" / "scripts" / "select_skills.py"
-            res = subprocess.run([sys.executable, str(selector), "--inject", json.dumps(sel)],
+            root, _ = repo_root(os.getcwd())
+            tid = re.sub(r"[^A-Za-z0-9_-]", "-", str(task.get("id") or "task"))
+            out = root / ".feature-ladder" / "cards" / f"{tid}-skills.md"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            res = subprocess.run([sys.executable, str(selector), "--inject", "--out", str(out), json.dumps(sel)],
                                  capture_output=True, text=True, encoding="utf-8", errors="replace")
             sys.stdout.write(res.stdout if res.returncode == 0 else
                              "## Skills for this task\nNone selected (selector error: " + res.stderr.strip()[-200:] + ")\n")

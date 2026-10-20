@@ -36,18 +36,20 @@ Both use the same scripts and rules.
   scoring function (`route.py`), from Haiku low for mechanical edits up to
   Opus high for hard, designed work.
 - Decides **which skills** each worker gets with a fixed rule engine
-  (`select_skills.py`), and in Claude Code physically prevents workers from
-  loading any others.
+  (`select_skills.py`), writes their text to a file the worker reads (so it
+  never passes through the coordinator), and in Claude Code physically
+  prevents workers from loading any others.
 - **Lean by default.** The intake sizes the feature (S, M or L) and that size
   is a binding budget. S and M, which is most features, get one worker (two
-  at most), no design doc, no separate check-runner, no Codex, no memory
-  scribe, and a coordinator loop of about a dozen turns. The full protocol
-  only runs for L: Opus-tier or escalated work.
+  at most), no design doc, no Codex, no memory scribe, and a coordinator loop
+  of about a dozen turns. The full protocol only runs for L: Opus-tier or
+  escalated work.
 - Keeps the expensive model (Fable 5.1) on a short leash: its turns are
   budgeted per size, and escalations are one step at a time with a written
   justification.
-- Requires evidence: every worker returns real command output for its checks.
-  For L features the acceptance checks are re-run by a separate cheap worker.
+- Requires evidence: every worker returns real command output for its checks,
+  and acceptance checks are re-run by a script (`verify.py`), not by the author
+  and not by another model.
 - Records durable lessons (decisions, pitfalls, interfaces, test gates) in
   Hindsight after each task and each feature, using the cheapest model that
   can summarize correctly.
@@ -100,15 +102,18 @@ Both use the same scripts and rules.
 3. **Decompose and route.** Each task card is scored by `route.py`. The score
    picks the rung. Hard flags (ambiguous, cross-system plus security,
    whole-app blast radius) force escalation instead.
-4. **Select skills.** `select_skills.py` picks the card's skills and their
-   full text is pasted into the card.
+4. **Select skills.** `select_skills.py` picks the card's skills, writes
+   their full text to `.feature-ladder/cards/<task>-skills.md`, and the card
+   tells the worker to read that file first.
 5. **Design if needed.** Ambiguous or novel work goes to a domain expert
    first. Opus implementation is refused until a design is accepted.
 6. **Execute.** Workers run in parallel where independent, each returning an
    *Evidence Packet*: files changed, checks run with real output, claims and
    how they were verified.
-7. **Verify.** A separate mechanic re-runs the "done when" checks. The
-   coordinator spot-checks claims against the diff.
+7. **Verify.** `verify.py` re-runs the "done when" checks with no model,
+   records exit codes and output tails, and flags any file changed outside the
+   card's scope or a changed-files claim that does not match. The coordinator
+   spot-checks the remaining claims against the diff.
 8. **Get a second opinion from another model.** OpenAI Codex reviews the
    whole feature diff (read-only). With `--adversarial` it also writes tests
    that try to break the change and runs them. Real problems go back through
@@ -116,9 +121,9 @@ Both use the same scripts and rules.
    second opinion.
 9. **Escalate only when warranted.** One rung at a time, each climb justified
    in the report.
-10. **Accept and remember.** The coordinator finishes the report, the
-   durable facts go to Hindsight, and the final PR opens on top of any
-   checkpoint PRs.
+10. **Accept and remember.** The coordinator finishes the report (including
+   the per-rung token table from the ledger), the durable facts go to
+   Hindsight, and the final PR opens on top of any checkpoint PRs.
 
 Throughout, nothing stops for you. Non-critical choices are decided and
 listed under Assumptions. A **critical decision** (costly to undo, could go
@@ -151,15 +156,15 @@ coordinator cannot exceed. Cost scales with agents × turns × context, because
 every turn of every agent re-reads its whole context, so the budget limits
 agents first.
 
-| Size | Score | Workers | Design doc | Separate check-runner | Codex | Memory scribe | Coordinator turns |
+| Size | Score | Workers | Design doc | Check re-run | Codex | Memory scribe | Coordinator turns |
 |---|---|---|---|---|---|---|---|
-| S | 0–9 | 1 | no | no | no | no | ~12 |
-| M | 10–19 | 1–2 | no | no | `--codex` only | no | ~20 |
-| L | 20+ or a hard flag | up to 4 | if not agreed | yes | once, no retries | one | ~45 |
+| S | 0–9 | 1 | no | `verify.py` (no model) | no | no | ~12 |
+| M | 10–19 | 1–2 | no | `verify.py` (no model) | `--codex` only | no | ~20 |
+| L | 20+ or a hard flag | up to 4 | if not agreed | `verify.py` + mechanic for Codex repros | once, no retries | one | ~45 |
 
 Adversarial Codex tests never run on their own; add `--adversarial` at the
-end of a phased rollout. Workers preload a 2.5K-character contract instead of
-the full protocol skills, and get at most two injected skills (24K characters).
+end of a phased rollout. Workers preload a short contract instead of the full
+protocol skills, and the selector caps injected skill text per role.
 
 ### Intake: ask once, up front
 
@@ -207,6 +212,12 @@ access`, `cat .env`, `printenv`, `echo $X_KEY`). Deleting, disabling or
 re-sharing a secret is on the never-list; creating one on production is a
 risky step. Values never reach a report, PR, commit, memory or Codex prompt.
 
+The guard classifies the command after `--` exactly as if it ran on its own.
+Most commands that need a key (deploys, dev or staging targets, reads) run at
+once with no Fable call. One that deletes or overwrites production data gets
+the same single Fable verdict it would get without the wrapper, and anything
+on the never-list is still left for you.
+
 ### Run to completion: branches and checkpoint PRs
 
 `skills/orchestration-ladder/scripts/pr_checkpoint.py` handles the branches.
@@ -233,7 +244,7 @@ classifies every shell command during a run, with no model tokens, and the
 |---|---|---|
 | **mundane** | emulator, dev or staging targets; `firebase deploy`; index builds; exports; dry runs; anything that doesn't destroy production data | runs at once, logged |
 | **risky** | `firestore:delete`, `firestore import`, destructive SQL, migration/backfill scripts against production | denied once; the coordinator gets one `second-opinion` (Fable low) verdict on the exact command, approves it with `irreversible.py approve`, and it runs |
-| **never** | deleting a project, database, repo or backups; weakening database protection; merging PRs; pushing to your base branch; force-pushing or deleting `main` | left for you, logged |
+| **never** | deleting a project, database, repo or backups; weakening database protection; merging PRs; pushing to your base branch; force-pushing or deleting `main`; `rm -rf` of `/` or your home folder | left for you, logged |
 
 The intake policy narrows this: *non-production only* leaves every production
 action for you; *nothing outside the repo* leaves all of them. Production is
@@ -241,19 +252,42 @@ recognised from `.firebaserc` aliases, `--project` flags and words like
 `prod`/`staging` in the command; an unknown target on a real cloud tool is
 treated as production. Only the executable part of a command is classified
 (quoted strings, heredocs and comments are stripped), so a commit message or a
-`grep` that mentions `DROP TABLE` is not a command. Every action, approved,
+`grep` that mentions `DROP TABLE` is not a command. Code a shell still runs is
+classified too: `bash -c '...'`, `eval`, a heredoc fed to a shell, `$(...)`,
+backticks, and the command after `--` in `with_secrets.py`. Recursively
+deleting `/` or your home folder is on the never-list. Every action, approved,
 rejected or left for you, is listed in a table in `FEATURE-REPORT.md`.
 
 ### Deterministic skill selection
 
 See [Skill selection](#skill-selection) below.
 
+### Token ledger
+
+Every run records what each rung cost, with no model tokens spent. When a
+subagent stops, the `SubagentStop` hook (`hooks/scripts/ledger.py`) reads its
+transcript, sums input, cache-read, cache-write and output tokens, parses the
+rung, model, effort and task id from its Task Card, and appends one line to
+`.feature-ladder/runs/<slug>/usage.jsonl`. A subagent bounced by the retain
+gate replaces its earlier line rather than counting twice.
+
+`ledger.py report` prints a table by rung and model (agents, turns, tokens by
+kind, each rung's share of output tokens). The coordinator pastes it into
+`FEATURE-REPORT.md` at acceptance, and `/feature-ladder:feature` prints the
+complete table after the coordinator has finished, so the coordinator's own
+cost is included. The ledger is what the router bands, skill budgets and rung
+choices get tuned against; without it those are guesses.
+
 ### Hindsight memory
 
-- **Recall before work:** the coordinator and every worker query project memory first.
+- **Recall before work:** the coordinator queries project memory first and
+  quotes the useful snippets into each Task Card; a worker queries Hindsight
+  itself only when its card's `Memory:` line is `none`.
 - **Retain when each subagent finishes:** every rung ends its report with a
   `Retained:` line. A `SubagentStop` hook sends a worker back once if that
-  line is missing.
+  line is missing; mechanics, the Codex driver and the memory scribe are
+  exempt, since their footer is always `none` or written by design and a
+  bounce would only cost a turn.
 - **Cheapest model writes memories:** Haiku and Sonnet workers write their own
   1–3 facts. Fable and Opus rungs hand a raw list to `memory-scribe`
   (Haiku low) instead of spending their own tokens. A sample self-hosted
@@ -294,11 +328,13 @@ touches credentials.
   deterministically, the same way for review and adversarial runs: medium for
   routine work, high when any task routed to Opus or escalated, or touched
   security, persistence, concurrency, cross-system, live or public-API code.
-- **Verify, then fix:** every critical, high or medium finding is first
-  checked by a Haiku mechanic running the input, test or query that would
-  show the bug. Confirmed bugs become fix tasks routed through the router,
-  with the reproduction as the "done when" check, then Codex reviews again.
-  Claims that can't be reproduced go to a one-question Fable second opinion.
+- **Trim, verify, then fix:** the script drops `low` findings (kept in the
+  record) and duplicates with no model tokens, asks Codex for a `repro`
+  command per finding, and writes one verification card. A single Haiku
+  mechanic runs every repro in one dispatch and returns a verdict per finding.
+  Confirmed bugs become fix tasks routed through the router, with the
+  reproduction as the "done when" check, then Codex reviews again. Claims
+  that can't be reproduced go to a one-question Fable second opinion.
 - **Adversarial tests (`--adversarial`):** Codex writes tests that attack the
   change (edge cases, hostile input, error paths, concurrency) only under
   `.feature-ladder/adversarial/<slug>/`, runs them with your test runner, and
@@ -319,6 +355,13 @@ any branch or uncommitted work: `/feature-ladder:codex-review [--adversarial]`.
 
 - Task cards, evidence packets and design docs follow fixed formats
   (`skills/orchestration-ladder/SKILL.md`).
+- Acceptance checks cost no tokens:
+  `skills/orchestration-ladder/scripts/verify.py run --id T3 --check "pytest tests/x -q" --scope src/x.py --changed src/x.py`
+  runs the card's checks exactly as written, saves exit codes and output
+  tails to `.feature-ladder/evidence/<task>.json`, and compares the files that
+  really changed with the card's scope and the worker's claim. A check that
+  would touch production data or print a secret is refused, not run. A mechanic
+  is dispatched only when a check's output needs interpreting.
 - Failed or blocked tasks move up **one** band at a time.
 - Escalation means "fix the task" (decide, design, or split), never "the
   coordinator writes the code".
@@ -344,11 +387,19 @@ repeatable and auditable.
    personal skills, project `.claude/skills`, installed plugins, and in the
    Claude app the synced account and plugin skills. It then applies the rules
    in `skill-rules.json`.
-3. It returns at most `max_skills` skills (default 3) within `max_chars` of
-   skill text (default 60,000). Anything cut is reported, never silently
-   included.
-4. `--inject` prints those skills' full instructions. The coordinator pastes
-   them into the task card and logs the choice in `FEATURE-REPORT.md`.
+3. It returns at most `max_skills` skills (default 3) within a character
+   budget of skill text: `max_chars_by_role` per router role (shipped
+   defaults: mechanic 0, implementer 15,000, senior implementer and domain
+   experts 30,000), else `max_chars` (default 20,000). Anything cut is
+   reported, never silently included.
+4. `--inject --out .feature-ladder/cards/<task>-skills.md` writes those
+   skills' full instructions to that file and prints a three-line block that
+   names it. The coordinator pastes the block into the task card and logs the
+   choice in `FEATURE-REPORT.md`; the worker reads the file before it starts.
+   The skill text (up to 60,000 characters per card) therefore never enters
+   the coordinator's context or its output, which is where a large share of a
+   run's Fable tokens went before. Plain `--inject` still prints the full text
+   for dry runs.
 5. **Enforcement:**
    - **Claude Code:** every ladder agent has `Skill` in `disallowedTools`, so
      the injected skills are the only ones a worker can use. A worker that
@@ -433,8 +484,10 @@ for the hooks (Claude Code already requires it).
 ### Claude app
 
 Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
-the start of a conversation it downloads `route.py`, `select_skills.py`,
-`skill-rules.json` and `resolve_bank.py` from this repo, pinned to a release tag (currently `v1.2.0`), so the app and
+the start of a conversation it downloads `route.py`, `intake.py`,
+`pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
+`select_skills.py`, `skill-rules.json` and `resolve_bank.py` from this repo, pinned to a release
+tag (currently `v1.8.0`), so the app and
 Claude Code always run identical logic. The app session needs code execution
 and network access to GitHub.
 
@@ -483,6 +536,7 @@ one, the app skill skips memory and says so.
 | Codex second opinion and adversarial tests | ✅ via your local Codex CLI | — (needs your local Codex sign-in) |
 | Intake (ask once, up front) | ✅ scoper agent + question cards | ✅ same script; questions asked in chat |
 | Branches and checkpoint PRs | ✅ plus guard hook | ✅ only when the work is a git repo with `gh` |
+| Token ledger per rung | ✅ `SubagentStop` hook, table in the report | — (no hooks in the app) |
 
 ## Repository layout
 
@@ -493,13 +547,14 @@ plugins/feature-ladder/
   .mcp.json                            Hindsight HTTP MCP server (env-driven)
   agents/                              14 agents (13 rungs + scoper)
   commands/                            feature, scope, route, skills, recall, codex-review
-  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py
-  skills/worker-contract/              the 2.5K-char contract workers preload instead of the full protocol
+  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py, verify.py
+  skills/worker-contract/              the short contract workers preload instead of the full protocol
   skills/complexity-router/            route.py + intake.py
   skills/skill-selector/               select_skills.py + skill-rules.json
+  skills/worker-contract/              the short contract every worker preloads instead of the full protocol
   skills/hindsight-memory/             recall / retain protocol + resolve_bank.py
   skills/cross-model-review/           codex_review.py (Codex review + adversarial tests)
-  hooks/                               bank resolution, per-call bank routing, retain gate, irreversible-command guard
+  hooks/                               bank resolution, per-call bank routing, retain gate, token ledger, irreversible-command guard
   hindsight/                           self-host env, start script, round-trip test
 claude-app/model-ladder-router/        the Claude app skill
 ```
@@ -518,7 +573,8 @@ claude-app/model-ladder-router/        the Claude app skill
   step on a target it can't recognise is treated as production.
 - Checkpoint PRs stack: merge them in the order the final report lists.
   GitHub retargets the next PR when you merge one and delete its branch.
-- Subagents have a fixed startup cost. For very small checks, running them
+- Subagents have a fixed startup cost. Acceptance checks therefore run through
+  `verify.py` rather than a mechanic; for other very small jobs, running them
   directly can be cheaper than delegating.
 - The Codex second opinion requires the Codex CLI (`npm install -g @openai/codex`)
   signed in with `codex login`. A review takes a few minutes; it is bounded by

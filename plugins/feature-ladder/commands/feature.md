@@ -105,4 +105,9 @@ Stay within the budget: it is the whole protocol for this feature. Recall once. 
 
 When the coordinator returns, relay its report as-is, then one line pointing at
 FEATURE-REPORT.md and, if there are checkpoint PRs, one line saying which PR
-needs the user first.
+needs the user first. Last, run
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ledger.py" report
+```
+and show its table: it now includes the coordinator's own tokens, which the report written
+during the run could not.
