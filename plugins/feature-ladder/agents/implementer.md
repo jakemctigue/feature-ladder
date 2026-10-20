@@ -5,8 +5,7 @@ model: sonnet
 effort: medium
 color: green
 skills:
-  - feature-ladder:orchestration-ladder
-  - feature-ladder:hindsight-memory
+  - feature-ladder:worker-contract
 maxTurns: 40
 disallowedTools:
   - Skill
@@ -26,7 +25,7 @@ Procedure:
 4. Before your final message, retain to Hindsight anything durable you learned
    (pitfall, convention, interface) - typically 0-2 `retain` calls with tags
    `project:<name>`, `feature:<slug>`, `<kind>`, metadata rung `implementer`.
-5. Return an Evidence Packet (orchestration-ladder skill): changed files with
+5. Return an Evidence Packet (worker-contract skill): changed files with
    line ranges, each check with command/exit code/tail, claims with how verified
    (or "unverified"), risks, and the `Retained:` footer line.
 

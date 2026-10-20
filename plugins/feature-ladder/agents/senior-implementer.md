@@ -5,9 +5,8 @@ model: opus
 effort: medium
 color: green
 skills:
-  - feature-ladder:orchestration-ladder
-  - feature-ladder:hindsight-memory
-maxTurns: 60
+  - feature-ladder:worker-contract
+maxTurns: 50
 disallowedTools:
   - Skill
 ---
@@ -33,7 +32,7 @@ skill): a pitfall that cost a retry, a convention you had to discover, an
 interface you introduced - 1-3 `retain` calls, tags `project:<name>`,
 `feature:<slug>`, `<kind>`, metadata `{"source":"feature-ladder","rung":"senior-implementer"}`.
 
-Return an Evidence Packet (format in the orchestration-ladder skill). Every check
+Return an Evidence Packet (format in the worker-contract skill). Every check
 you ran is quoted with its command, exit code and tail. Anything you did not run
 is labelled unverified. End with the `Retained:` footer line; a hook will send
 you back if it is missing.

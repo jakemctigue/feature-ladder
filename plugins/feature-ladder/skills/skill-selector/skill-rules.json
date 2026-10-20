@@ -1,7 +1,7 @@
 {
   "_doc": "Each rule gives one skill to a task when ALL listed 'when' groups match (any value within a group). 'unless' uses the same groups and cancels the rule. Higher priority wins; ties keep file order. Groups: roles, kinds, globs (match paths in scope or their file names), keywords (whole-word match in task text), all_keywords, flags (router booleans). Put personal overrides in ~/.claude/feature-ladder/skill-rules.json and per-project ones in <repo>/.feature-ladder/skill-rules.json; reuse an id to replace a rule, or list ids under 'disable'. Rules sharing a 'group' are alternatives (e.g. a Claude Code skill and its Claude app equivalent): only the highest-priority installed one is used.",
-  "max_skills": 3,
-  "max_chars": 60000,
+  "max_skills": 2,
+  "max_chars": 24000,
   "rules": [
     {"id": "debugging", "skill": "superpowers:systematic-debugging", "priority": 80, "when": {"roles": ["implementer", "senior-implementer", "deep-verifier"], "keywords": ["bug", "bugs", "fix", "fixes", "regression", "crash", "crashes", "exception", "failing", "fails", "flaky", "broken", "traceback", "not working"]}, "group": "debugging"},
     {"id": "debugging-app", "skill": "engineering:debug", "group": "debugging", "priority": 79, "when": {"roles": ["implementer", "senior-implementer", "deep-verifier"], "keywords": ["bug", "bugs", "fix", "fixes", "regression", "crash", "crashes", "exception", "failing", "fails", "flaky", "broken", "traceback", "not working"]}},

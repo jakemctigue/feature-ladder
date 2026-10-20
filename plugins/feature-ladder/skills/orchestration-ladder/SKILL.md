@@ -37,19 +37,31 @@ user -> /feature-ladder:feature "<description>"
   0. intake                scoper (Sonnet) estimates every variable; the user answers only
                            what is uncertain AND changes the model, plus open decisions;
                            confirmed intake saved; run branch feature-ladder/<slug> created
-  1. coordinator (F-Med)   recall memory -> scope -> decompose -> route each task
-  2. domain-expert (D)     only for tasks whose router result is ESCALATE/design_agreed=false
-                           or kind=analysis -> produces DESIGN.md (accepted by coordinator)
-  3. workers (T0-T5)       execute routed tasks in parallel where independent
-                           each returns an Evidence Packet (below)
-  4. coordinator (F-Med)   inspects evidence, runs the defined checks via mechanic,
-                           fact-checks claims against files/tests, accepts or bounces
-  5. escalation            only on: conflicting evidence, a bug nobody can isolate,
-                           correctness that spans systems -> deep-verifier (F-High)
-                           -> architect-escalation (F-Extra) -> ultra (opt-in)
-  6. coordinator           retains outcome to Hindsight, writes FEATURE-REPORT.md,
-                           opens the final PR (pr_checkpoint.py finish)
+  1. coordinator (F-Med)   recall once -> ONE Task Card from the intake (intake.py card
+                           routes it and picks its skills in one call)
+  2. worker (T0-T3)        does the whole feature, runs the Done-when checks itself,
+                           returns an Evidence Packet with the output quoted
+  3. coordinator (F-Med)   reads the packet, accepts, retains one line, opens the PR
+  -- that is the whole flow for size S and M (about a dozen coordinator turns) --
+  size L only:             design (domain-expert) if not agreed; split into cards;
+                           a mechanic re-runs Opus-tier checks; Codex review once;
+                           one scribe at the end; escalation one rung at a time
+                           (deep-verifier -> architect-escalation -> ultra, opt-in)
 ```
+
+## Budget by size
+
+The intake's `budget` (from the router's `size`) is binding. It exists because
+cost scales with agents x turns x context: every turn of every agent re-reads
+its whole context, so one extra subagent costs more than its output suggests.
+
+| Size | Score | Workers | Design | Independent check | Codex | Scribe |
+|---|---|---|---|---|---|---|
+| S | 0-9 | 1 | no | no | no | no |
+| M | 10-19 | 1-2 | no | no | `--codex` only | no |
+| L | 20+ or hard flag | <=4 | if not agreed | yes | once | one |
+
+Adversarial tests: only with `--adversarial`, at any size.
 
 ## Run to completion: branches and checkpoint PRs
 

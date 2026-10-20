@@ -38,11 +38,16 @@ Both use the same scripts and rules.
 - Decides **which skills** each worker gets with a fixed rule engine
   (`select_skills.py`), and in Claude Code physically prevents workers from
   loading any others.
-- Keeps the expensive model (Fable 5.1) on a short leash: at most three
-  inspection passes per feature, and one-step escalations with a written
+- **Lean by default.** The intake sizes the feature (S, M or L) and that size
+  is a binding budget. S and M, which is most features, get one worker (two
+  at most), no design doc, no separate check-runner, no Codex, no memory
+  scribe, and a coordinator loop of about a dozen turns. The full protocol
+  only runs for L: Opus-tier or escalated work.
+- Keeps the expensive model (Fable 5.1) on a short leash: its turns are
+  budgeted per size, and escalations are one step at a time with a written
   justification.
-- Requires evidence: every worker returns real command output for its checks,
-  and acceptance checks are re-run by a separate cheap worker, not by the author.
+- Requires evidence: every worker returns real command output for its checks.
+  For L features the acceptance checks are re-run by a separate cheap worker.
 - Records durable lessons (decisions, pitfalls, interfaces, test gates) in
   Hindsight after each task and each feature, using the cheapest model that
   can summarize correctly.
@@ -132,9 +137,29 @@ section); none of them stops the run.
 in, rung out. Points come from files, lines changed, modules touched, new
 dependencies, public API changes, persistence, security, concurrency,
 cross-system work, missing tests, ambiguity, novelty and blast radius. Score
-bands map to Haiku low (0–2), Sonnet medium (3–6), Sonnet high (7–9), Opus
-medium (10–13), Opus high (14–17), and escalate (18+). Run
-`route.py --table` for the full table. Workers never choose their own model.
+bands map to Haiku low (0–3), Sonnet medium (4–9), Sonnet high (10–19), Opus
+medium (20–23), Opus high (24–28), and escalate (29+). The weights are
+calibrated for application work: an endpoint plus a database change plus
+tests stays on Sonnet even with every risk flag set; Opus needs novelty or
+real scale on top. Run `route.py --table` for the full table. Workers never
+choose their own model.
+
+### Size budgets
+
+The score also sets the feature's size, and the size is a budget the
+coordinator cannot exceed. Cost scales with agents × turns × context, because
+every turn of every agent re-reads its whole context, so the budget limits
+agents first.
+
+| Size | Score | Workers | Design doc | Separate check-runner | Codex | Memory scribe | Coordinator turns |
+|---|---|---|---|---|---|---|---|
+| S | 0–9 | 1 | no | no | no | no | ~12 |
+| M | 10–19 | 1–2 | no | no | `--codex` only | no | ~20 |
+| L | 20+ or a hard flag | up to 4 | if not agreed | yes | once, no retries | one | ~45 |
+
+Adversarial Codex tests never run on their own; add `--adversarial` at the
+end of a phased rollout. Workers preload a 2.5K-character contract instead of
+the full protocol skills, and get at most two injected skills (24K characters).
 
 ### Intake: ask once, up front
 
@@ -469,6 +494,7 @@ plugins/feature-ladder/
   agents/                              14 agents (13 rungs + scoper)
   commands/                            feature, scope, route, skills, recall, codex-review
   skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py
+  skills/worker-contract/              the 2.5K-char contract workers preload instead of the full protocol
   skills/complexity-router/            route.py + intake.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/hindsight-memory/             recall / retain protocol + resolve_bank.py

@@ -44,41 +44,46 @@ import re
 import sys
 
 # ---- Scoring table (edit here; keep it monotonic) ---------------------------
+# Calibrated so that ordinary application work (an endpoint plus a database
+# change plus tests) stays on Sonnet. Risk flags raise effort within Sonnet;
+# Opus needs real size or novelty on top of them.
 POINTS = {
-    "files":        lambda v: 0 if v <= 1 else 1 if v <= 3 else 2 if v <= 6 else 4,
-    "loc":          lambda v: 0 if v <= 30 else 1 if v <= 120 else 2 if v <= 300 else 4,
-    "modules":      lambda v: 0 if v <= 1 else 1 if v == 2 else 3,
-    "new_dependency": lambda v: 2 if v else 0,
-    "public_api":   lambda v: 2 if v else 0,
-    "persistence":  lambda v: 3 if v else 0,
-    "security":     lambda v: 3 if v else 0,
-    "concurrency":  lambda v: 3 if v else 0,
-    "cross_system": lambda v: 3 if v else 0,
+    "files":        lambda v: 0 if v <= 1 else 1 if v <= 3 else 2 if v <= 6 else 3,
+    "loc":          lambda v: 0 if v <= 30 else 1 if v <= 120 else 2 if v <= 300 else 3,
+    "modules":      lambda v: 0 if v <= 1 else 1 if v == 2 else 2,
+    "new_dependency": lambda v: 1 if v else 0,
+    "public_api":   lambda v: 1 if v else 0,
+    "persistence":  lambda v: 2 if v else 0,
+    "security":     lambda v: 2 if v else 0,
+    "concurrency":  lambda v: 2 if v else 0,
+    "cross_system": lambda v: 2 if v else 0,
     "no_tests":     lambda v: 1 if v else 0,
     # Effects outside the repo (real data, deploys, publishing, external calls).
     # Code on a branch is always reversible, so this is a risk weight, not a stop:
     # the step runs under the intake's outside-repo policy (see irreversible.py).
-    "irreversible": lambda v: 3 if v else 0,
+    "irreversible": lambda v: 2 if v else 0,
     "ambiguity":    lambda v: [0, 1, 3, 5][max(0, min(3, int(v)))],
-    "novelty":      lambda v: [0, 1, 2, 4][max(0, min(3, int(v)))],
-    "blast_radius": lambda v: [0, 1, 3, 5][max(0, min(3, int(v)))],
+    "novelty":      lambda v: [0, 1, 3, 5][max(0, min(3, int(v)))],
+    "blast_radius": lambda v: [0, 1, 2, 4][max(0, min(3, int(v)))],
 }
 
 # Rungs are chosen by score band. "escalate" means: hand to the coordinator
 # (Fable 5.1 Medium), who decides the Fable rung or re-scopes the task.
+# Size (S/M/L) sets the feature's budget: how many agents, whether a design,
+# an independent check, Codex or a scribe are used at all (intake.py).
 BANDS = [
-    (0,  2,  "mechanic",            "haiku",  "low",    "T0 Haiku Low - mechanical patch"),
-    (3,  6,  "implementer",         "sonnet", "medium", "T2 Sonnet Medium - bounded coding"),
-    (7,  9,  "implementer",         "sonnet", "high",   "T3 Sonnet High - bounded coding, harder"),
-    (10, 13, "senior-implementer",  "opus",   "medium", "T4 Opus Medium - difficult implementation"),
-    (14, 17, "senior-implementer",  "opus",   "high",   "T5 Opus High - difficult implementation"),
-    (18, 10**6, "escalate",         "fable",  "medium", "ESCALATE - coordinator decides (Fable rung or re-scope)"),
+    (0,  3,  "mechanic",            "haiku",  "low",    "T0 Haiku Low - mechanical patch"),
+    (4,  9,  "implementer",         "sonnet", "medium", "T2 Sonnet Medium - bounded coding"),
+    (10, 19, "implementer",         "sonnet", "high",   "T3 Sonnet High - bounded coding, harder"),
+    (20, 23, "senior-implementer",  "opus",   "medium", "T4 Opus Medium - difficult implementation"),
+    (24, 28, "senior-implementer",  "opus",   "high",   "T5 Opus High - difficult implementation"),
+    (29, 10**6, "escalate",         "fable",  "medium", "ESCALATE - coordinator decides (Fable rung or re-scope)"),
 ]
+SIZE = [(0, 9, "S"), (10, 19, "M"), (20, 10**6, "L")]
 
 # Any of these forces escalation regardless of score.
 HARD_FLAGS = {
     "ambiguity>=2": "approach not specified (ambiguity >= 2)",
-    "cross_system+security": "cross-system AND security-sensitive",
     "blast_radius=3": "whole-app blast radius",
 }
 
@@ -87,7 +92,7 @@ NON_CODE_KINDS = {
     "fixture":  ("mechanic",           "haiku", "low",    "T0 Haiku Low - fixtures"),
     "check":    ("mechanic",           "haiku", "low",    "T0 Haiku Low - execute defined checks"),
     "research": ("evidence-collector", "haiku", "medium", "T1 Haiku Medium - collect sources / prepare evidence"),
-    "analysis": ("domain-expert",      "opus",  "medium", "T4 Opus Medium - domain analysis (use domain-expert-high if novelty>=2)"),
+    "analysis": ("domain-expert",      "opus",  "medium", "T4 Opus Medium - domain analysis (use domain-expert-high only if novelty=3)"),
 }
 
 KEYWORDS = {
@@ -148,8 +153,6 @@ def score(task: dict):
     flags = []
     if _num(task.get("ambiguity", 0)) >= 2:
         flags.append(HARD_FLAGS["ambiguity>=2"])
-    if task.get("cross_system") and task.get("security"):
-        flags.append(HARD_FLAGS["cross_system+security"])
     if _num(task.get("blast_radius", 0)) >= 3:
         flags.append(HARD_FLAGS["blast_radius=3"])
     return total, breakdown, flags
@@ -162,7 +165,7 @@ def route(task: dict) -> dict:
 
     if kind in NON_CODE_KINDS and not flags:
         agent, model, effort, label = NON_CODE_KINDS[kind]
-        if kind == "analysis" and _num(task.get("novelty", 0)) >= 2:
+        if kind == "analysis" and _num(task.get("novelty", 0)) >= 3:
             agent, effort, label = "domain-expert-high", "high", "T5 Opus High - domain analysis, novel area"
         return _out(label, agent, model, effort, total, flags, breakdown,
                     f"kind={kind} routes by kind, not score")
@@ -193,6 +196,7 @@ def _out(label, agent, model, effort, total, flags, breakdown, reason):
         "hard_flags": flags,
         "breakdown": breakdown,
         "reason": reason,
+        "size": next((s for lo, hi, s in SIZE if lo <= total <= hi), "L") if not flags else "L",
     }
 
 
@@ -223,12 +227,13 @@ def describe(text: str) -> dict:
 
 def table():
     print("Score points:")
-    print("  files    <=1:0  2-3:1  4-6:2  7+:4")
-    print("  loc      <=30:0 31-120:1 121-300:2 301+:4")
-    print("  modules  1:0  2:1  3+:3")
-    print("  new_dependency +2   public_api +2   no_tests +1")
-    print("  persistence +3  security +3  concurrency +3  cross_system +3  irreversible +3")
-    print("  ambiguity 0/1/3/5   novelty 0/1/2/4   blast_radius 0/1/3/5")
+    print("  files    <=1:0  2-3:1  4-6:2  7+:3")
+    print("  loc      <=30:0 31-120:1 121-300:2 301+:3")
+    print("  modules  1:0  2:1  3+:2")
+    print("  new_dependency +1   public_api +1   no_tests +1")
+    print("  persistence +2  security +2  concurrency +2  cross_system +2  irreversible +2")
+    print("  ambiguity 0/1/3/5   novelty 0/1/3/5   blast_radius 0/1/2/4")
+    print("Size: S 0-9 (one worker, nothing else)  M 10-19 (<=2 workers)  L 20+ or hard flag (full protocol)")
     print("Bands:")
     for lo, hi, agent, model, effort, label in BANDS:
         hi_s = "+" if hi >= 10**6 else str(hi)

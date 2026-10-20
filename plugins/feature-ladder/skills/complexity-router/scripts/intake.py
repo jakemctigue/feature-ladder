@@ -32,6 +32,13 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           novel or algorithmic work) and `secrets` (names the feature needs,
           from the scan or the scoper's `secrets` list in ANSWERS; never values).
 
+  card    '<task json>'
+          Route one task AND select its skills in one call. The JSON takes
+          the router fields plus "paths" (files in scope), "text" (goal and
+          description), optional "add"/"exclude" skill names. Prints the route
+          JSON, a blank line, then the "## Skills for this task" block to paste
+          into the Task Card.
+
   find    "<request>" [--cwd DIR]
           Prints the path of a confirmed, not-yet-used intake for exactly this
           request text (from /feature-ladder:scope or an aborted run) and marks
@@ -311,21 +318,39 @@ ALGORITHMIC = ["algorithm", "parser", "lexer", "compiler", "interpreter", "sched
 
 
 def codex_recommendation(fields, text, route):
-    """Deterministic: when a second model's review is worth its cost."""
+    """Deterministic: a second model's review is automatic only for size L
+    (Opus-tier or escalated work). Anything else lists reasons the user might
+    want --codex, but does not spend Codex time on its own."""
+    size = route.get("size", "S")
     why = []
-    if route.get("model") == "opus":
-        why.append(f"routed {route.get('agent')} ({route.get('model')}/{route.get('effort')})")
-    elif int(route.get("score", 0) or 0) >= 10:
-        why.append(f"complexity score {route.get('score')}")
-    for f in ("security", "persistence", "concurrency", "cross_system", "irreversible", "public_api"):
-        if fields.get(f):
-            why.append(f)
+    if size == "L":
+        why.append(f"size L: routed {route.get('agent')} ({route.get('model')}/{route.get('effort')}), score {route.get('score')}")
+    hints = []
     if int(fields.get("novelty", 0) or 0) >= 2:
-        why.append("novel to this repo")
+        hints.append("novel to this repo")
     hits = [k for k in ALGORITHMIC if router.keyword_hit(text.lower(), [k])]
     if hits:
-        why.append("algorithmic: " + ", ".join(hits[:4]))
-    return {"review": bool(why), "why": why}
+        hints.append("algorithmic: " + ", ".join(hits[:4]))
+    return {"review": bool(why), "why": why, "consider_codex": hints if not why else []}
+
+
+def budget_for(route, fields):
+    """What a feature of this size may spend. Binding for the coordinator."""
+    size = route.get("size", "S")
+    if size == "S":
+        return {"size": "S", "workers": 1, "design": False, "independent_check": False,
+                "codex": False, "adversarial": False, "scribe": False, "escalation": "one band up on failure only",
+                "coordinator_turns": 12,
+                "shape": "one worker does the whole feature and quotes its own check output; the coordinator writes the card, reads the packet, accepts"}
+    if size == "M":
+        return {"size": "M", "workers": 2, "design": False, "independent_check": False,
+                "codex": False, "adversarial": False, "scribe": False, "escalation": "one band up on failure only",
+                "coordinator_turns": 20,
+                "shape": "one worker unless the work splits into two independent file sets; no design doc, no separate check-runner, no Codex unless --codex"}
+    return {"size": "L", "workers": 4, "design": not fields.get("design_agreed", False), "independent_check": True,
+            "codex": True, "adversarial": False, "scribe": True, "escalation": "ladder as written",
+            "coordinator_turns": 45,
+            "shape": "full protocol: design if not agreed, split into cards, independent check-runner, Codex review once (no retries), one scribe at the end"}
 
 
 # --------------------------------------------------------------------- scan --
@@ -659,6 +684,7 @@ def apply(prop, answers):
         "fields": final,
         "sources": sources,
         "codex": codex_recommendation(final, prop.get("request", ""), r),
+        "budget": budget_for(r, final),
         "secrets": {"provider": secrets.get("provider"), "project": secrets.get("project"),
                     "names": needed, "template_keys": secrets.get("template_keys", [])},
         "decisions": decisions,
@@ -730,6 +756,24 @@ def main(argv):
                 out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
                 result["written_to"] = str(out)
             print(json.dumps(result, indent=2))
+            return 0
+        if cmd == "card":
+            # Route one task and pick its skills in a single call: prints the
+            # router result, then the ready-to-paste skills block.
+            task = json.loads(" ".join(rest))
+            r = router.route(task)
+            flags = {k: True for k in ("security", "persistence", "concurrency", "cross_system",
+                                       "public_api", "irreversible", "new_dependency") if task.get(k)}
+            sel = {"role": r["agent"], "kind": task.get("kind", "code"), "paths": task.get("paths", []),
+                   "text": task.get("text", ""), "flags": flags, "add": task.get("add", []),
+                   "exclude": task.get("exclude", [])}
+            print(json.dumps(r, indent=2))
+            print()
+            selector = Path(__file__).resolve().parents[2] / "skill-selector" / "scripts" / "select_skills.py"
+            res = subprocess.run([sys.executable, str(selector), "--inject", json.dumps(sel)],
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace")
+            sys.stdout.write(res.stdout if res.returncode == 0 else
+                             "## Skills for this task\nNone selected (selector error: " + res.stderr.strip()[-200:] + ")\n")
             return 0
         if cmd == "find":
             cwd = opt("--cwd", os.getcwd())

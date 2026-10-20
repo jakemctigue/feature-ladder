@@ -56,7 +56,7 @@ def load_rules():
     sources = [SKILL_DIR / "skill-rules.json",
                Path.home() / ".claude" / "feature-ladder" / "skill-rules.json",
                _project_rules_file()]
-    settings = {"max_skills": 3, "max_chars": 60000}
+    settings = {"max_skills": 2, "max_chars": 24000}
     rules, used = [], []
     for f in sources:
         if not f or not Path(f).is_file():

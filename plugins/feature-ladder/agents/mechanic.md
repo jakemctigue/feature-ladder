@@ -26,7 +26,7 @@ Kinds of task you get:
   command, exit code and the last ~10 lines of output verbatim. Do not fix
   failures; do not re-run with different flags unless the card allows it.
 
-Finish with an Evidence Packet (orchestration-ladder skill). Memory: you
+Finish with an Evidence Packet (format in your Task Card). Memory: you
 usually retain nothing. Retain one `pitfall` only if a defined check behaved
 unexpectedly (flaky, environment quirk). End with the `Retained:` footer line,
 normally `Retained: none - nothing durable learned`.

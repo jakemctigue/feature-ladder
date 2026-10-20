@@ -17,12 +17,15 @@ limits. No credentials are read, copied, or passed around by this plugin.
 
 | Trigger | Mode | Codex reasoning effort |
 |---|---|---|
-| `/feature-ladder:feature ... --codex`, or the confirmed intake's `codex.review` is true (any task routed to Opus, complexity score >= 10, a risk flag, novelty >= 2, or algorithmic work such as parsers, schedulers, RNG, ranking, sync, concurrency) | `review`, before acceptance | medium; high if any task routed T4/T5/ESC or had flags security, persistence, concurrency, cross_system, irreversible, public_api |
-| `--adversarial`, or intake `security: true` | `review` then `adversarial` | same rule as review |
+| `/feature-ladder:feature ... --codex`, or the confirmed intake's `codex.review` is true (size L only: Opus-tier or escalated work) | `review`, once, before acceptance | medium; high if any task routed T4/T5/ESC or had flags security, persistence, concurrency, cross_system, irreversible, public_api |
+| `--adversarial` only (never automatic; meant for the end of a phased rollout) | `review` then `adversarial`, once each | same rule as review |
 | `/feature-ladder:codex-review [--adversarial]` | on demand, any branch or uncommitted work | same rules |
 
-Features that need none of this (small, well-trodden Sonnet/Haiku work) skip
-Codex; the report says so with the intake's reason.
+Size S and M features skip Codex unless `--codex` is given; the report says
+so. The intake's `codex.consider_codex` lists reasons (novel or algorithmic
+work) the user might add the switch next time. **One attempt per mode.** A
+timeout (exit 1 after `FEATURE_LADDER_CODEX_TIMEOUT` seconds) or exit 3 is
+recorded as "skipped" and the run continues; no retries, no background runs.
 
 Effort and model can be overridden with `FEATURE_LADDER_CODEX_EFFORT` and
 `FEATURE_LADDER_CODEX_MODEL`; otherwise Codex's own configured model is used.
