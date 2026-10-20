@@ -41,7 +41,9 @@ DESIGN.md under *Constraints (from memory)* and mark it as reflect-derived.
 makes sure what it learned *in its own run* is retained, and ends its final
 message with a `Retained:` line listing what was stored (or `Retained: none -
 <reason>`). A `SubagentStop` hook bounces any subagent whose final message lacks
-that line, so do it before you write the Evidence Packet, not after.
+that line, so do it before you write the Evidence Packet, not after. `mechanic`,
+`codex-reviewer` and `memory-scribe` are exempt from the bounce (their footer is
+always `none`, or written by design); they still write the line.
 
 **B. The coordinator, at acceptance.** It ensures the feature-level facts are
 retained (accepted design decision and why, interfaces other code now depends

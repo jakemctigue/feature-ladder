@@ -260,7 +260,9 @@ choices get tuned against; without it those are guesses.
   itself only when its card's `Memory:` line is `none`.
 - **Retain when each subagent finishes:** every rung ends its report with a
   `Retained:` line. A `SubagentStop` hook sends a worker back once if that
-  line is missing.
+  line is missing; mechanics, the Codex driver and the memory scribe are
+  exempt, since their footer is always `none` or written by design and a
+  bounce would only cost a turn.
 - **Cheapest model writes memories:** Haiku and Sonnet workers write their own
   1–3 facts. Fable and Opus rungs hand a raw list to `memory-scribe`
   (Haiku low) instead of spending their own tokens. A sample self-hosted
@@ -301,11 +303,13 @@ touches credentials.
   deterministically, the same way for review and adversarial runs: medium for
   routine work, high when any task routed to Opus or escalated, or touched
   security, persistence, concurrency, cross-system, live or public-API code.
-- **Verify, then fix:** every critical, high or medium finding is first
-  checked by a Haiku mechanic running the input, test or query that would
-  show the bug. Confirmed bugs become fix tasks routed through the router,
-  with the reproduction as the "done when" check, then Codex reviews again.
-  Claims that can't be reproduced go to a one-question Fable second opinion.
+- **Trim, verify, then fix:** the script drops `low` findings (kept in the
+  record) and duplicates with no model tokens, asks Codex for a `repro`
+  command per finding, and writes one verification card. A single Haiku
+  mechanic runs every repro in one dispatch and returns a verdict per finding.
+  Confirmed bugs become fix tasks routed through the router, with the
+  reproduction as the "done when" check, then Codex reviews again. Claims
+  that can't be reproduced go to a one-question Fable second opinion.
 - **Adversarial tests (`--adversarial`):** Codex writes tests that attack the
   change (edge cases, hostile input, error paths, concurrency) only under
   `.feature-ladder/adversarial/<slug>/`, runs them with your test runner, and

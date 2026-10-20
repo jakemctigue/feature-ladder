@@ -5,7 +5,9 @@ to Hindsight (or explicitly said why not) before finishing.
 
 Reads the hook payload from stdin. If the subagent's last assistant message does
 not contain a line starting with "Retained:", the hook blocks the stop once with
-a reason that tells the agent what to do. It never blocks twice in a row
+a reason that tells the agent what to do. Mechanics, the Codex driver and the
+memory scribe are exempt: their footer is always "none" or written by design,
+so a bounce would only cost an extra turn. It never blocks twice in a row
 (stop_hook_active guard), so a stubborn agent cannot loop forever.
 
 Exit 0 with {"decision":"block","reason":...} to send the agent back;
@@ -17,6 +19,7 @@ import re
 import sys
 
 MARK = re.compile(r"^\s*Retained:\s*\S", re.MULTILINE)
+EXEMPT = {"mechanic", "codex-reviewer", "memory-scribe"}
 
 
 def last_assistant_text(transcript_path: str) -> str:
@@ -59,6 +62,12 @@ def main() -> int:
         "implementer", "mechanic", "evidence-collector", "second-opinion",
         "deep-verifier", "architect-escalation", "ultra-investigator",
     }:
+        return 0
+
+    # Rungs whose footer is always "Retained: none" (mechanic, the Codex driver)
+    # or who write the footer by construction (memory-scribe): a bounce would
+    # cost a whole extra turn to produce a line that carries no information.
+    if agent_type.split(":")[-1] in EXEMPT:
         return 0
 
     if payload.get("stop_hook_active"):
