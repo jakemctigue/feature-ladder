@@ -1,5 +1,5 @@
 {
-  "description": "feature-ladder: resolve this repository's Hindsight bank at session start (find existing or create), route every Hindsight tool call to it, and require every ladder subagent to retain memories (or say why not) before it finishes.",
+  "description": "feature-ladder: resolve this repository's Hindsight bank at session start (find existing or create), route every Hindsight tool call to it, and require every ladder subagent to retain memories (or say why not) before it finishes, and block irreversible shell commands while a ladder run is active.",
   "hooks": {
     "SessionStart": [
       {
@@ -21,6 +21,16 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/resolve_bank.py\" --pretooluse",
             "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/guard_irreversible.py\"",
+            "timeout": 15
           }
         ]
       }

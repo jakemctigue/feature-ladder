@@ -20,6 +20,15 @@ Both use the same scripts and rules.
 - Takes a feature request ("add rate limiting to /search, 100 req/min per key")
   and runs it end to end in your repo: recall memory, scope, decompose into
   task cards, design where needed, implement, verify, accept, remember.
+- **Asks first, then finishes.** Before anything is delegated, a Sonnet scout
+  works out every routing variable from your code, with evidence and a
+  confidence level. You're asked only about the ones that are uncertain *and*
+  would change which model does the work, plus the design choices a worker
+  would otherwise guess. After that the run goes to completion without
+  stopping.
+- **Works on its own branch.** A critical decision that comes up mid-run, or
+  a step with effects outside the repo, becomes a draft PR with the
+  assumption or the exact commands, and work continues on a stacked branch.
 - Decides **which model and effort level** handles each task with a fixed
   scoring function (`route.py`), from Haiku low for mechanical edits up to
   Opus high for hard, designed work.
@@ -37,10 +46,13 @@ Both use the same scripts and rules.
 
 **What it does not do**
 
-- It does not push, deploy, open PRs or touch production. It works in your
-  checkout and reports what changed. Shipping is your call.
-- It does not invent a design when the request is ambiguous. Ambiguous or
-  risky tasks are escalated until a design is agreed.
+- It does not merge, push to your base branch, deploy or touch production.
+  It pushes its own `feature-ladder/...` branches and opens PRs for you to
+  review. Steps with effects outside the repo (migrating real data,
+  deploying, publishing, calling outside services) are written but never
+  run; a guard hook blocks them while a run is active. Shipping is your call.
+- It does not invent a design when the request is ambiguous. It asks at
+  intake, or escalates to a design step if you'd rather it chose.
 - It does not replace your tests. "Done" means your checks passed, quoted
   verbatim.
 
@@ -50,6 +62,7 @@ Both use the same scripts and rules.
 
 | Level | Agent | Model / effort | Daily job |
 |---|---|---|---|
+| I | `scoper` | Sonnet 5.5 / medium | Intake: settles every routing variable with evidence before anything is delegated |
 | T0 | `mechanic` | Haiku / low | Mechanical patches, docs drafts, fixtures, executing defined checks |
 | T1 | `evidence-collector` | Haiku / medium | Collect current sources, extract claims, prepare evidence |
 | T2–T3 | `implementer` | Sonnet 5.5 / medium–high | Bounded coding, regression tests, domain analysis |
@@ -65,13 +78,19 @@ Both use the same scripts and rules.
 
 ### How a feature run flows
 
+0. **Intake.** The scoper scans the repo and reads the code the feature will
+   touch, and proposes a value, confidence and evidence for every routing
+   variable. `intake.py decide` picks the questions: only uncertain variables
+   whose answer changes the model, plus open design decisions. You answer
+   once; the confirmed intake is binding. The run then moves to its own
+   branch, `feature-ladder/<slug>`.
 1. **Recall.** The coordinator asks Hindsight for this project's conventions,
    past decisions and pitfalls in the area.
 2. **Scope.** It reads only what it needs, and writes `FEATURE-REPORT.md`
    with the goal, acceptance criteria and out-of-scope items.
 3. **Decompose and route.** Each task card is scored by `route.py`. The score
-   picks the rung. Hard flags (irreversible, ambiguous, cross-system plus
-   security, whole-app blast radius) force escalation instead.
+   picks the rung. Hard flags (ambiguous, cross-system plus security,
+   whole-app blast radius) force escalation instead.
 4. **Select skills.** `select_skills.py` picks the card's skills and their
    full text is pasted into the card.
 5. **Design if needed.** Ambiguous or novel work goes to a domain expert
@@ -88,8 +107,16 @@ Both use the same scripts and rules.
    second opinion.
 9. **Escalate only when warranted.** One rung at a time, each climb justified
    in the report.
-10. **Accept and remember.** The coordinator finishes the report, and the
-   durable facts go to Hindsight.
+10. **Accept and remember.** The coordinator finishes the report, the
+   durable facts go to Hindsight, and the final PR opens on top of any
+   checkpoint PRs.
+
+Throughout, nothing stops for you. Non-critical choices are decided and
+listed under Assumptions. A **critical decision** (costly to undo, could go
+either way) is decided with the recommended option and parked in a draft PR
+that explains how to switch. An **irreversible step** (effects outside the
+repo) is written but not run, and parked in a draft PR with the exact
+commands. Either way, work continues on the next stacked branch.
 
 ---
 
@@ -104,6 +131,45 @@ cross-system work, missing tests, ambiguity, novelty and blast radius. Score
 bands map to Haiku low (0–2), Sonnet medium (3–6), Sonnet high (7–9), Opus
 medium (10–13), Opus high (14–17), and escalate (18+). Run
 `route.py --table` for the full table. Workers never choose their own model.
+
+### Intake: ask once, up front
+
+`skills/complexity-router/scripts/intake.py` has three steps:
+
+- `scan` reads the repo without changing it: candidate files, test files and
+  the test command, the areas present (database, auth, API, workers, outside
+  clients) and git state. It gives each variable a first guess.
+- The `scoper` agent reads the code and corrects every value with evidence and
+  a confidence level.
+- `decide` asks about a variable only when its confidence is not high **and**
+  flipping it changes the rung. It also checks whether several small guesses
+  together would change the rung. Open design decisions are always asked.
+  Uncommitted changes in your checkout get one question: include them as their
+  own commit, stash them, or stop.
+
+`--auto` asks nothing and takes the scout's values and recommended options.
+`--ask-all` confirms every variable. `/feature-ladder:scope` runs intake alone
+and saves it, so `/feature-ladder:feature --intake <file>` can build it later.
+
+### Run to completion: branches and checkpoint PRs
+
+`skills/orchestration-ladder/scripts/pr_checkpoint.py` handles the branches.
+
+| Step | What it does |
+|---|---|
+| `start` | Creates `feature-ladder/<slug>` from your branch and turns on the guard hook for this repo |
+| `checkpoint --kind decision` | Commits, pushes and opens a **draft PR** saying what was assumed and how to switch, then continues on `feature-ladder/<slug>-pt2` |
+| `checkpoint --kind irreversible` | Same, with the exact commands to run after you approve; the ladder never runs them |
+| `finish` | Opens the final PR on top of the stack and prints the merge order |
+
+Without a remote or the `gh` CLI (or with `--no-pr`), the same branches are
+made locally and each PR description is saved in `.feature-ladder/checkpoints/`.
+
+Code on a branch is always reversible, so `irreversible` only means effects
+outside the repo. In routing it is a +3 risk weight, not a stop. While a run
+is active, a `PreToolUse` guard denies commands such as force pushes, pushes to
+`main`/`master`, `gh pr merge`, `DROP`/`TRUNCATE`, `terraform apply`,
+`kubectl delete`, package publishing and deploys.
 
 ### Deterministic skill selection
 
@@ -317,7 +383,8 @@ one, the app skill skips memory and says so.
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--adversarial] [--ultra]` | Run a feature end to end |
+| `/feature-ladder:feature <request> [--auto \| --ask-all] [--adversarial] [--ultra] [--no-pr] [--base <branch>] [--intake <file>]` | Intake, then run a feature to completion on its own branch |
+| `/feature-ladder:scope <request> [--ask-all]` | Intake only: settle the variables and save them for a later run |
 | `/feature-ladder:codex-review [--base <ref>] [--uncommitted] [--adversarial]` | Codex second opinion (and adversarial tests) on demand |
 | `/feature-ladder:route <task or JSON>` | Dry-run the model router |
 | `/feature-ladder:skills <task, JSON or --list>` | Dry-run the skill selector |
@@ -329,10 +396,12 @@ one, the app skill skips memory and says so.
 |---|---|---|
 | Deterministic model routing | ✅ plugin script | ✅ same script, fetched from this repo |
 | Deterministic skill selection | ✅ enforced (`Skill` tool removed from workers) | ✅ selected and injected; enforcement by instruction |
-| Thirteen named ladder agents | ✅ | General-purpose subagents with role briefs |
+| Named ladder agents (13 rungs + scoper) | ✅ | General-purpose subagents with role briefs |
 | Hindsight memory | ✅ plugin MCP server, per-repo bank via hooks | ✅ if a Hindsight connector is added; per-repo bank via the same resolver |
 | Retain gate and startup hooks | ✅ | — (no hooks in the app) |
 | Codex second opinion and adversarial tests | ✅ via your local Codex CLI | — (needs your local Codex sign-in) |
+| Intake (ask once, up front) | ✅ scoper agent + question cards | ✅ same script; questions asked in chat |
+| Branches and checkpoint PRs | ✅ plus guard hook | ✅ only when the work is a git repo with `gh` |
 
 ## Repository layout
 
@@ -341,14 +410,14 @@ one, the app skill skips memory and says so.
 plugins/feature-ladder/
   .claude-plugin/plugin.json
   .mcp.json                            Hindsight HTTP MCP server (env-driven)
-  agents/                              13 rungs
-  commands/                            feature, route, skills, recall, codex-review
-  skills/orchestration-ladder/         protocol + handoff contracts
-  skills/complexity-router/            route.py
+  agents/                              14 agents (13 rungs + scoper)
+  commands/                            feature, scope, route, skills, recall, codex-review
+  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py
+  skills/complexity-router/            route.py + intake.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/hindsight-memory/             recall / retain protocol + resolve_bank.py
   skills/cross-model-review/           codex_review.py (Codex review + adversarial tests)
-  hooks/                               session-start bank resolution, per-call bank routing, retain gate
+  hooks/                               bank resolution, per-call bank routing, retain gate, irreversible-command guard
   hindsight/                           self-host env, start script, round-trip test
 claude-app/model-ladder-router/        the Claude app skill
 ```
@@ -361,6 +430,11 @@ claude-app/model-ladder-router/        the Claude app skill
   `Skill` tool, so the protocol skills should still load with `Skill`
   disabled. Confirm this on your first run by asking an agent whether its
   orchestration protocol is in context.
+- The guard hook matches command patterns; it's a safety net behind the
+  agents' instructions, not a sandbox. A step hidden inside a script it can't
+  see into isn't caught by it.
+- Checkpoint PRs stack: merge them in the order the final report lists.
+  GitHub retargets the next PR when you merge one and delete its branch.
 - Subagents have a fixed startup cost. For very small checks, running them
   directly can be cheaper than delegating.
 - The Codex second opinion requires the Codex CLI (`npm install -g @openai/codex`)

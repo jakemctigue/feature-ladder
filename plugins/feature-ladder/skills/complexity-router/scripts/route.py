@@ -30,7 +30,7 @@ Input fields (all optional; missing = 0 / false)
   security          bool  touches auth, secrets, permissions, crypto, input trust boundary
   concurrency       bool  async/threads/locks/queues/race-prone code
   cross_system      bool  spans >1 service, repo, process, or external system
-  irreversible      bool  destructive data ops, prod config, deletes, one-way migrations
+  irreversible      bool  effects outside the repo (real data, deploys, publishing, external calls); +3, never run by the ladder
   no_tests          bool  area has no existing tests to lean on
   ambiguity         0-3   0 fully specified ... 3 goal only, approach unknown
   novelty           0-3   0 pattern exists in repo ... 3 nothing like it anywhere here
@@ -54,6 +54,10 @@ POINTS = {
     "concurrency":  lambda v: 3 if v else 0,
     "cross_system": lambda v: 3 if v else 0,
     "no_tests":     lambda v: 1 if v else 0,
+    # Effects outside the repo (real data, deploys, publishing, external calls).
+    # Code on a branch is always reversible, so this is a risk weight, not a stop:
+    # the step is written but never run, and is parked in a checkpoint PR.
+    "irreversible": lambda v: 3 if v else 0,
     "ambiguity":    lambda v: [0, 1, 3, 5][max(0, min(3, int(v)))],
     "novelty":      lambda v: [0, 1, 2, 4][max(0, min(3, int(v)))],
     "blast_radius": lambda v: [0, 1, 3, 5][max(0, min(3, int(v)))],
@@ -72,7 +76,6 @@ BANDS = [
 
 # Any of these forces escalation regardless of score.
 HARD_FLAGS = {
-    "irreversible": "irreversible/destructive operation",
     "ambiguity>=2": "approach not specified (ambiguity >= 2)",
     "cross_system+security": "cross-system AND security-sensitive",
     "blast_radius=3": "whole-app blast radius",
@@ -107,8 +110,6 @@ def score(task: dict):
     total = sum(breakdown.values())
 
     flags = []
-    if task.get("irreversible"):
-        flags.append(HARD_FLAGS["irreversible"])
     if int(task.get("ambiguity", 0)) >= 2:
         flags.append(HARD_FLAGS["ambiguity>=2"])
     if task.get("cross_system") and task.get("security"):
@@ -175,7 +176,7 @@ def table():
     print("  loc      <=30:0 31-120:1 121-300:2 301+:4")
     print("  modules  1:0  2:1  3+:3")
     print("  new_dependency +2   public_api +2   no_tests +1")
-    print("  persistence +3  security +3  concurrency +3  cross_system +3")
+    print("  persistence +3  security +3  concurrency +3  cross_system +3  irreversible +3")
     print("  ambiguity 0/1/3/5   novelty 0/1/2/4   blast_radius 0/1/3/5")
     print("Bands:")
     for lo, hi, agent, model, effort, label in BANDS:

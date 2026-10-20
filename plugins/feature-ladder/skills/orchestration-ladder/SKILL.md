@@ -14,6 +14,7 @@ for a specific unresolved problem.
 
 | Rung | Agent | Model / effort | Daily job |
 |---|---|---|---|
+| I | `scoper` | sonnet / medium | Intake before anything is delegated: settles every router variable with evidence and lists the decisions to ask the user |
 | T0 | `mechanic` | haiku / low | Mechanical patches, docs drafts, fixtures, executing defined checks |
 | T1 | `evidence-collector` | haiku / medium | Collect current sources, extract claims, prepare evidence packets |
 | T2-T3 | `implementer` | sonnet / medium or high | Bounded coding, regression tests, small domain analysis |
@@ -33,6 +34,9 @@ High=`high`, Extra=`xhigh`, Ultra=`max`.
 
 ```
 user -> /feature-ladder:feature "<description>"
+  0. intake                scoper (Sonnet) estimates every variable; the user answers only
+                           what is uncertain AND changes the model, plus open decisions;
+                           confirmed intake saved; run branch feature-ladder/<slug> created
   1. coordinator (F-Med)   recall memory -> scope -> decompose -> route each task
   2. domain-expert (D)     only for tasks whose router result is ESCALATE/design_agreed=false
                            or kind=analysis -> produces DESIGN.md (accepted by coordinator)
@@ -43,8 +47,28 @@ user -> /feature-ladder:feature "<description>"
   5. escalation            only on: conflicting evidence, a bug nobody can isolate,
                            correctness that spans systems -> deep-verifier (F-High)
                            -> architect-escalation (F-Extra) -> ultra (opt-in)
-  6. coordinator           retains outcome to Hindsight, writes FEATURE-REPORT.md
+  6. coordinator           retains outcome to Hindsight, writes FEATURE-REPORT.md,
+                           opens the final PR (pr_checkpoint.py finish)
 ```
+
+## Run to completion: branches and checkpoint PRs
+
+After intake the run never stops for the user. `scripts/pr_checkpoint.py`
+keeps it safe:
+
+- `start` puts the run on `feature-ladder/<slug>` (the user's uncommitted
+  changes are committed first as their own commit, or stashed, as chosen at
+  intake) and switches on the guard hook that denies irreversible shell
+  commands while the run is active.
+- `checkpoint --kind decision|irreversible` commits, pushes and opens a draft PR
+  for a critical decision (assumption made, alternatives, how to switch) or an
+  irreversible step (written, never run; exact commands to run after
+  approval), then continues on `feature-ladder/<slug>-ptN`, stacked on it.
+- `finish` opens the final PR on top of the stack and prints the merge order.
+
+Without a remote or the `gh` CLI the same happens on local branches and the PR
+bodies are saved in `.feature-ladder/checkpoints/`. Code on a branch is never
+irreversible; only effects outside the repo are.
 
 ## Rules that keep Fable sparse
 

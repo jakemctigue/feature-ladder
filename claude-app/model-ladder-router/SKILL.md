@@ -31,30 +31,49 @@ architecture problems, fable/max only if the user opts in.
 
 ## 1. Fetch the scripts (once per conversation)
 
-If `.feature-ladder/v1.2.0/` does not exist in the working directory, run:
+If `.feature-ladder/v1.4.0/` does not exist in the working directory, run:
 
 ```bash
-FL=.feature-ladder/v1.2.0
-B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.2.0/plugins/feature-ladder/skills
-for f in complexity-router/scripts/route.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py; do
+FL=.feature-ladder/v1.4.0
+B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.4.0/plugins/feature-ladder/skills
+for f in complexity-router/scripts/route.py complexity-router/scripts/intake.py orchestration-ladder/scripts/pr_checkpoint.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py; do
   mkdir -p "$FL/$(dirname "$f")" && curl -fsSL "$B/$f" -o "$FL/$f" || break
 done
 python3 "$FL/complexity-router/scripts/route.py" --table >/dev/null && echo FETCH_OK
 ```
 
 If that does not print `FETCH_OK`, try
-`git clone --depth 1 --branch v1.2.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
+`git clone --depth 1 --branch v1.4.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
 and use `.feature-ladder/repo/plugins/feature-ladder/skills` as the base path.
 If both fail, tell the user the scripts could not be downloaded and stop; do not
 route by judgment. Never edit the downloaded files.
 
-## 2. Gather facts, then route each task
+## 2. Intake: gather everything first, ask once, then run to completion
 
-Look at the actual files or material first. Estimate `files`, `loc` and
-`modules` from what you read, not from the request. Then:
+Before delegating anything, settle the facts for the whole job and ask the user
+only what is uncertain and matters. After that, do not stop to ask again.
+
+1. If the work is in a folder or repo here, run
+   `python3 .feature-ladder/v1.4.0/complexity-router/scripts/intake.py scan "<request>" --cwd <folder> > .feature-ladder/proposal.json`.
+   Otherwise start from `{"request": "...", "slug": "...", "fields": {}, "open_decisions": []}`.
+2. Read the actual files or material. For every field write
+   `{"value": ..., "confidence": "high|medium|low", "evidence": [...]}` into
+   `fields`, and list up to 4 `open_decisions` (choices a worker would
+   otherwise guess; each with `id`, `header`, `question`, 2-4 `options`,
+   recommended first).
+3. `python3 .feature-ladder/v1.4.0/complexity-router/scripts/intake.py decide .feature-ladder/proposal.json`
+   lists the questions: fields that are uncertain **and** change the model,
+   plus the open decisions. Ask them all in one go (the question tool if this
+   session has one, otherwise one short numbered message). If the user said to
+   just go, assume the recommended options.
+4. Save the answers as `{"<field>": value, "decisions": {"<id>": "<label>"}}`
+   and run `intake.py apply .feature-ladder/proposal.json <answers file> --out .feature-ladder/intake.json`.
+   That file is binding for every task below.
+
+Then route each task:
 
 ```bash
-python3 .feature-ladder/v1.2.0/complexity-router/scripts/route.py '<task json>'
+python3 .feature-ladder/v1.4.0/complexity-router/scripts/route.py '<task json>'
 ```
 
 Fields: `kind` (code, docs, fixture, check, research, analysis), `files`,
@@ -62,16 +81,26 @@ Fields: `kind` (code, docs, fixture, check, research, analysis), `files`,
 `security`, `concurrency`, `cross_system`, `irreversible`, `no_tests`,
 `design_agreed`; 0-3 scales `ambiguity`, `novelty`, `blast_radius`.
 `--describe "<sentence>"` gives a keyword pre-fill you must correct;
-`--table` prints the scoring rules. Hard flags always escalate: irreversible,
-ambiguity >= 2, cross_system together with security, blast_radius = 3. Opus
-implementation rungs require `design_agreed: true`.
+`--table` prints the scoring rules. Hard flags always escalate: ambiguity >= 2,
+cross_system together with security, blast_radius = 3. Opus implementation
+rungs require `design_agreed: true`.
+
+`irreversible` means effects outside the files being edited (real data,
+deploys, publishing, messages or payments sent to outside services). It adds
+risk points but never stops the run: such a step is written but **never run**.
+List it under "To run after review" with exact commands. A critical decision
+that comes up mid-run is decided with the recommended option and recorded
+under "Assumptions". If the work is in a git repo with the `gh` CLI, use
+`orchestration-ladder/scripts/pr_checkpoint.py` (`start`, `checkpoint`,
+`finish`) so each lands in its own draft PR while work continues on the next
+branch.
 
 The result gives `agent` (the role), `model` and `effort`.
 
 ## 3. Select the task's skills
 
 ```bash
-python3 .feature-ladder/v1.2.0/skill-selector/scripts/select_skills.py --inject '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
+python3 .feature-ladder/v1.4.0/skill-selector/scripts/select_skills.py --inject '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
 ```
 
 It returns at most three skills (within a size budget) chosen by rules, with
@@ -134,14 +163,14 @@ session has Hindsight tools from a connector pointed at the multi-bank endpoint
 (`.../mcp/`, so `list_banks` and `create_bank` exist):
 
 1. In the project's directory run
-   `python3 .feature-ladder/v1.2.0/hindsight-memory/scripts/resolve_bank.py --candidates`.
+   `python3 .feature-ladder/v1.4.0/hindsight-memory/scripts/resolve_bank.py --candidates`.
    It prints the project name, the git owner/repo, and the candidate bank ids
    in priority order. If it reports `"is_git": false`, use the connector's
    default bank and skip to step 5.
 2. Call `list_banks` with `query` set to the project name (and again with the
    repo name if it differs). Save the combined results to
    `.feature-ladder/banks.json` as `{"banks": [...]}`.
-3. Run `python3 .feature-ladder/v1.2.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
+3. Run `python3 .feature-ladder/v1.4.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
    It returns `bank_id` and `action` (`pinned`, `existing` or `create`).
 4. If `action` is `create`, call `create_bank` with that `bank_id`, a `name`
    of `owner/repo` (or the project name), and a `mission` describing the
