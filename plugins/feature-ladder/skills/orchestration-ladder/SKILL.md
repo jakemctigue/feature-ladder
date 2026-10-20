@@ -88,6 +88,12 @@ it:
 prints the table for FEATURE-REPORT.md. Nobody writes undo scripts or
 rehearsals for these steps: the tokens go to the feature.
 
+Secret management commands follow the same tiers: creating or adding a
+version is *risky* on production; deleting, disabling or changing who can
+read a secret is on the never-list. A fourth outcome, *secret*, denies any
+command whose output would carry a secret value into the transcript and
+points at `with_secrets.py`.
+
 ## Rules that keep Fable sparse
 
 1. **Fable Medium runs at most three "inspection passes" per feature**: after planning,
@@ -112,11 +118,24 @@ Design: path to DESIGN.md section, or "N/A - mechanical"
 Done when: <observable checks, e.g. `pytest tests/x -q` green, lint clean>
 Do not: <things explicitly out of scope>
 Memory: <1-3 relevant Hindsight recall snippets, verbatim>
+Secrets: <NAME -> ENV_VAR, ... | none>   (Google Secret Manager names; never values)
 Return: Evidence Packet
 <skill-selector --inject output, verbatim: the only skills this worker has>
 ```
 Workers cannot invoke the Skill tool. If a worker needs a skill it was not
 given, it returns `blocked` naming the skill and why; it does not improvise.
+
+**Secrets rule for every worker.** A command that needs an API key or other
+secret is run as
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`
+(the card's `Secrets:` line gives the names). The value lands in that one
+command's environment and is masked in its output. Never fetch, print, echo,
+log, commit or quote a secret value, and never write one into a file; the
+guard hook denies commands that would. New code reads secrets the way the
+repo already does (Secret Manager client, `defineSecret`, or the env var the
+deployment injects), never from a committed file. If a needed secret does not
+exist or is unreadable, report it in the Evidence Packet as `blocked: secret
+NAME` and finish everything that does not depend on it.
 
 ### Evidence Packet (any worker -> coordinator)
 ```

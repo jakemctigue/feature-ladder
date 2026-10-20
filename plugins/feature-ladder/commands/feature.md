@@ -1,6 +1,6 @@
 ---
-description: Add a feature with the orchestration ladder. A Sonnet scout settles every routing variable from your code; you answer only what is uncertain, once; then it runs to completion on its own branch, live changes included under the policy you chose, and opens PRs. Usage - /feature-ladder:feature <description> [--auto] [--adversarial] [--ultra]
-argument-hint: <feature description> [--auto] [--adversarial] [--ultra]
+description: Add a feature with the orchestration ladder. A Sonnet scout settles every routing variable from your code; you answer only what is uncertain, once; then it runs to completion on its own branch, live changes included under the policy you chose, and opens PRs. Usage - /feature-ladder:feature <description> [--auto] [--codex] [--adversarial] [--ultra]
+argument-hint: <feature description> [--auto] [--codex] [--adversarial] [--ultra]
 ---
 
 Start a feature-ladder run for: $ARGUMENTS
@@ -11,12 +11,13 @@ scope, design, or implement anything yourself. Use `python` instead of
 
 ## 0. Switches
 
-Separate the request text from these switches. There are only three:
+Separate the request text from these switches. There are only four:
 
 | Switch | Effect |
 |---|---|
 | `--auto` | Ask nothing. Use the scout's values and the recommended option for every decision. |
-| `--adversarial` | Codex also writes and runs attack tests before acceptance. (Happens anyway when the confirmed intake has `security: true`.) |
+| `--codex` | OpenAI Codex reviews all the code before acceptance; confirmed bugs are fixed. (Happens anyway when the confirmed intake's `codex.review` is true: Opus-tier, risk-flagged, novel or algorithmic work.) |
+| `--adversarial` | Codex also writes and runs attack tests. Implies `--codex`. (Happens anyway when the intake has `security: true`.) |
 | `--ultra` | Allows the ultra-investigator (Fable max) as the last escalation. |
 
 Everything else is detected: the branch to start from is the current one; PRs
@@ -75,7 +76,10 @@ Exit 2 means the folder is not a git repo: continue without branches. Mention
 ## 5. Hand off
 
 Adversarial is ENABLED if `--adversarial` was given or the confirmed intake's
-`fields.security` is true.
+`fields.security` is true. Codex review is ENABLED if `--codex` or adversarial
+is enabled, or the intake's `codex.review` is true (quote its `why`).
+Secrets: the intake's `secrets.names` lists the Secret Manager secrets the
+feature reads (names only).
 
 ```
 Agent(
@@ -89,7 +93,9 @@ Confirmed intake (binding): <path to .feature-ladder/intake/<slug>.json>
 Run branch: <branch from step 4, or 'none - not a git repo'>  Base: <base>  PRs: <enabled | disabled: reason>
 Project: infer the project name from the repo (package name, pyproject/package.json name, or directory name) and use it as the `project:<name>` tag for all Hindsight calls.
 Ultra rung: <ENABLED by the user (--ultra) | NOT enabled; never use ultra-investigator>.
-Codex adversarial tests: <ENABLED | not requested; run only the Codex second-opinion review>.
+Codex second opinion: <ENABLED (--codex | intake: <why>) | not needed for this feature (intake)>.
+Codex adversarial tests: <ENABLED (--adversarial | intake: security) | not requested>.
+Secrets (Google Secret Manager, project <project>): <names, or 'none'>. Values never enter the transcript: workers run commands that need one through with_secrets.py.
 Run to completion. Do not stop to ask the user anything: decide non-critical choices yourself, park critical design decisions in checkpoint PRs, and run outside-repo steps under the intake's outside_policy exactly as your Run-to-completion rules say.
 Follow the orchestration-ladder, complexity-router, skill-selector, cross-model-review and hindsight-memory skills exactly. Recall first. Route every task with route.py, then pick its skills with select_skills.py --inject and paste that block into the card. Delegate everything you can. Three inspection passes maximum. Retain at acceptance. Finish with pr_checkpoint.py finish. Report back with FEATURE-REPORT.md path, files changed, the exact passing check commands, the PR stack in merge order, assumptions made, outside-repo actions taken or left, anything unverified, and what was retained."
 )

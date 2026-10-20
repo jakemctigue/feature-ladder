@@ -157,9 +157,30 @@ medium (10–13), Opus high (14–17), and escalate (18+). Run
 `/feature-ladder:scope` runs intake alone and saves it; the next
 `/feature-ladder:feature` with the same request text reuses it without asking.
 
-Those are the only switches: `--auto`, `--adversarial` (attack tests; on by
-itself when the intake says the feature touches security) and `--ultra`.
-The branch, PR availability and review scope are detected.
+Those are the only switches: `--auto`, `--codex` (second-model review; on by
+itself for complex work), `--adversarial` (attack tests; on by itself when
+the intake says the feature touches security) and `--ultra`. The branch, PR
+availability and review scope are detected.
+
+### Secrets from Google Secret Manager
+
+API keys for the services your code talks to (Firestore, Stripe, Discord,
+OpenAI, anything) stay in Secret Manager. The scout reads the code and lists
+the secret **names** the feature needs (`defineSecret("X")`,
+`projects/p/secrets/X`, `process.env.X_KEY`, `.env.example` keys); the
+coordinator puts them on each Task Card. A worker that must run something
+needing a key runs it as
+
+```
+with_secrets.py --secret NAME[=ENV_VAR] -- <command>
+```
+
+which fetches the value with your own `gcloud` sign-in, puts it in that one
+command's environment and masks it in the output. The guard denies anything
+that would print a value into the transcript (`gcloud secrets versions
+access`, `cat .env`, `printenv`, `echo $X_KEY`). Deleting, disabling or
+re-sharing a secret is on the never-list; creating one on production is a
+risky step. Values never reach a report, PR, commit, memory or Codex prompt.
 
 ### Run to completion: branches and checkpoint PRs
 
@@ -231,28 +252,36 @@ See [Skill selection](#skill-selection) below.
 
 ### Cross-model second opinion (OpenAI Codex)
 
-A different model family catches different mistakes, so Claude never grades
-its own work alone. Before acceptance, every feature's full diff is reviewed by
-OpenAI Codex through the official Codex CLI, using your own Codex sign-in
-(ChatGPT plan or API key; usage counts toward your Codex limits). The plugin
-never touches credentials.
+A different model family catches different mistakes, so complex code is
+never graded by Claude alone. The feature's full diff is reviewed by OpenAI
+Codex through the official Codex CLI, using your own Codex sign-in (ChatGPT
+plan or API key; usage counts toward your Codex limits). The plugin never
+touches credentials.
 
-- **Review (always):** Codex runs in a read-only sandbox and returns structured
+- **When:** with `--codex`, or automatically when the confirmed intake shows
+  complex work: any task routed to Opus, a complexity score of 10 or more, a
+  risk flag (security, persistence, concurrency, cross-system, live changes,
+  public API), novelty, or algorithmic work (parsers, schedulers, RNG,
+  ranking, sync, concurrency and the like). Small, well-trodden Sonnet or
+  Haiku work skips it, and the report says why.
+- **Review:** Codex runs in a read-only sandbox and returns structured
   findings (severity, file, line, why, fix). Reasoning effort is chosen
   deterministically, the same way for review and adversarial runs: medium for
-  routine work, high when any task routed to
-  Opus or escalated, or touched security, persistence, concurrency,
-  cross-system or public-API code.
+  routine work, high when any task routed to Opus or escalated, or touched
+  security, persistence, concurrency, cross-system, live or public-API code.
+- **Verify, then fix:** every critical, high or medium finding is first
+  checked by a Haiku mechanic running the input, test or query that would
+  show the bug. Confirmed bugs become fix tasks routed through the router,
+  with the reproduction as the "done when" check, then Codex reviews again.
+  Claims that can't be reproduced go to a one-question Fable second opinion.
 - **Adversarial tests (`--adversarial`):** Codex writes tests that attack the
   change (edge cases, hostile input, error paths, concurrency) only under
   `.feature-ladder/adversarial/<slug>/`, runs them with your test runner, and
   marks which failures are real bugs. A before-and-after `git status` check
   flags anything it touched outside that folder.
-- **Triage:** critical and high findings must be fixed (routed like any task)
-  and re-reviewed; medium are fixed or justified in the report; disputes go to
-  a one-question Fable second opinion; at most two rounds, then `deep-verifier`.
-  Adversarial tests that exposed real bugs are moved into your test suite once
-  fixed. Confirmed findings and false alarms are both saved to Hindsight.
+- **Limits:** at most two review rounds, then `deep-verifier`. Adversarial
+  tests that exposed real bugs are moved into your test suite once fixed.
+  Confirmed findings and false alarms are both saved to Hindsight.
 - **Cheap to drive:** a Haiku-low agent runs Codex and hands back its findings
   verbatim, so Fable never spends tokens reading raw review output.
 - **Optional:** if Codex isn't installed or signed in, the run says so and continues.
@@ -410,7 +439,7 @@ one, the app skill skips memory and says so.
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto] [--adversarial] [--ultra]` | Intake, then run a feature to completion on its own branch and open PRs |
+| `/feature-ladder:feature <request> [--auto] [--codex] [--adversarial] [--ultra]` | Intake, then run a feature to completion on its own branch and open PRs |
 | `/feature-ladder:scope <request>` | Intake only; the next `/feature-ladder:feature` with the same request reuses it |
 | `/feature-ladder:codex-review [--adversarial]` | Codex second opinion on the commits since main, or your uncommitted work |
 | `/feature-ladder:route <task or JSON>` | Dry-run the model router |
@@ -439,7 +468,7 @@ plugins/feature-ladder/
   .mcp.json                            Hindsight HTTP MCP server (env-driven)
   agents/                              14 agents (13 rungs + scoper)
   commands/                            feature, scope, route, skills, recall, codex-review
-  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py
+  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py
   skills/complexity-router/            route.py + intake.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/hindsight-memory/             recall / retain protocol + resolve_bank.py

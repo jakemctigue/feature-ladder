@@ -27,6 +27,11 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           {"<id>": "<chosen option>"}}) into the final, user-confirmed intake,
           routes it, and writes .feature-ladder/intake/<slug>.json (git-ignored).
 
+          The output also carries `codex` ({"review": bool, "why": [...]}: a
+          second-model review is recommended for Opus-tier, risk-flagged,
+          novel or algorithmic work) and `secrets` (names the feature needs,
+          from the scan or the scoper's `secrets` list in ANSWERS; never values).
+
   find    "<request>" [--cwd DIR]
           Prints the path of a confirmed, not-yet-used intake for exactly this
           request text (from /feature-ladder:scope or an aborted run) and marks
@@ -234,6 +239,95 @@ def field(value, confidence, *evidence):
     return {"value": value, "confidence": confidence, "evidence": [e for e in evidence if e]}
 
 
+SECRET_NAME_PATTERNS = [
+    r"projects/[\w-]+/secrets/([A-Za-z0-9_-]+)",            # resource paths (any Google client)
+    r"defineSecret\(\s*['\"]([A-Za-z0-9_-]+)['\"]",         # Firebase functions params
+    r"secrets:\s*\[([^\]]+)\]",                              # runWith({ secrets: ["A", "B"] })
+    r"--secret[=\s]+['\"]?([A-Za-z0-9_-]+)",                 # gcloud / with_secrets calls
+    r"(?:getSecret|get_secret|accessSecret|access_secret|fetchSecret|loadSecret)\w*\(\s*['\"]([A-Za-z0-9_-]+)['\"]",
+    r"process\.env\.([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|DSN|WEBHOOK)[A-Z0-9_]*)",
+    r"os\.(?:environ(?:\.get)?|getenv)\(?\[?\s*['\"]([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|DSN|WEBHOOK)[A-Z0-9_]*)['\"]",
+]
+SECRET_FILE_HINTS = ["secretmanager", "secret_manager", "SecretManagerServiceClient", "defineSecret",
+                     "accessSecretVersion", "access_secret_version", "projects/", "process.env.", "os.environ", "getenv"]
+
+
+def discover_secrets(root, files, cands, is_git, project):
+    """Names of secrets the code reads (never values). Candidate files first,
+    then .env.example-style templates, then a repo-wide grep capped at 40 files."""
+    names, where = {}, {}
+
+    def harvest(rel):
+        try:
+            txt = (root / rel).read_text(encoding="utf-8", errors="replace")[:200000]
+        except OSError:
+            return
+        for pat in SECRET_NAME_PATTERNS:
+            for m in re.finditer(pat, txt):
+                raw = m.group(1)
+                for n in re.split(r"[,\s]+", raw):
+                    n = n.strip("'\" ")
+                    if 2 < len(n) <= 64 and n.upper() not in ("NODE_ENV", "PATH", "HOME"):
+                        names[n] = names.get(n, 0) + 1
+                        where.setdefault(n, rel)
+
+    for rel in cands[:20]:
+        harvest(rel)
+    templates = [f for f in files if re.search(r"(^|/)\.env(\.example|\.sample|\.template)?$", f) or f.endswith(("secrets.yaml", "secrets.yml"))]
+    template_keys = []
+    for rel in templates[:5]:
+        try:
+            for line in (root / rel).read_text(encoding="utf-8", errors="replace").splitlines():
+                m = re.match(r"\s*(?:export\s+)?([A-Z][A-Z0-9_]+)\s*[=:]", line)
+                if m and re.search(r"KEY|SECRET|TOKEN|PASSWORD|DSN|WEBHOOK|CREDENTIAL", m.group(1)):
+                    template_keys.append(m.group(1))
+        except OSError:
+            pass
+    if is_git and len(names) < 3:
+        code, out = _run(["git", "grep", "-l", "-I", "-e", "secretmanager", "-e", "defineSecret", "-e", "accessSecretVersion",
+                          "-e", "access_secret_version", "-e", "SecretManagerServiceClient", "--", "."], str(root))
+        if code == 0:
+            for rel in out.splitlines()[:40]:
+                if not any(p in SKIP_DIRS for p in rel.split("/")):
+                    harvest(rel)
+    uses_gsm = any(where.get(n, "").endswith((".py", ".js", ".ts", ".mjs", ".go", ".java", ".rb")) for n in names) and (
+        bool(_run(["git", "grep", "-l", "-I", "-q", "-e", "secretmanager", "-e", "defineSecret", "--", "."], str(root))[0] == 0) if is_git else False)
+    return {
+        "provider": "google-secret-manager" if uses_gsm or project else "unknown",
+        "project": project,
+        "names": sorted(names, key=lambda n: (-names[n], n))[:30],
+        "template_keys": sorted(set(template_keys))[:30],
+        "where": {n: where[n] for n in list(where)[:30]},
+    }
+
+
+ALGORITHMIC = ["algorithm", "parser", "lexer", "compiler", "interpreter", "scheduler", "solver", "optimizer",
+               "state machine", "pathfinding", "a-star", "a*", "dijkstra", "graph", "tree", "trie", "heap",
+               "cache eviction", "lru", "rate limit", "token bucket", "consensus", "crdt", "merkle", "hash",
+               "crypto", "cipher", "signature", "rng", "random", "seed", "deterministic", "replay", "simulation",
+               "physics", "collision", "procedural", "generator", "matching", "ranking", "scoring", "elo",
+               "leaderboard", "anti-cheat", "anticheat", "validation", "sync", "conflict", "retry", "backoff",
+               "idempot", "transaction", "concurren", "lock", "queue", "stream", "websocket", "protocol", "binary format", "codec"]
+
+
+def codex_recommendation(fields, text, route):
+    """Deterministic: when a second model's review is worth its cost."""
+    why = []
+    if route.get("model") == "opus":
+        why.append(f"routed {route.get('agent')} ({route.get('model')}/{route.get('effort')})")
+    elif int(route.get("score", 0) or 0) >= 10:
+        why.append(f"complexity score {route.get('score')}")
+    for f in ("security", "persistence", "concurrency", "cross_system", "irreversible", "public_api"):
+        if fields.get(f):
+            why.append(f)
+    if int(fields.get("novelty", 0) or 0) >= 2:
+        why.append("novel to this repo")
+    hits = [k for k in ALGORITHMIC if router.keyword_hit(text.lower(), [k])]
+    if hits:
+        why.append("algorithmic: " + ", ".join(hits[:4]))
+    return {"review": bool(why), "why": why}
+
+
 # --------------------------------------------------------------------- scan --
 def scan(text, cwd):
     root, is_git = repo_root(cwd)
@@ -314,6 +408,8 @@ def scan(text, cwd):
     if not environments["production"] and any(f == "firebase.json" or f.startswith("functions/") for f in files):
         environments["production"].append("(firebase project, alias unknown)")
 
+    secrets = discover_secrets(root, files, cands, is_git, environments.get("default"))
+
     git = {}
     if is_git:
         _, br = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], str(root))
@@ -327,6 +423,7 @@ def scan(text, cwd):
         "slug": slugify(text),
         "git": git,
         "environments": environments,
+        "secrets": secrets,
         "repo_root": str(root),
         "is_git": is_git,
         "repo": {"files": len(files), "test_files": len(tests), "test_command": test_command(root),
@@ -552,6 +649,8 @@ def apply(prop, answers):
         sources["ambiguity"] = "user (open decisions answered)"
     decisions = {k: v for k, v in decisions.items() if k in scout_ids or k in builtin}
     r = router.route(final)
+    secrets = prop.get("secrets") or {}
+    needed = answers.get("secrets") if isinstance(answers.get("secrets"), list) else secrets.get("names", [])
     return {
         "request": prop.get("request"),
         "slug": prop.get("slug"),
@@ -559,6 +658,9 @@ def apply(prop, answers):
         "confirmed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "fields": final,
         "sources": sources,
+        "codex": codex_recommendation(final, prop.get("request", ""), r),
+        "secrets": {"provider": secrets.get("provider"), "project": secrets.get("project"),
+                    "names": needed, "template_keys": secrets.get("template_keys", [])},
         "decisions": decisions,
         "assumed_decisions": assumed_decisions,
         "notes": answers.get("notes", []),

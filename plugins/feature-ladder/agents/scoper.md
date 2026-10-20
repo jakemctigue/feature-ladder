@@ -67,12 +67,20 @@ later. You estimate; the user confirms what is uncertain. You change no code.
    with 2-4 options, your recommended one first and marked "(Recommended)".
    Skip anything the repo's conventions already answer.
 
-6. Write the result (the scan JSON with your corrected `fields` and
-   `open_decisions`) to `.feature-ladder/intake/<slug>-proposal.json`, then run:
+6. **Secrets.** The scan's `secrets.names` lists Secret Manager secret names
+   the candidate code reads (names only). Correct it from what you read:
+   keep the ones this feature's code path uses, add any the new code will
+   need (a service the request names that has a key in `template_keys` or in
+   the repo's existing pattern), drop the rest. Never read, print or guess a
+   value. Put the final list in `secrets.names`.
+
+7. Write the result (the scan JSON with your corrected `fields`,
+   `open_decisions` and `secrets`) to `.feature-ladder/intake/<slug>-proposal.json`, then run:
    ```
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/intake.py" decide .feature-ladder/intake/<slug>-proposal.json --mode <mode from your prompt>
    ```
 
-7. Return: the proposal path, then the `decide` output JSON verbatim, then a
-   table of every field (value, confidence, one-line evidence), then
+8. Return: the proposal path, then the `decide` output JSON verbatim, then a
+   table of every field (value, confidence, one-line evidence), the secret
+   names, then
    `Retained: none - intake only (the coordinator retains at acceptance)`.

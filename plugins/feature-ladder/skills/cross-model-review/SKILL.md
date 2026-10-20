@@ -17,9 +17,12 @@ limits. No credentials are read, copied, or passed around by this plugin.
 
 | Trigger | Mode | Codex reasoning effort |
 |---|---|---|
-| Every feature, before acceptance (pass 3) | `review` | medium; high if any task routed T4/T5/ESC/D or had flags security, persistence, concurrency, cross_system, public_api |
-| `/feature-ladder:feature ... --adversarial` | `review` then `adversarial` | same rule as review |
+| `/feature-ladder:feature ... --codex`, or the confirmed intake's `codex.review` is true (any task routed to Opus, complexity score >= 10, a risk flag, novelty >= 2, or algorithmic work such as parsers, schedulers, RNG, ranking, sync, concurrency) | `review`, before acceptance | medium; high if any task routed T4/T5/ESC or had flags security, persistence, concurrency, cross_system, irreversible, public_api |
+| `--adversarial`, or intake `security: true` | `review` then `adversarial` | same rule as review |
 | `/feature-ladder:codex-review [--adversarial]` | on demand, any branch or uncommitted work | same rules |
+
+Features that need none of this (small, well-trodden Sonnet/Haiku work) skip
+Codex; the report says so with the intake's reason.
 
 Effort and model can be overridden with `FEATURE_LADDER_CODEX_EFFORT` and
 `FEATURE_LADDER_CODEX_MODEL`; otherwise Codex's own configured model is used.
@@ -45,12 +48,19 @@ Results are saved to `.feature-ladder/reviews/<slug>-codex-<mode>.json`.
 
 ## Triage (coordinator)
 
-For each Codex finding, decide using the evidence, not deference to either model:
+For each Codex finding, decide using the evidence, not deference to either
+model. Verify first, then fix:
 
-1. **critical / high**: must be resolved before acceptance. Route a fix Task
-   Card through the router like any other task (the finding's file, line and
-   suggested fix go in the card), then re-run `review`.
-2. **medium**: fix if confirmed; otherwise record why not in FEATURE-REPORT.md.
+0. **Verify every critical/high/medium finding** with a check, not a read:
+   a `mechanic` (haiku/low) runs the input, test or query that would show the
+   bug (Codex's `detail` usually names it). Confirmed -> fix. Not reproducible
+   and the claim is about behaviour -> `second-opinion` (fable/low) with the
+   code excerpt and Codex's claim decides. Record the check in the report.
+1. **critical / high (confirmed)**: must be resolved before acceptance. Route
+   a fix Task Card through the router like any other task (the finding's
+   file, line, suggested fix and the reproducing check go in the card), then
+   re-run `review`.
+2. **medium (confirmed)**: fix; otherwise record why not in FEATURE-REPORT.md.
 3. **low**: list in the report; no automatic fix.
 4. **Disputed** (you believe Codex is wrong): send the single question to
    `second-opinion` (fable/low) with the code excerpt and Codex's claim. Its

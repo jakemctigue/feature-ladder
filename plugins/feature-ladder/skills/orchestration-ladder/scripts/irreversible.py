@@ -52,6 +52,21 @@ NEVER = [
     (r"\b(gsutil\s+(-m\s+)?rm|gcloud\s+storage\s+rm)\b[^;&|]*backup", "delete backups"),
     (r"\bterraform\s+destroy\b", "terraform destroy"),
     (r"\bdrop\s+database\b", "drop a database"),
+    (r"\bgcloud\s+secrets\s+(delete|versions\s+(destroy|disable))\b", "delete or disable a secret"),
+    (r"\bgcloud\s+secrets\s+(add-iam-policy-binding|set-iam-policy)\b", "change who can read a secret"),
+    (r"\bfirebase\s+functions:secrets:(destroy|prune)\b", "destroy a Firebase secret"),
+]
+
+# Commands whose output would put a secret value into the transcript or a file.
+# Workers use with_secrets.py instead, which keeps the value in one command's
+# environment and masks it in the output.
+SECRET_EXPOSURE = [
+    (r"\bgcloud\s+secrets\s+versions\s+access\b", "reads a secret value"),
+    (r"\bfirebase\s+functions:(secrets:access|config:get)\b", "reads a secret value"),
+    (r"\b(cat|type|less|more|head|tail|bat)\s+[^;&|]*\.env(\.\w+)?(\s|$)", "prints a .env file"),
+    (r"(^|[;&|]\s*)(printenv|env|set)\s*($|[;&|])", "dumps the environment"),
+    (r"\b(echo|printf|print)\b[^;&|]*\$\{?[A-Za-z_]*(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL)[A-Za-z_]*\b", "prints a secret variable"),
+    (r"\b(KEY|SECRET|TOKEN|PASSWORD)\S*=\S{16,}", "puts a secret value on the command line"),
 ]
 
 # (pattern, label, destroys_data). Everything here has effects outside the repo.
@@ -66,6 +81,8 @@ OUTSIDE = [
     (r"\bfirebase\s+hosting:", "hosting change", False),
     (r"\bgcloud\s+firestore\s+import\b", "import into Firestore (overwrites)", True),
     (r"\bgcloud\s+firestore\s+export\b", "export Firestore", False),
+    (r"\bgcloud\s+secrets\s+(create|versions\s+add|update)\b", "write a secret", True),
+    (r"\bfirebase\s+functions:secrets:set\b", "write a Firebase secret", True),
     (r"\bgcloud\b[^;&|]*\s(delete|remove)\b", "delete cloud resource", True),
     (r"\b(gsutil\s+(-m\s+)?rm|gcloud\s+storage\s+rm)\b", "delete stored objects", True),
     (r"\b(node|tsx|ts-node|deno|bun|python3?|py|npx\s+\S+)\s+" + _NOT_TEST + r"(\S+[/\\])*\S*(migrat|backfill|purge|cleanup|clean-up|wipe|reset|dedupe|delete|import|seed)\S*\.(m?[jt]s|cjs|py)\b", "data script", True),
@@ -143,8 +160,13 @@ def classify(cmd, run):
     env = run.get("environments") or {}
     policy = run.get("outside_policy") or "all"
     text = executable_text(cmd)
-    if OWN_SCRIPTS.search(text):
+    if OWN_SCRIPTS.search(text) or "with_secrets.py" in text:
         return {"tier": "none", "decision": "allow"}
+    for pat, label in SECRET_EXPOSURE:
+        if re.search(pat, text, I | re.M):
+            return {"tier": "secret", "label": label, "decision": "deny",
+                    "reason": f"this {label}, which would put it in the transcript. Run the command that needs it "
+                              "through with_secrets.py --secret NAME -- <command> instead"}
     base = run.get("base") or ""
     never = list(NEVER)
     if base and base not in ("main", "master", "production", "release"):
@@ -201,6 +223,9 @@ def gate(cmd, run):
                        "now? It must answer with a line 'VERDICT: APPROVE' or 'VERDICT: REJECT'. Save the "
                        "answer to a file, run irreversible.py approve --cmd \"<exact command>\" --verdict-file "
                        "<file>, then run the exact same command. Do not write undo scripts."), False
+    if c["tier"] == "secret":
+        record(run, cmd, c, "blocked: would expose a secret")
+        return False, "feature-ladder: " + c["reason"] + ".", True
     record(run, cmd, c, "left for user: " + c["reason"])
     return False, "feature-ladder: " + c["reason"] + ". Note it in FEATURE-REPORT.md and carry on.", True
 

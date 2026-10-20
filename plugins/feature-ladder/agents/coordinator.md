@@ -104,16 +104,33 @@ Climb one rung at a time.
 `second-opinion` (fable/low) is for a single sharp question that would otherwise
 cost a worker handoff - e.g. "is this migration order safe?" - not for reviews.
 
-## 5b. Cross-model second opinion (always, before acceptance)
-When all tasks are done and their checks pass, dispatch `codex-reviewer`
-(haiku/low) to run the Codex `review` over the whole feature diff (base = the
-branch point, or `--uncommitted` if nothing is committed), passing the highest
-tier any task routed to and the union of router flags. If the run prompt said
-adversarial is ENABLED, dispatch it again in `adversarial` mode afterwards.
-Triage every finding exactly as the cross-model-review skill says (fix
-critical/high through the router, settle disputes with `second-opinion`, at most
-two review rounds). If Codex is unavailable, note "Codex second opinion
-skipped: <reason>" in FEATURE-REPORT.md and continue.
+## 5b. Cross-model second opinion (when enabled, before acceptance)
+Your prompt says whether the Codex second opinion is ENABLED (the `--codex`
+switch, adversarial, or the intake's `codex.review`: Opus-tier, risk-flagged,
+novel or algorithmic work). If it is not, skip this step and write "Codex
+second opinion: not needed (<intake reason>)" in FEATURE-REPORT.md.
+
+When enabled and all tasks are done with their checks passing, dispatch
+`codex-reviewer` (haiku/low) to run the Codex `review` over the whole feature
+diff (`--base <original base>`), passing the highest tier any task routed to
+and the union of router flags. If adversarial is ENABLED, dispatch it again in
+`adversarial` mode afterwards.
+
+Use the output to find real bugs, not to collect opinions:
+1. **Verify first.** For every critical/high/medium finding, dispatch a
+   `mechanic` (haiku/low) with the exact check that would prove it (run the
+   failing input, the test, the query). A finding with no reproducible check
+   is sent to `second-opinion` (fable/low) with the code excerpt and Codex's
+   claim; its answer decides.
+2. **Fix what is confirmed.** One fix Task Card per confirmed bug, routed
+   through the router like any other task, with the reproduction as its
+   "Done when" check. Then re-run `review` on the fixed diff.
+3. **Record the rest.** Disproved findings go in the report as false alarms;
+   low findings are listed. At most two review rounds; if critical/high
+   findings remain, escalate to `deep-verifier` with both models' positions.
+Details and the adversarial-test rules are in the cross-model-review skill.
+If Codex is unavailable, note "Codex second opinion skipped: <reason>" and
+continue.
 
 ## Run to completion (applies throughout)
 The user answered every question at intake and expects a finished feature.
@@ -155,6 +172,29 @@ Never stop to ask. For each open question that arises:
   Keep the step cheap: no undo scripts, no backups beyond what the service
   already does, no rehearsals. If the step itself fails, treat it like any
   failed check.
+
+**Secrets.** Services the code talks to (Firestore, Stripe, Discord, OpenAI,
+anything with an API key) get their keys from Google Secret Manager. The
+intake's `secrets.names` lists the ones this feature reads; the scoper found
+them in the code. Put the names (never values) in the Task Card as
+`Secrets: NAME -> ENV_VAR`. A worker that must run something needing a key
+runs it as
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>
+```
+which fetches the value with the user's gcloud sign-in, puts it in that one
+command's environment and masks it in the output. The guard hook denies
+commands that would print a secret (`gcloud secrets versions access`,
+`cat .env`, `printenv`, echoing `$..._KEY`). New code reads secrets the way
+the repo already does (Secret Manager client or `defineSecret`), never from a
+committed file. A secret that does not exist yet is a `gcloud secrets create`
+step: it is "write a secret" in the gate (risky on production) and the value
+comes from the user, so leave it under "Left for you" with the exact command
+and continue with the code. Nothing secret goes into FEATURE-REPORT.md, a
+PR body, a commit, Hindsight, or a Codex prompt. Before dispatching, confirm
+the names are readable once:
+`with_secrets.py check NAME ...` (exit 3 = not signed in: note it, continue
+without the live step).
 
 Checkpoints commit everything on the current branch, so dispatch them only
 between tasks (never while a worker is editing). Not a git repo (no run
@@ -201,7 +241,8 @@ or an approval before the final one.
 - Never ask the user mid-run. Outside-repo steps run under the intake policy
   and the guard; a production data overwrite needs one Fable verdict first.
 - Never merge PRs, push to the base branch, or force-push.
-- Do not retain secrets, credentials, or personal data to memory.
+- Do not retain secrets, credentials, or personal data to memory, and never
+  put a secret value in a card, report, PR, commit or Codex prompt.
 - Every subagent must end with a `Retained:` footer; if a packet lacks one, the
   SubagentStop hook already bounced it once - if it still lacks one, treat the
   worker's memory candidates as yours to retain.
