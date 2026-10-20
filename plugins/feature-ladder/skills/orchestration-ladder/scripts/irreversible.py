@@ -24,7 +24,11 @@ outside the repo.
 
 Only the executable part of a command is classified: quoted strings, heredocs
 and comments are stripped first, so `git commit -m "drop table"` or
-`grep "DELETE FROM"` are not commands.
+`grep "DELETE FROM"` are not commands. Code that a shell will still run is
+classified too: the payload of `bash -c '...'` / `sh -c` / `eval`, a heredoc
+fed to a shell, `$(...)` and backticks, and the command after `--` in
+with_secrets.py. Calls to our own scripts are skipped one segment at a time,
+so `route.py ...; <command>` still classifies the command.
 
   classify "<command>"            print the decision as JSON (no side effects)
   approve --cmd C --verdict-file F
@@ -51,6 +55,8 @@ NEVER = [
     (r"\bgit\s+push\b[^;&|]*(\s:(main|master)(\s|$)|--delete\s+(main|master)(\s|$))", "delete main/master"),
     (r"\b(gsutil\s+(-m\s+)?rm|gcloud\s+storage\s+rm)\b[^;&|]*backup", "delete backups"),
     (r"\bterraform\s+destroy\b", "terraform destroy"),
+    (r"\brm\b(?=[^;&|]*\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(\s|$))[^;&|]*\s(/\*?|~/?\*?|\$\{?HOME\}?/?\*?)(\s|$)",
+     "recursively delete / or the home folder"),
     (r"\bdrop\s+database\b", "drop a database"),
     (r"\bgcloud\s+secrets\s+(delete|versions\s+(destroy|disable))\b", "delete or disable a secret"),
     (r"\bgcloud\s+secrets\s+(add-iam-policy-binding|set-iam-policy)\b", "change who can read a secret"),
@@ -115,9 +121,13 @@ PROD_WORDS = r"\b(prod|production|live)\b"
 OWN_SCRIPTS = re.compile(r"\b(irreversible|pr_checkpoint|intake|route|select_skills|resolve_bank|codex_review)\.py\b")
 
 
+HEREDOC = re.compile(r"(<<-?\s*['\"]?(\w+)['\"]?[^\n]*)\n.*?\n\s*\2\b", re.S)
+SHELL_HEREDOC = re.compile(r"\b(?:ba|z|da|k)?sh\b[^;&|\n]*<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n(.*?)\n\s*\1\b", re.S)
+
+
 def executable_text(cmd):
     """Strip quoted strings, heredoc bodies and comments: what is left is what runs."""
-    t = re.sub(r"<<-?\s*['\"]?(\w+)['\"]?\n.*?\n\s*\1\b", " ", cmd, flags=re.S)  # heredocs
+    t = HEREDOC.sub(r"\1 ", cmd)  # heredoc bodies; the rest of the opening line still runs
     t = re.sub(r"'[^']*'", "''", t)
     t = re.sub(r'"(?:\\.|[^"\\])*"', '""', t)
     t = re.sub(r"(^|\s)#[^\n]*", " ", t)
@@ -156,12 +166,99 @@ def _environment(cmd, env):
     return "nonprod"   # local tools with no target named (dev database, local scripts)
 
 
-def classify(cmd, run):
+SHELL_C = re.compile(r"\b(?:ba|z|da|k)?sh\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*c[a-zA-Z]*\s+(?:'([^']*)'|\"((?:\\.|[^\"\\])*)\")")
+EVAL = re.compile(r"\beval\s+(?:'([^']*)'|\"((?:\\.|[^\"\\])*)\")")
+SUBST = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+RANK = {"deny": 3, "needs_verdict": 2, "allow": 1}
+
+
+def _segments(cmd):
+    """Split on unquoted ; & | and newlines; quoted text stays inside its segment."""
+    segs, cur, q, i = [], [], None, 0
+    while i < len(cmd):
+        ch = cmd[i]
+        if ch == "\\" and q != "'" and i + 1 < len(cmd):
+            cur.append(cmd[i:i + 2])
+            i += 2
+            continue
+        if q:
+            q = None if ch == q else q
+            cur.append(ch)
+        elif ch in "'\"":
+            q = ch
+            cur.append(ch)
+        elif ch in ";&|\n":
+            segs.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+    segs.append("".join(cur))
+    return [g for g in segs if g.strip()]
+
+
+def _quoted(cmd):
+    """For each position in cmd: the quote it is inside (' or "), or None."""
+    mask, q, i = [None] * len(cmd), None, 0
+    while i < len(cmd):
+        ch = cmd[i]
+        if ch == "\\" and q != "'" and i + 1 < len(cmd):
+            mask[i] = mask[i + 1] = q
+            i += 2
+            continue
+        if q:
+            mask[i] = q
+            q = None if ch == q else q
+        elif ch in "'\"":
+            mask[i] = q = ch
+        i += 1
+    return mask
+
+
+def _unescape(dq):
+    return re.sub(r'\\(["\\$`])', r"\1", dq)
+
+
+def _inner_commands(raw):
+    """Code a shell runs that quote-stripping would hide."""
+    mask = _quoted(raw)
+    wrapped = [m for rx in (SHELL_C, EVAL) for m in rx.finditer(raw) if not mask[m.start()]]
+    inner = [m.group(1) if m.group(1) is not None else _unescape(m.group(2)) for m in wrapped]
+    # $(...) and backticks run unless single-quoted or escaped
+    inner += [m.group(1) if m.group(1) is not None else m.group(2) for m in SUBST.finditer(raw)
+              if mask[m.start()] != "'" and not raw[:m.start()].endswith("\\")]
+    return [c for c in inner if c.strip()]
+
+
+def _worse(a, b):
+    ra, rb = RANK[a["decision"]], RANK[b["decision"]]
+    if ra != rb:
+        return a if ra > rb else b
+    return b if a["tier"] == "none" and b["tier"] != "none" else a
+
+
+def classify(cmd, run, _depth=0):
+    inner = [m.group(2) for m in SHELL_HEREDOC.finditer(cmd)]
+    raw = HEREDOC.sub(r"\1 ", cmd)
+    kept = []
+    for seg in _segments(raw):
+        if "with_secrets.py" in executable_text(seg):
+            m = re.search(r"\s--\s(.*)$", seg, re.S)
+            if m:
+                kept.append(m.group(1))
+        elif not OWN_SCRIPTS.search(executable_text(seg)):
+            kept.append(seg)
+    raw = " ; ".join(kept)
+    out = _classify_text(executable_text(raw), run)
+    if _depth < 4:
+        for c in inner + _inner_commands(raw):
+            out = _worse(out, classify(c, run, _depth + 1))
+    return out
+
+
+def _classify_text(text, run):
     env = run.get("environments") or {}
     policy = run.get("outside_policy") or "all"
-    text = executable_text(cmd)
-    if OWN_SCRIPTS.search(text) or "with_secrets.py" in text:
-        return {"tier": "none", "decision": "allow"}
     for pat, label in SECRET_EXPOSURE:
         if re.search(pat, text, I | re.M):
             return {"tier": "secret", "label": label, "decision": "deny",
