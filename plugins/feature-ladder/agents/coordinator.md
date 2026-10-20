@@ -8,6 +8,7 @@ skills:
   - feature-ladder:orchestration-ladder
   - feature-ladder:complexity-router
   - feature-ladder:skill-selector
+  - feature-ladder:cross-model-review
   - feature-ladder:hindsight-memory
 disallowedTools:
   - Skill
@@ -90,6 +91,17 @@ Climb one rung at a time.
 
 `second-opinion` (fable/low) is for a single sharp question that would otherwise
 cost a worker handoff - e.g. "is this migration order safe?" - not for reviews.
+
+## 5b. Cross-model second opinion (always, before acceptance)
+When all tasks are done and their checks pass, dispatch `codex-reviewer`
+(haiku/low) to run the Codex `review` over the whole feature diff (base = the
+branch point, or `--uncommitted` if nothing is committed), passing the highest
+tier any task routed to and the union of router flags. If the run prompt said
+adversarial is ENABLED, dispatch it again in `adversarial` mode afterwards.
+Triage every finding exactly as the cross-model-review skill says (fix
+critical/high through the router, settle disputes with `second-opinion`, at most
+two review rounds). If Codex is unavailable, note "Codex second opinion
+skipped: <reason>" in FEATURE-REPORT.md and continue.
 
 ## 6. Accept (inspection pass 3 of 3)
 Acceptance criteria are in the orchestration-ladder skill. When met: finish

@@ -61,6 +61,7 @@ Both use the same scripts and rules.
 | F-High | `deep-verifier` | Fable 5.1 / high | Subtle bugs, conflicting evidence, cross-system correctness |
 | F-Extra | `architect-escalation` | Fable 5.1 / xhigh | Architecture or systemic problems unresolved after High |
 | F-Ultra | `ultra-investigator` | Fable 5.1 / max | Optional deep investigations (opt-in with `--ultra`) |
+| X | `codex-reviewer` | Haiku / low driving **OpenAI Codex** | Cross-model second opinion on every feature; adversarial tests with `--adversarial` |
 
 ### How a feature run flows
 
@@ -80,9 +81,14 @@ Both use the same scripts and rules.
    how they were verified.
 7. **Verify.** A separate mechanic re-runs the "done when" checks. The
    coordinator spot-checks claims against the diff.
-8. **Escalate only when warranted.** One rung at a time, each climb justified
+8. **Get a second opinion from another model.** OpenAI Codex reviews the
+   whole feature diff (read-only). With `--adversarial` it also writes tests
+   that try to break the change and runs them. Real problems go back through
+   the router as fix tasks; disputed findings are settled by a short Fable
+   second opinion.
+9. **Escalate only when warranted.** One rung at a time, each climb justified
    in the report.
-9. **Accept and remember.** The coordinator finishes the report, and the
+10. **Accept and remember.** The coordinator finishes the report, and the
    durable facts go to Hindsight.
 
 ---
@@ -129,6 +135,38 @@ See [Skill selection](#skill-selection) below.
   (and your home folder) use the default bank.
 - **Health check:** the same session-start step reports the bank in use, or
   that Hindsight is unreachable. If memory is down, work continues without it.
+
+### Cross-model second opinion (OpenAI Codex)
+
+A different model family catches different mistakes, so Claude never grades
+its own work alone. Before acceptance, every feature's full diff is reviewed by
+OpenAI Codex through the official Codex CLI, using your own Codex sign-in
+(ChatGPT plan or API key; usage counts toward your Codex limits). The plugin
+never touches credentials.
+
+- **Review (always):** Codex runs in a read-only sandbox and returns structured
+  findings (severity, file, line, why, fix). Reasoning effort is chosen
+  deterministically, the same way for review and adversarial runs: medium for
+  routine work, high when any task routed to
+  Opus or escalated, or touched security, persistence, concurrency,
+  cross-system or public-API code.
+- **Adversarial tests (`--adversarial`):** Codex writes tests that attack the
+  change (edge cases, hostile input, error paths, concurrency) only under
+  `.feature-ladder/adversarial/<slug>/`, runs them with your test runner, and
+  marks which failures are real bugs. A before-and-after `git status` check
+  flags anything it touched outside that folder.
+- **Triage:** critical and high findings must be fixed (routed like any task)
+  and re-reviewed; medium are fixed or justified in the report; disputes go to
+  a one-question Fable second opinion; at most two rounds, then `deep-verifier`.
+  Adversarial tests that exposed real bugs are moved into your test suite once
+  fixed. Confirmed findings and false alarms are both saved to Hindsight.
+- **Cheap to drive:** a Haiku-low agent runs Codex and hands back its findings
+  verbatim, so Fable never spends tokens reading raw review output.
+- **Optional:** if Codex isn't installed or signed in, the run says so and continues.
+
+Records are saved to `.feature-ladder/reviews/`. That folder and
+`.feature-ladder/adversarial/` are git-ignored automatically. On demand, for
+any branch or uncommitted work: `/feature-ladder:codex-review [--adversarial]`.
 
 ### Evidence and escalation discipline
 
@@ -239,7 +277,7 @@ claude plugin install feature-ladder@feature-ladder
 
 Or inside a session: `/plugin marketplace add jakemctigue/feature-ladder`,
 then `/plugin install feature-ladder@feature-ladder`. To check the install,
-`/agents` should list the twelve `feature-ladder:*` agents, and `/mcp` should
+`/agents` should list the thirteen `feature-ladder:*` agents, and `/mcp` should
 show `plugin:feature-ladder:hindsight`.
 
 Requirements: Python 3 on PATH (`python3` or `python`). On Windows, Git Bash
@@ -279,7 +317,8 @@ one, the app skill skips memory and says so.
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--ultra]` | Run a feature end to end |
+| `/feature-ladder:feature <request> [--adversarial] [--ultra]` | Run a feature end to end |
+| `/feature-ladder:codex-review [--base <ref>] [--uncommitted] [--adversarial]` | Codex second opinion (and adversarial tests) on demand |
 | `/feature-ladder:route <task or JSON>` | Dry-run the model router |
 | `/feature-ladder:skills <task, JSON or --list>` | Dry-run the skill selector |
 | `/feature-ladder:recall <topic>` | Ask Hindsight what it knows, without starting a run |
@@ -290,9 +329,10 @@ one, the app skill skips memory and says so.
 |---|---|---|
 | Deterministic model routing | ✅ plugin script | ✅ same script, fetched from this repo |
 | Deterministic skill selection | ✅ enforced (`Skill` tool removed from workers) | ✅ selected and injected; enforcement by instruction |
-| Twelve named ladder agents | ✅ | General-purpose subagents with role briefs |
+| Thirteen named ladder agents | ✅ | General-purpose subagents with role briefs |
 | Hindsight memory | ✅ plugin MCP server, per-repo bank via hooks | ✅ if a Hindsight connector is added; per-repo bank via the same resolver |
 | Retain gate and startup hooks | ✅ | — (no hooks in the app) |
+| Codex second opinion and adversarial tests | ✅ via your local Codex CLI | — (needs your local Codex sign-in) |
 
 ## Repository layout
 
@@ -301,12 +341,13 @@ one, the app skill skips memory and says so.
 plugins/feature-ladder/
   .claude-plugin/plugin.json
   .mcp.json                            Hindsight HTTP MCP server (env-driven)
-  agents/                              12 rungs
-  commands/                            feature, route, skills, recall
+  agents/                              13 rungs
+  commands/                            feature, route, skills, recall, codex-review
   skills/orchestration-ladder/         protocol + handoff contracts
   skills/complexity-router/            route.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/hindsight-memory/             recall / retain protocol + resolve_bank.py
+  skills/cross-model-review/           codex_review.py (Codex review + adversarial tests)
   hooks/                               session-start bank resolution, per-call bank routing, retain gate
   hindsight/                           self-host env, start script, round-trip test
 claude-app/model-ladder-router/        the Claude app skill
@@ -322,6 +363,14 @@ claude-app/model-ladder-router/        the Claude app skill
   orchestration protocol is in context.
 - Subagents have a fixed startup cost. For very small checks, running them
   directly can be cheaper than delegating.
+- The Codex second opinion requires the Codex CLI (`npm install -g @openai/codex`)
+  signed in with `codex login`. A review takes a few minutes; it is bounded by
+  `FEATURE_LADDER_CODEX_TIMEOUT` (default 570 seconds, just under Claude Code's 10-minute command limit). Set
+  `FEATURE_LADDER_CODEX_MODEL` / `FEATURE_LADDER_CODEX_EFFORT` to override
+  Codex's model or reasoning effort.
+- Gemini is deliberately not integrated through a consumer subscription:
+  Google's Antigravity FAQ says wrapping its CLI in third-party coding agents
+  isn't supported on consumer plans. Use a paid Gemini API key for that.
 - On Hindsight Cloud, Vectorize chooses the model for Hindsight's own
   extraction. The per-operation model pinning applies to self-hosted servers.
 

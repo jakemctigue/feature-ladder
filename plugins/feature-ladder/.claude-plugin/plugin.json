@@ -1,18 +1,21 @@
 {
   "name": "feature-ladder",
-  "version": "1.2.0",
-  "description": "Orchestration ladder for adding features: Fable 5.1 coordinates and verifies sparingly, Opus 5.5 experts design and do hard implementation, Sonnet/Haiku workers do routed coding; deterministic model routing, deterministic per-task skill selection, per-repository Hindsight memory banks.",
+  "version": "1.3.0",
+  "description": "Orchestration ladder for adding features: Fable 5.1 coordinates and verifies sparingly, Opus 5.5 experts design and do hard implementation, Sonnet/Haiku workers do routed coding; deterministic model routing, deterministic per-task skill selection, per-repository Hindsight memory banks, and an OpenAI Codex cross-model second opinion with optional adversarial tests.",
   "author": {
     "name": "Jake McTigue",
     "url": "https://github.com/jakemctigue"
   },
   "keywords": [
-    "orchestration",
-    "subagents",
+    "adversarial-testing",
+    "code-review",
+    "codex",
     "feature",
     "hindsight",
     "memory",
-    "model-routing"
+    "model-routing",
+    "orchestration",
+    "subagents"
   ],
   "license": "MIT",
   "homepage": "https://github.com/jakemctigue/feature-ladder",

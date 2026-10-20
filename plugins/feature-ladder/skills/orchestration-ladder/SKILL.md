@@ -24,6 +24,7 @@ for a specific unresolved problem.
 | F-High | `deep-verifier` | fable / high | Subtle bugs, conflicting evidence, cross-system or consequential correctness |
 | F-Extra | `architect-escalation` | fable / xhigh | Architecture or systemic problems still unresolved after High |
 | F-Ultra | `ultra-investigator` | fable / max | Optional deep investigations; opt-in only |
+| X | `codex-reviewer` | haiku / low driving OpenAI Codex | Cross-model second opinion on every feature diff; adversarial tests on request (`--adversarial`) |
 
 Effort names map to Claude Code effort levels: Low=`low`, Medium=`medium`,
 High=`high`, Extra=`xhigh`, Ultra=`max`.
