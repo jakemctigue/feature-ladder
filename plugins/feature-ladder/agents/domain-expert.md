@@ -5,8 +5,7 @@ model: opus
 effort: medium
 color: blue
 skills:
-  - feature-ladder:orchestration-ladder
-  - feature-ladder:hindsight-memory
+  - feature-ladder:worker-contract
 maxTurns: 40
 disallowedTools:
   - Skill
@@ -43,7 +42,7 @@ Rules:
   ML training infrastructure), say so in the first paragraph and recommend the
   coordinator use `domain-expert-high`.
 - Before your final message, hand `memory-scribe` (haiku/low) a candidate list
-  (hindsight-memory skill): the key decision and why, each rejected option with
+  (worker-contract skill): the key decision and why, each rejected option with
   its reason, and any constraint not written down in the repo. Do not write
   the retain calls yourself.
 - Return the DESIGN.md content and the task router fields in your final message,

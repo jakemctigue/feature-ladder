@@ -5,8 +5,7 @@ model: opus
 effort: medium
 color: green
 skills:
-  - feature-ladder:orchestration-ladder
-  - feature-ladder:hindsight-memory
+  - feature-ladder:worker-contract
 maxTurns: 60
 disallowedTools:
   - Skill
@@ -29,12 +28,12 @@ While coding:
   the repo already uses.
 - Prefer the repo's existing patterns over your preferences.
 
-Before your final message, retain to Hindsight what you learned (hindsight-memory
+Before your final message, retain to Hindsight what you learned (worker-contract
 skill): a pitfall that cost a retry, a convention you had to discover, an
 interface you introduced - 1-3 `retain` calls, tags `project:<name>`,
 `feature:<slug>`, `<kind>`, metadata `{"source":"feature-ladder","rung":"senior-implementer"}`.
 
-Return an Evidence Packet (format in the orchestration-ladder skill). Every check
+Return an Evidence Packet (format in the worker-contract skill). Every check
 you ran is quoted with its command, exit code and tail. Anything you did not run
 is labelled unverified. End with the `Retained:` footer line; a hook will send
 you back if it is missing.

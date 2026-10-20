@@ -255,7 +255,9 @@ choices get tuned against; without it those are guesses.
 
 ### Hindsight memory
 
-- **Recall before work:** the coordinator and every worker query project memory first.
+- **Recall before work:** the coordinator queries project memory first and
+  quotes the useful snippets into each Task Card; a worker queries Hindsight
+  itself only when its card's `Memory:` line is `none`.
 - **Retain when each subagent finishes:** every rung ends its report with a
   `Retained:` line. A `SubagentStop` hook sends a worker back once if that
   line is missing.
@@ -356,9 +358,11 @@ repeatable and auditable.
    personal skills, project `.claude/skills`, installed plugins, and in the
    Claude app the synced account and plugin skills. It then applies the rules
    in `skill-rules.json`.
-3. It returns at most `max_skills` skills (default 3) within `max_chars` of
-   skill text (default 60,000). Anything cut is reported, never silently
-   included.
+3. It returns at most `max_skills` skills (default 3) within a character
+   budget of skill text: `max_chars_by_role` per router role (shipped
+   defaults: mechanic 0, implementer 15,000, senior implementer and domain
+   experts 30,000), else `max_chars` (default 20,000). Anything cut is
+   reported, never silently included.
 4. `--inject --out .feature-ladder/cards/<task>-skills.md` writes those
    skills' full instructions to that file and prints a three-line block that
    names it. The coordinator pastes the block into the task card and logs the
@@ -515,6 +519,7 @@ plugins/feature-ladder/
   skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py, verify.py
   skills/complexity-router/            route.py + intake.py
   skills/skill-selector/               select_skills.py + skill-rules.json
+  skills/worker-contract/              the short contract every worker preloads instead of the full protocol
   skills/hindsight-memory/             recall / retain protocol + resolve_bank.py
   skills/cross-model-review/           codex_review.py (Codex review + adversarial tests)
   hooks/                               bank resolution, per-call bank routing, retain gate, token ledger, irreversible-command guard

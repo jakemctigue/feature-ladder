@@ -31,6 +31,11 @@ Task fields (all optional)
   add      skill names the coordinator adds explicitly (logged as such)
   exclude  skill names to drop
 
+Budgets: at most max_skills skills and max_chars characters of skill text per
+task; max_chars_by_role (keyed by router role) overrides max_chars for that
+role, so a mechanic gets no skill text and a senior implementer gets more than
+an implementer. Anything cut is reported, never silently included.
+
 Rules are merged from, in order (later wins on the same rule id):
   1. <plugin>/skills/skill-selector/skill-rules.json   (shipped defaults)
   2. ~/.claude/feature-ladder/skill-rules.json          (your personal rules)
@@ -64,7 +69,7 @@ def load_rules():
     sources = [SKILL_DIR / "skill-rules.json",
                Path.home() / ".claude" / "feature-ladder" / "skill-rules.json",
                _project_rules_file()]
-    settings = {"max_skills": 3, "max_chars": 60000}
+    settings = {"max_skills": 3, "max_chars": 20000, "max_chars_by_role": {}}
     rules, used = [], []
     for f in sources:
         if not f or not Path(f).is_file():
@@ -74,6 +79,8 @@ def load_rules():
         for k in ("max_skills", "max_chars"):
             if k in data:
                 settings[k] = int(data[k])
+        for role, v in (data.get("max_chars_by_role") or {}).items():
+            settings["max_chars_by_role"][str(role).lower()] = int(v)
         for rid in data.get("disable", []):
             rules = [r for r in rules if r.get("id") != rid]
         for r in data.get("rules", []):
@@ -225,7 +232,15 @@ def _valid(rule):
     return bool(rule.get("skill")) and any(rule.get("when", {}).get(g) for g in GROUPS)
 
 
+def budget(task, settings):
+    """Character budget for this task's role: max_chars_by_role wins over max_chars."""
+    role = str(task.get("role", "")).split(":")[-1].lower()
+    by_role = settings.get("max_chars_by_role") or {}
+    return int(by_role.get(role, settings["max_chars"]))
+
+
 def select(task, settings, rules, inv):
+    max_chars = budget(task, settings)
     picked = {}  # skill -> (priority, order, reasons)
     for order, r in enumerate(rules):
         if not _valid(r):
@@ -260,8 +275,8 @@ def select(task, settings, rules, inv):
         size = len(body)
         if len(chosen) >= settings["max_skills"]:
             dropped.append({"skill": name, "reason": "over max_skills"})
-        elif total + size > settings["max_chars"]:
-            dropped.append({"skill": name, "reason": f"over max_chars ({size} chars)"})
+        elif total + size > max_chars:
+            dropped.append({"skill": name, "reason": f"over max_chars for this role ({size} chars, budget {max_chars})"})
         else:
             total += size
             if group:
@@ -269,7 +284,7 @@ def select(task, settings, rules, inv):
             chosen.append({"skill": name, "priority": pri, "chars": size,
                            "path": str(path), "why": why})
     return {"skills": chosen, "dropped": dropped, "unresolved": unresolved,
-            "total_chars": total, "settings": settings}
+            "total_chars": total, "max_chars": max_chars, "settings": settings}
 
 
 def inject(result):

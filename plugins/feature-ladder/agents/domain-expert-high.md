@@ -5,8 +5,7 @@ model: opus
 effort: high
 color: blue
 skills:
-  - feature-ladder:orchestration-ladder
-  - feature-ladder:hindsight-memory
+  - feature-ladder:worker-contract
 maxTurns: 50
 disallowedTools:
   - Skill
@@ -27,11 +26,11 @@ procedure and DESIGN.md headings as `domain-expert`, with these additions:
 - Cite sources for non-obvious claims (spec, RFC, library docs, or the file:line
   in this repo). Use `evidence-collector`-style rigor: a claim without a source
   is labelled as your judgment.
-- Recall and reflect from Hindsight as in the hindsight-memory skill; prior
+- Recall and reflect from Hindsight (one narrow `recall`, `reflect` for history questions); prior
   failed approaches in this repo are the most valuable thing memory can give you.
 
 Before your final message, hand `memory-scribe` (haiku/low) a candidate list
-(hindsight-memory skill): the key decision and why, rejected options with
+(worker-contract skill): the key decision and why, rejected options with
 reasons, invariants not documented in the repo, and any failure mode specific
 to this codebase. Do not write the retain calls yourself; copy the scribe's
 footer into your final message.

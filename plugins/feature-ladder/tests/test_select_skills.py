@@ -90,3 +90,46 @@ class OutFile(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoleBudgets(unittest.TestCase):
+    def _repo_with_budgets(self, tmp, by_role):
+        root = make_repo(tmp)
+        rules = json.loads((root / ".feature-ladder" / "skill-rules.json").read_text(encoding="utf-8"))
+        rules["max_chars_by_role"] = by_role
+        (root / ".feature-ladder" / "skill-rules.json").write_text(json.dumps(rules), encoding="utf-8")
+        return root
+
+    def test_role_budget_zero_drops_every_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo_with_budgets(tmp, {"implementer": 0})
+            code, out, _ = run(root, TASK)
+            self.assertEqual(code, 0)
+            data = json.loads(out)
+            self.assertEqual(data["skills"], [])
+            self.assertEqual(data["max_chars"], 0)
+            self.assertTrue(any("budget 0" in d["reason"] for d in data["dropped"]))
+
+    def test_role_without_budget_uses_max_chars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo_with_budgets(tmp, {"mechanic": 0})
+            task = json.dumps({"role": "second-opinion", "kind": "code", "paths": [], "text": "is the demo safe"})
+            code, out, _ = run(root, task)
+            data = json.loads(out)
+            self.assertEqual(data["max_chars"], 20000)  # shipped default; no per-role entry for this role
+            self.assertIn("demo", [s["skill"] for s in data["skills"]])
+
+    def test_project_rules_override_one_role_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo_with_budgets(tmp, {"implementer": 50000})
+            code, out, _ = run(root, TASK)
+            self.assertEqual(json.loads(out)["max_chars"], 50000)
+
+    def test_shipped_defaults_give_mechanic_no_skill_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(tmp)
+            task = json.dumps({"role": "mechanic", "kind": "docs", "paths": ["README.md"], "text": "draft the demo docs"})
+            code, out, _ = run(root, task)
+            data = json.loads(out)
+            self.assertEqual(data["max_chars"], 0)
+            self.assertEqual(data["skills"], [])

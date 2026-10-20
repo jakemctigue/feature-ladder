@@ -66,7 +66,9 @@ Groups: `roles`, `kinds`, `globs` (matched against each scope path and its file
 name; `*` also crosses folders), `keywords` (whole-word, case-insensitive),
 `all_keywords`, `flags`. Highest priority wins; ties keep file order. At most
 `max_skills` skills and `max_chars` characters of skill text are injected per
-card; anything cut is reported, never silently included.
+card; `max_chars_by_role` (keyed by the router role) overrides `max_chars` for
+that role, so a mechanic gets none and a senior implementer gets more than an
+implementer. Anything cut is reported, never silently included.
 
 Skill names: personal and project skills by their own name (`aws-cdk`,
 `eh:debug`); plugin skills as `plugin:skill` (`superpowers:test-driven-development`).

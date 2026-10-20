@@ -122,7 +122,7 @@ The result gives `agent` (the role), `model` and `effort`.
 python3 .feature-ladder/v1.6.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
 ```
 
-It chooses at most three skills (within a size budget) by rules, writes their
+It chooses at most three skills (within a per-role size budget) by rules, writes their
 full instructions to that file, and prints a short `## Skills for this task`
 block naming the file. Put that block in the subagent's prompt, not the file's
 contents: the skill text is for the worker, not for you. Run it without
