@@ -182,6 +182,12 @@ access`, `cat .env`, `printenv`, `echo $X_KEY`). Deleting, disabling or
 re-sharing a secret is on the never-list; creating one on production is a
 risky step. Values never reach a report, PR, commit, memory or Codex prompt.
 
+The guard classifies the command after `--` exactly as if it ran on its own.
+Most commands that need a key (deploys, dev or staging targets, reads) run at
+once with no Fable call. One that deletes or overwrites production data gets
+the same single Fable verdict it would get without the wrapper, and anything
+on the never-list is still left for you.
+
 ### Run to completion: branches and checkpoint PRs
 
 `skills/orchestration-ladder/scripts/pr_checkpoint.py` handles the branches.
@@ -208,7 +214,7 @@ classifies every shell command during a run, with no model tokens, and the
 |---|---|---|
 | **mundane** | emulator, dev or staging targets; `firebase deploy`; index builds; exports; dry runs; anything that doesn't destroy production data | runs at once, logged |
 | **risky** | `firestore:delete`, `firestore import`, destructive SQL, migration/backfill scripts against production | denied once; the coordinator gets one `second-opinion` (Fable low) verdict on the exact command, approves it with `irreversible.py approve`, and it runs |
-| **never** | deleting a project, database, repo or backups; weakening database protection; merging PRs; pushing to your base branch; force-pushing or deleting `main` | left for you, logged |
+| **never** | deleting a project, database, repo or backups; weakening database protection; merging PRs; pushing to your base branch; force-pushing or deleting `main`; `rm -rf` of `/` or your home folder | left for you, logged |
 
 The intake policy narrows this: *non-production only* leaves every production
 action for you; *nothing outside the repo* leaves all of them. Production is
@@ -216,7 +222,10 @@ recognised from `.firebaserc` aliases, `--project` flags and words like
 `prod`/`staging` in the command; an unknown target on a real cloud tool is
 treated as production. Only the executable part of a command is classified
 (quoted strings, heredocs and comments are stripped), so a commit message or a
-`grep` that mentions `DROP TABLE` is not a command. Every action, approved,
+`grep` that mentions `DROP TABLE` is not a command. Code a shell still runs is
+classified too: `bash -c '...'`, `eval`, a heredoc fed to a shell, `$(...)`,
+backticks, and the command after `--` in `with_secrets.py`. Recursively
+deleting `/` or your home folder is on the never-list. Every action, approved,
 rejected or left for you, is listed in a table in `FEATURE-REPORT.md`.
 
 ### Deterministic skill selection
