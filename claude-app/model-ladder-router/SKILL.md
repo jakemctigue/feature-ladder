@@ -70,26 +70,44 @@ only what is uncertain and matters. After that, do not stop to ask again.
    and run `intake.py apply .feature-ladder/proposal.json <answers file> --out .feature-ladder/intake.json`.
    That file is binding for every task below.
 
-Then route each task:
+The confirmed intake carries `route` (the rung for the whole feature),
+`budget` (its size) and `secrets`. Tell the user one line before anything
+runs: "Size M: one Sonnet-high worker, no design doc, no Codex. Running now."
+
+## 2b. The budget is binding
+
+| Size | Score | What you may spend |
+|---|---|---|
+| S | 0-9 | ONE subagent does the whole feature. No design, no second subagent to re-check, no Codex, no scribe. About a dozen of your own turns. |
+| M | 10-19 | One subagent; two only if the files form two independent sets. Otherwise as S. |
+| L | 20+ or a hard flag | Design first if `design_agreed` is false (an opus subagent writes DESIGN.md; you accept it), split into cards, Codex review once if signed in, one haiku scribe at the end. |
+
+Every subagent and every one of your turns re-reads its whole context, so
+the budget is where the cost is controlled. Never add a step it does not
+list. For S and M the whole job is: one `intake.py card` call, one subagent,
+one `verify.py run`, accept.
+
+Build each card and pick its skills in one call:
 
 ```bash
-python3 .feature-ladder/v1.8.0/complexity-router/scripts/route.py '<task json>'
+python3 .feature-ladder/v1.8.0/complexity-router/scripts/intake.py card '{"id":"T1", <router fields from the intake>, "paths":["<files in scope>"], "text":"<goal + description>"}'
 ```
 
-Fields: `kind` (code, docs, fixture, check, research, analysis), `files`,
-`loc`, `modules`; booleans `new_dependency`, `public_api`, `persistence`,
-`security`, `concurrency`, `cross_system`, `irreversible`, `no_tests`,
-`design_agreed`; 0-3 scales `ambiguity`, `novelty`, `blast_radius`.
-`--describe "<sentence>"` gives a keyword pre-fill you must correct;
-`--table` prints the scoring rules. Hard flags always escalate: ambiguity >= 2,
-blast_radius = 3. Opus implementation rungs require `design_agreed: true`.
+It prints the route (`agent`, `model`, `effort`, `size`) and a short
+`## Skills for this task` block naming a file the worker reads; paste both
+into the card and never read that file yourself. Router fields: `kind`
+(code, docs, fixture, check, research, analysis), `files`, `loc`, `modules`;
+booleans `new_dependency`, `public_api`, `persistence`, `security`,
+`concurrency`, `cross_system`, `irreversible`, `no_tests`, `design_agreed`;
+0-3 scales `ambiguity`, `novelty`, `blast_radius`. `route.py --table` prints
+the scoring rules. Hard flags always escalate: ambiguity >= 2, blast_radius =
+3. Opus rungs require `design_agreed: true`.
 
-The route also carries `size` (S, M or L) and the intake's `budget` says what
-that size may spend. **S and M (most features): one worker (two at most), no
-design doc, no separate check-runner, no Codex, no scribe; about a dozen
-coordinating turns.** Only L (Opus-tier or escalated) uses the full protocol.
-Do not add steps the budget does not list: every subagent and every turn
-re-reads its whole context, so the budget is where the cost is controlled.
+Verify with no model: after the worker returns, run
+`python3 .feature-ladder/v1.8.0/orchestration-ladder/scripts/verify.py run --id T1 --check "<cmd>" --scope <files> --changed <files the worker listed>`.
+Exit 0 accepts; exit 1 re-dispatches once with the failure (a second failure
+goes one band up, never more); exit 2 means the worker touched files outside
+scope, so bounce the packet to it.
 
 `irreversible` means effects outside the files being edited (real data,
 deploys, publishing, messages or payments sent to outside services). It adds
@@ -118,12 +136,12 @@ the official Codex CLI is signed in on this machine, run it over the diff,
 verify each finding with a check before fixing, and route confirmed bugs as
 fix tasks. Otherwise skip it and say why.
 
-The result gives `agent` (the role), `model` and `effort`.
+## 3. Selecting skills on their own
 
-## 3. Select the task's skills
+`intake.py card` already did this. To see the choice by itself:
 
 ```bash
-python3 .feature-ladder/v1.8.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent from step 2>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
+python3 .feature-ladder/v1.8.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
 ```
 
 It chooses at most three skills (within a per-role size budget) by rules, writes their
@@ -137,16 +155,16 @@ has `.feature-ladder/skill-rules.json`, those rules are merged in automatically.
 
 ## 4. Act on the result exactly
 
-- **ESCALATE** means the task is not ready. Resolve the ambiguity (decide, or
-  get a design from a domain expert), split it into tasks that route cleanly,
-  or for inherently consequential work keep it on an Opus rung and add a
-  fable/high review before accepting. Escalation never means you write the
-  code yourself.
+- **ESCALATE** means the task is not ready (ambiguity the intake should have
+  removed, or whole-app blast radius). Decide the open point yourself if it
+  is cheap to change later, or get a design from an opus subagent; then
+  re-run `intake.py card`. Escalation never means you write the code
+  yourself, and it never adds agents beyond the budget.
 - **If you can start subagents:** spawn a general-purpose subagent with the
   returned `model` and `effort` (this skill is the explicit instruction to set
   effort). Its prompt is: the role brief below, a task card (goal, scope of
   files allowed, "done when" checks, out of scope, relevant context), the
-  `## Skills for this task` block from step 3, and this line: "Read the skills
+  `## Skills for this task` block from `intake.py card`, and this line: "Read the skills
   file named above before anything else. Do not invoke the Skill tool. Those
   are the only skills you may use; if you need another, stop and say which
   and why."
@@ -161,9 +179,9 @@ Acceptance: the "done when" checks are re-run without a model:
 `python3 .feature-ladder/v1.8.0/orchestration-ladder/scripts/verify.py run --id <task> --check "<cmd>" ... --scope <paths> ... --changed <files the worker claims>`
 runs them exactly as written, saves the evidence under
 `.feature-ladder/evidence/`, and flags files changed outside scope or a wrong
-claim (exit 0 green, 1 a check failed, 2 scope or claim mismatch). When a
-check's output needs interpreting, a separate mechanic (haiku/low) re-runs it
-instead. Never the worker who wrote the code.
+claim (exit 0 green, 1 a check failed, 2 scope or claim mismatch). Only for
+size L, and only when a check's output needs interpreting, a separate
+haiku/low subagent re-runs it instead. Never the worker who wrote the code.
 
 ## Role briefs (put at the top of the subagent prompt)
 
