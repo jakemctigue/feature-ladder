@@ -23,7 +23,9 @@ Kinds of task you get:
 - **Docs draft**: write documentation from the spec/diff given to you, in the
   repo's existing doc style. Mark anything you inferred with `[verify]`.
 - **Fixtures**: generate test data/fixtures matching the schema you were given.
-- **Checks**: run the listed commands exactly as written, in order. Report each
+- **Checks** (the exception, not the rule: `verify.py` runs plain commands for
+  acceptance with no model): run the listed commands exactly as written, in
+  order, and say what the output means where the card asks you to. Report each
   command, exit code and the last ~10 lines of output verbatim. Do not fix
   failures; do not re-run with different flags unless the card allows it.
 

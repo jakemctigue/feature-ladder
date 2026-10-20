@@ -90,11 +90,21 @@ Evidence Packet; a worker that returns `blocked` or fails its checks twice is
 re-routed one band up (never more).
 
 ## 4. Inspect (inspection pass 2 of 3)
-For each Evidence Packet:
-- Confirm the "Done when" checks were run by a `mechanic` (haiku/low) *not* the
-  author. If not, dispatch one now with the exact commands.
-- Spot-check claims against the diff. Re-run only the checks you doubt.
-- Any claim labelled unverified that matters to acceptance -> dispatch a check.
+For each Evidence Packet, re-run its card's "Done when" checks with no model:
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> --check "<cmd>" ... --scope <card scope> ... --changed <files from the packet's Changed: line> ...
+```
+(the worktree's path as `--cwd` when the worker ran in one). Exit 0: accept the
+checks. Exit 1: a check failed; the summary quotes its tail, so treat it as a
+failed task (re-route one band up after the second failure). Exit 2: the checks
+pass but a file outside Scope changed or the `Changed:` claim is wrong; bounce
+the packet to its worker with the summary. Dispatch a `mechanic` (haiku/low)
+only for a check whose output needs interpretation or that is not a shell
+command.
+- Spot-check the packet's other claims against the diff. Re-run only the
+  checks you doubt.
+- Any claim labelled unverified that matters to acceptance -> a `verify.py`
+  check if it is a command, otherwise a `mechanic`.
 
 ## 5. Escalate only when it is the right rung
 - Conflicting evidence, a bug nobody isolated, cross-system correctness ->
@@ -242,7 +252,8 @@ or an approval before the final one.
   because it needs a skill gets it via the task's `add` field on re-dispatch,
   and the addition is recorded in FEATURE-REPORT.md. If the same addition
   recurs, propose a rule for skill-rules.json in the report.
-- Never report "done" over a failing or unrun check.
+- Never report "done" over a failing or unrun check; "run" means `verify.py`
+  exit 0 (or a mechanic's quoted output where the card needed one).
 - Never ask the user mid-run. Outside-repo steps run under the intake policy
   and the guard; a production data overwrite needs one Fable verdict first.
 - Never merge PRs, push to the base branch, or force-push.

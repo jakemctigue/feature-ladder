@@ -39,6 +39,8 @@ B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.6.0/plugins/fe
 for f in complexity-router/scripts/route.py complexity-router/scripts/intake.py orchestration-ladder/scripts/pr_checkpoint.py orchestration-ladder/scripts/irreversible.py orchestration-ladder/scripts/with_secrets.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py; do
   mkdir -p "$FL/$(dirname "$f")" && curl -fsSL "$B/$f" -o "$FL/$f" || break
 done
+# added after v1.6.0; absent on older release tags, so its absence is not an error
+curl -fsSL "$B/orchestration-ladder/scripts/verify.py" -o "$FL/orchestration-ladder/scripts/verify.py" 2>/dev/null || true
 python3 "$FL/complexity-router/scripts/route.py" --table >/dev/null && echo FETCH_OK
 ```
 
@@ -151,8 +153,14 @@ has `.feature-ladder/skill-rules.json`, those rules are merged in automatically.
   judgment. Re-route on failure one band at a time (T2 to T3 to T4 to T5);
   after T5 fails, escalate to fable/high to diagnose, not to implement.
 
-Acceptance: the "done when" checks are re-run by a separate mechanic
-(haiku/low), not by the worker who wrote the code.
+Acceptance: the "done when" checks are re-run without a model:
+`python3 .feature-ladder/v1.6.0/orchestration-ladder/scripts/verify.py run --id <task> --check "<cmd>" ... --scope <paths> ... --changed <files the worker claims>`
+runs them exactly as written, saves the evidence under
+`.feature-ladder/evidence/`, and flags files changed outside scope or a wrong
+claim (exit 0 green, 1 a check failed, 2 scope or claim mismatch). If that
+script was not fetched (older release), or a check's output needs
+interpreting, a separate mechanic (haiku/low) re-runs it instead. Never the
+worker who wrote the code.
 
 ## Role briefs (put at the top of the subagent prompt)
 

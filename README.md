@@ -43,7 +43,8 @@ Both use the same scripts and rules.
   inspection passes per feature, and one-step escalations with a written
   justification.
 - Requires evidence: every worker returns real command output for its checks,
-  and acceptance checks are re-run by a separate cheap worker, not by the author.
+  and acceptance checks are re-run by a script (`verify.py`), not by the author
+  and not by another model.
 - Records durable lessons (decisions, pitfalls, interfaces, test gates) in
   Hindsight after each task and each feature, using the cheapest model that
   can summarize correctly.
@@ -104,8 +105,10 @@ Both use the same scripts and rules.
 6. **Execute.** Workers run in parallel where independent, each returning an
    *Evidence Packet*: files changed, checks run with real output, claims and
    how they were verified.
-7. **Verify.** A separate mechanic re-runs the "done when" checks. The
-   coordinator spot-checks claims against the diff.
+7. **Verify.** `verify.py` re-runs the "done when" checks with no model,
+   records exit codes and output tails, and flags any file changed outside the
+   card's scope or a changed-files claim that does not match. The coordinator
+   spot-checks the remaining claims against the diff.
 8. **Get a second opinion from another model.** OpenAI Codex reviews the
    whole feature diff (read-only). With `--adversarial` it also writes tests
    that try to break the change and runs them. Real problems go back through
@@ -321,6 +324,13 @@ any branch or uncommitted work: `/feature-ladder:codex-review [--adversarial]`.
 
 - Task cards, evidence packets and design docs follow fixed formats
   (`skills/orchestration-ladder/SKILL.md`).
+- Acceptance checks cost no tokens:
+  `skills/orchestration-ladder/scripts/verify.py run --id T3 --check "pytest tests/x -q" --scope src/x.py --changed src/x.py`
+  runs the card's checks exactly as written, saves exit codes and output
+  tails to `.feature-ladder/evidence/<task>.json`, and compares the files that
+  really changed with the card's scope and the worker's claim. A check that
+  would touch production data or print a secret is refused, not run. A mechanic
+  is dispatched only when a check's output needs interpreting.
 - Failed or blocked tasks move up **one** band at a time.
 - Escalation means "fix the task" (decide, design, or split), never "the
   coordinator writes the code".
@@ -502,7 +512,7 @@ plugins/feature-ladder/
   .mcp.json                            Hindsight HTTP MCP server (env-driven)
   agents/                              14 agents (13 rungs + scoper)
   commands/                            feature, scope, route, skills, recall, codex-review
-  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py
+  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py, verify.py
   skills/complexity-router/            route.py + intake.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/hindsight-memory/             recall / retain protocol + resolve_bank.py
@@ -526,7 +536,8 @@ claude-app/model-ladder-router/        the Claude app skill
   step on a target it can't recognise is treated as production.
 - Checkpoint PRs stack: merge them in the order the final report lists.
   GitHub retargets the next PR when you merge one and delete its branch.
-- Subagents have a fixed startup cost. For very small checks, running them
+- Subagents have a fixed startup cost. Acceptance checks therefore run through
+  `verify.py` rather than a mechanic; for other very small jobs, running them
   directly can be cheaper than delegating.
 - The Codex second opinion requires the Codex CLI (`npm install -g @openai/codex`)
   signed in with `codex login`. A review takes a few minutes; it is bounded by

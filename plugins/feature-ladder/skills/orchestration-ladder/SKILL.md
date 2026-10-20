@@ -163,9 +163,32 @@ Independent tasks are launched in one message with multiple Agent calls. Tasks
 that touch the same files are serialized. Use `isolation: worktree` for Opus
 implementation tasks so a bad run never dirties the main tree.
 
+## Acceptance checks without a model
+
+`scripts/verify.py` re-runs a card's "Done when" checks for acceptance, so no
+mechanic subagent is started for them:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> \
+    --check "<done-when command>" [--check ...] --scope <path> [--scope ...] \
+    --changed <file the packet says it changed> [--changed ...] [--base <ref>]
+```
+
+It runs each command exactly as written, records exit code and output tail,
+lists what actually changed in the repo, and flags files outside the card's
+Scope or a `Changed:` claim that does not match. Evidence goes to
+`.feature-ladder/evidence/<task-id>.json`; the printed summary is a few lines.
+Exit 0 is green; 1 means a check failed (or was refused: a check that would
+touch production data or print a secret is never run); 2 means the checks
+passed but the scope or the claim is wrong. A `mechanic` is dispatched for
+acceptance only when a check's output needs interpretation (a flaky suite, an
+environment quirk) or the card's checks are not shell commands.
+
 ## Acceptance criteria (coordinator's final gate)
 
 - Every Task Card has a matching Evidence Packet with status `done`.
-- All "Done when" checks were run by `mechanic` (not by the implementer who wrote the code) and are green.
+- All "Done when" checks were re-run by `verify.py` (not by the implementer who
+  wrote the code) with exit 0, or by `mechanic` where the card says a check
+  needs interpretation.
 - No unverified claim survives in anything user-visible without being labelled.
 - FEATURE-REPORT.md written; outcome retained to Hindsight with tags `project:<name>`, `feature:<slug>`.

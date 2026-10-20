@@ -118,7 +118,7 @@ NONPROD_WORDS = r"\b(dev|devel|development|test|testing|staging|stage|qa|sandbox
 PROD_WORDS = r"\b(prod|production|live)\b"
 
 # Our own scripts take commands and SQL as quoted arguments; never classify them.
-OWN_SCRIPTS = re.compile(r"\b(irreversible|pr_checkpoint|intake|route|select_skills|resolve_bank|codex_review)\.py\b")
+OWN_SCRIPTS = re.compile(r"\b(irreversible|pr_checkpoint|intake|route|select_skills|resolve_bank|codex_review|verify|ledger)\.py\b")
 
 
 HEREDOC = re.compile(r"(<<-?\s*['\"]?(\w+)['\"]?[^\n]*)\n.*?\n\s*\2\b", re.S)
