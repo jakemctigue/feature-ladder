@@ -241,7 +241,7 @@ def record_ledger(root, task_id, rung, model, result):
                  "cache_read": int(usage.get("cache_read_input_tokens") or 0),
                  "cache_write": int(usage.get("cache_creation_input_tokens") or 0),
                  "output": int(usage.get("output_tokens") or 0),
-                 "cost_usd": result.get("total_cost_usd")}
+                 "cost_usd": result.get("openrouter_cost_usd")}
         entry["total"] = entry["input"] + entry["cache_read"] + entry["cache_write"] + entry["output"]
         out = ledger.ledger_path(root, run.get("slug"))
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -251,6 +251,26 @@ def record_ledger(root, task_id, rung, model, result):
         out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except Exception:  # noqa: BLE001 - the ledger is best effort
         pass
+
+
+def unfence(text):
+    """Models often wrap the packet in a ``` fence; the packet starts at TASK."""
+    t = text.strip()
+    m = re.search(r"^TASK\b.*", t, re.M)
+    if m:
+        t = t[m.start():]
+        t = re.sub(r"\n```\s*$", "", t)
+    return t.strip()
+
+
+def usage_usd(cfg, key):
+    """OpenRouter's own usage counter for this key; the difference around a
+    run is the real charge (Claude Code's total_cost_usd assumes Anthropic prices)."""
+    try:
+        s = key_status(cfg, key)
+        return float(s["usage_usd"]) if s.get("valid") and s.get("usage_usd") is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_result(stdout):
@@ -303,6 +323,7 @@ def run(args):
     cmd = [exe, "-p", "--model", "sonnet", "--output-format", "json", "--max-turns", str(max_turns),
            "--permission-mode", "acceptEdits", "--allowedTools", TOOLS, "--disallowedTools", DISALLOWED,
            "--append-system-prompt", contract_text()]
+    usage_before = usage_usd(cfg, key)
     t0 = time.time()
     try:
         r = subprocess.run(cmd, cwd=cwd, env=child_env(cfg, key, model), input=card, capture_output=True,
@@ -313,25 +334,30 @@ def run(args):
         return 1
     secs = round(time.time() - t0)
     result = parse_result(r.stdout)
-    packet = str(result.get("result") or "").strip()
+    packet = unfence(str(result.get("result") or ""))
     if not packet.startswith("TASK"):
         packet = f"TASK {task_id} - partial\n{packet or '(worker returned no text)'}"
     if "Retained:" not in packet:
         packet += "\nRetained: none - external worker did not report"
+    usage_after = usage_usd(cfg, key)
+    charged = (round(usage_after - usage_before, 4) if usage_before is not None and usage_after is not None else None)
+    result["openrouter_cost_usd"] = charged  # what OpenRouter billed; total_cost_usd is Claude Code's Anthropic-price guess
     root = repo_root(cwd)
     ev = root / ".feature-ladder" / "evidence"
     ev.mkdir(parents=True, exist_ok=True)
     record = {"task": task_id, "rung": rung, "model": model, "key_source": source, "seconds": secs,
               "exit": r.returncode, "is_error": result.get("is_error"), "num_turns": result.get("num_turns"),
-              "usage": result.get("usage"), "total_cost_usd": result.get("total_cost_usd"),
+              "usage": result.get("usage"), "openrouter_cost_usd": charged,
+              "claude_code_estimate_usd": result.get("total_cost_usd"),
               "session_id": result.get("session_id"), "stderr_tail": (r.stderr or "")[-1500:], "packet": packet}
     (ev / f"{task_id}-external.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     record_ledger(root, task_id, rung, model, result)
     print(packet)
-    cost = result.get("total_cost_usd")
+    u = result.get("usage") or {}
+    toks = int(u.get("input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0)
+    cost_txt = f"OpenRouter charged ${charged:.4f}" if charged is not None else "cost not available"
     print(f"\nexternal worker: {model} via OpenRouter, {result.get('num_turns', '?')} turns, {secs}s, "
-          f"cost ${cost:.4f}" if isinstance(cost, (int, float)) else
-          f"\nexternal worker: {model} via OpenRouter, {result.get('num_turns', '?')} turns, {secs}s")
+          f"{toks:,} input tokens, {int(u.get('output_tokens') or 0):,} output, {cost_txt}")
     if r.returncode != 0 and not packet.startswith("TASK"):
         return 1
     return 0

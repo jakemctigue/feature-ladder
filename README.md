@@ -253,7 +253,9 @@ out) instead of the plan's weekly limit.
 `intake.py card` prints a `runner` with the exact command; the coordinator
 writes the Task Card to a file and runs it. A worker that fails its checks
 twice re-routes one band up, which lands back on Claude. Usage lands in the
-ledger with its OpenRouter cost. Override models in
+ledger with what OpenRouter actually charged (measured from the key's usage
+counter around the run; Claude Code's own cost figure assumes Anthropic
+prices and is ignored). Override models in
 `~/.claude/feature-ladder/providers.json` or with
 `FEATURE_LADDER_WORKER_MODEL`; `/feature-ladder:workers check --probe`
 validates the key, shows remaining credit and pings each model.
