@@ -768,11 +768,27 @@ def main(argv):
             sel = {"role": r["agent"], "kind": task.get("kind", "code"), "paths": task.get("paths", []),
                    "text": task.get("text", ""), "flags": flags, "add": task.get("add", []),
                    "exclude": task.get("exclude", [])}
+            root, _ = repo_root(os.getcwd())
+            tid = re.sub(r"[^A-Za-z0-9_-]", "-", str(task.get("id") or "task"))
+            # External (OpenRouter) workers for the cheap rungs, when configured.
+            try:
+                sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "orchestration-ladder" / "scripts"))
+                import external_worker as ew
+                cfg = ew.load_config(str(root))
+                if cfg.get("workers") == "openrouter" and r["agent"] in ew.EXTERNAL_RUNGS:
+                    rung_arg = r["agent"] + ("-high" if r.get("effort") == "high" else "")
+                    card_file = root / ".feature-ladder" / "cards" / f"{tid}.md"
+                    r["runner"] = {"kind": "external", "provider": "openrouter",
+                                   "model": ew.model_for(cfg, r["agent"], r.get("effort")),
+                                   "card_file": str(card_file),
+                                   "command": f'python3 "{ew.HERE / "external_worker.py"}" run --card "{card_file}" --id {tid} --rung {rung_arg}'}
+                else:
+                    r["runner"] = {"kind": "subagent"}
+            except Exception as e:  # noqa: BLE001 - routing must never fail because of this
+                r["runner"] = {"kind": "subagent", "note": f"external worker config ignored: {e}"[:160]}
             print(json.dumps(r, indent=2))
             print()
             selector = Path(__file__).resolve().parents[2] / "skill-selector" / "scripts" / "select_skills.py"
-            root, _ = repo_root(os.getcwd())
-            tid = re.sub(r"[^A-Za-z0-9_-]", "-", str(task.get("id") or "task"))
             out = root / ".feature-ladder" / "cards" / f"{tid}-skills.md"
             out.parent.mkdir(parents=True, exist_ok=True)
             res = subprocess.run([sys.executable, str(selector), "--inject", "--out", str(out), json.dumps(sel)],

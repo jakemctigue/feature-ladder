@@ -31,19 +31,19 @@ architecture problems, fable/max only if the user opts in.
 
 ## 1. Fetch the scripts (once per conversation)
 
-If `.feature-ladder/v1.8.0/` does not exist in the working directory, run:
+If `.feature-ladder/v1.9.0/` does not exist in the working directory, run:
 
 ```bash
-FL=.feature-ladder/v1.8.0
-B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.8.0/plugins/feature-ladder/skills
-for f in complexity-router/scripts/route.py complexity-router/scripts/intake.py orchestration-ladder/scripts/pr_checkpoint.py orchestration-ladder/scripts/irreversible.py orchestration-ladder/scripts/with_secrets.py orchestration-ladder/scripts/verify.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py; do
+FL=.feature-ladder/v1.9.0
+B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.9.0/plugins/feature-ladder/skills
+for f in complexity-router/scripts/route.py complexity-router/scripts/intake.py orchestration-ladder/scripts/pr_checkpoint.py orchestration-ladder/scripts/irreversible.py orchestration-ladder/scripts/with_secrets.py orchestration-ladder/scripts/verify.py orchestration-ladder/scripts/external_worker.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py; do
   mkdir -p "$FL/$(dirname "$f")" && curl -fsSL "$B/$f" -o "$FL/$f" || break
 done
 python3 "$FL/complexity-router/scripts/route.py" --table >/dev/null && echo FETCH_OK
 ```
 
 If that does not print `FETCH_OK`, try
-`git clone --depth 1 --branch v1.8.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
+`git clone --depth 1 --branch v1.9.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
 and use `.feature-ladder/repo/plugins/feature-ladder/skills` as the base path.
 If both fail, tell the user the scripts could not be downloaded and stop; do not
 route by judgment. Never edit the downloaded files.
@@ -54,14 +54,14 @@ Before delegating anything, settle the facts for the whole job and ask the user
 only what is uncertain and matters. After that, do not stop to ask again.
 
 1. If the work is in a folder or repo here, run
-   `python3 .feature-ladder/v1.8.0/complexity-router/scripts/intake.py scan "<request>" --cwd <folder> > .feature-ladder/proposal.json`.
+   `python3 .feature-ladder/v1.9.0/complexity-router/scripts/intake.py scan "<request>" --cwd <folder> > .feature-ladder/proposal.json`.
    Otherwise start from `{"request": "...", "slug": "...", "fields": {}, "open_decisions": []}`.
 2. Read the actual files or material. For every field write
    `{"value": ..., "confidence": "high|medium|low", "evidence": [...]}` into
    `fields`, and list up to 4 `open_decisions` (choices a worker would
    otherwise guess; each with `id`, `header`, `question`, 2-4 `options`,
    recommended first).
-3. `python3 .feature-ladder/v1.8.0/complexity-router/scripts/intake.py decide .feature-ladder/proposal.json`
+3. `python3 .feature-ladder/v1.9.0/complexity-router/scripts/intake.py decide .feature-ladder/proposal.json`
    lists the questions: fields that are uncertain **and** change the model,
    plus the open decisions. Ask them all in one go (the question tool if this
    session has one, otherwise one short numbered message). If the user said to
@@ -90,7 +90,7 @@ one `verify.py run`, accept.
 Build each card and pick its skills in one call:
 
 ```bash
-python3 .feature-ladder/v1.8.0/complexity-router/scripts/intake.py card '{"id":"T1", <router fields from the intake>, "paths":["<files in scope>"], "text":"<goal + description>"}'
+python3 .feature-ladder/v1.9.0/complexity-router/scripts/intake.py card '{"id":"T1", <router fields from the intake>, "paths":["<files in scope>"], "text":"<goal + description>"}'
 ```
 
 It prints the route (`agent`, `model`, `effort`, `size`) and a short
@@ -104,7 +104,7 @@ the scoring rules. Hard flags always escalate: ambiguity >= 2, blast_radius =
 3. Opus rungs require `design_agreed: true`.
 
 Verify with no model: after the worker returns, run
-`python3 .feature-ladder/v1.8.0/orchestration-ladder/scripts/verify.py run --id T1 --check "<cmd>" --scope <files> --changed <files the worker listed>`.
+`python3 .feature-ladder/v1.9.0/orchestration-ladder/scripts/verify.py run --id T1 --check "<cmd>" --scope <files> --changed <files the worker listed>`.
 Exit 0 accepts; exit 1 re-dispatches once with the failure (a second failure
 goes one band up, never more); exit 2 means the worker touched files outside
 scope, so bounce the packet to it.
@@ -112,7 +112,7 @@ scope, so bounce the packet to it.
 `irreversible` means effects outside the files being edited (real data,
 deploys, publishing, messages or payments sent to outside services). It adds
 risk points but never stops the run. Before running such a command, classify
-it: `python3 .feature-ladder/v1.8.0/orchestration-ladder/scripts/irreversible.py classify "<command>"`.
+it: `python3 .feature-ladder/v1.9.0/orchestration-ladder/scripts/irreversible.py classify "<command>"`.
 `mundane` (non-production targets, deploys, exports, dry runs): run it and log
 it. `risky` (overwrites or deletes production data): get one fable/low verdict
 on the exact command (`VERDICT: APPROVE` or `REJECT`), then run or skip it.
@@ -126,9 +126,17 @@ puts each decision in its own draft PR while work continues on the next branch.
 
 **Secrets.** The intake's `secrets.names` lists the Google Secret Manager
 secrets the feature reads (names only). A command that needs one is run as
-`python3 .feature-ladder/v1.8.0/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`,
+`python3 .feature-ladder/v1.9.0/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`,
 which fetches the value with the user's gcloud sign-in and masks it in the
 output. Never print, echo, log, commit or quote a secret value.
+
+**External workers.** If `~/.claude/feature-ladder/providers.json` says
+`"workers": "openrouter"` and the route's `runner.kind` is `external`, write
+the Task Card to `runner.card_file` and run `runner.command` in the shell
+instead of starting a subagent: it launches a child `claude -p` on GLM 5.3
+through OpenRouter (key from Google Secret Manager or `OPENROUTER_API_KEY`)
+and prints the Evidence Packet. Exit 3 means OpenRouter is unavailable; use
+a subagent instead. Needs the Claude CLI on this machine.
 
 **Second opinion.** The intake's `codex` says whether a second-model review is
 worth it (size L only unless the user asks). When it is, and
@@ -141,7 +149,7 @@ fix tasks. Otherwise skip it and say why.
 `intake.py card` already did this. To see the choice by itself:
 
 ```bash
-python3 .feature-ladder/v1.8.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
+python3 .feature-ladder/v1.9.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
 ```
 
 It chooses at most three skills (within a per-role size budget) by rules, writes their
@@ -176,7 +184,7 @@ has `.feature-ladder/skill-rules.json`, those rules are merged in automatically.
   after T5 fails, escalate to fable/high to diagnose, not to implement.
 
 Acceptance: the "done when" checks are re-run without a model:
-`python3 .feature-ladder/v1.8.0/orchestration-ladder/scripts/verify.py run --id <task> --check "<cmd>" ... --scope <paths> ... --changed <files the worker claims>`
+`python3 .feature-ladder/v1.9.0/orchestration-ladder/scripts/verify.py run --id <task> --check "<cmd>" ... --scope <paths> ... --changed <files the worker claims>`
 runs them exactly as written, saves the evidence under
 `.feature-ladder/evidence/`, and flags files changed outside scope or a wrong
 claim (exit 0 green, 1 a check failed, 2 scope or claim mismatch). Only for
@@ -213,14 +221,14 @@ session has Hindsight tools from a connector pointed at the multi-bank endpoint
 (`.../mcp/`, so `list_banks` and `create_bank` exist):
 
 1. In the project's directory run
-   `python3 .feature-ladder/v1.8.0/hindsight-memory/scripts/resolve_bank.py --candidates`.
+   `python3 .feature-ladder/v1.9.0/hindsight-memory/scripts/resolve_bank.py --candidates`.
    It prints the project name, the git owner/repo, and the candidate bank ids
    in priority order. If it reports `"is_git": false`, use the connector's
    default bank and skip to step 5.
 2. Call `list_banks` with `query` set to the project name (and again with the
    repo name if it differs). Save the combined results to
    `.feature-ladder/banks.json` as `{"banks": [...]}`.
-3. Run `python3 .feature-ladder/v1.8.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
+3. Run `python3 .feature-ladder/v1.9.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
    It returns `bank_id` and `action` (`pinned`, `existing` or `create`).
 4. If `action` is `create`, call `create_bank` with that `bank_id`, a `name`
    of `owner/repo` (or the project name), and a `mission` describing the

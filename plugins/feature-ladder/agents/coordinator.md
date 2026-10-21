@@ -53,9 +53,17 @@ under "Budget" and finish within the budget anyway.
    file yourself. For M, split into two cards only if the files form two
    independent sets; otherwise one card. Write FEATURE-REPORT.md with goal,
    acceptance criteria, the intake summary and the card(s): one write.
-3. **Dispatch** exactly the returned `agent`/`model`/`effort`:
-   `Agent(subagent_type="feature-ladder:<agent>", model="<model>", effort="<effort>", prompt="<Task Card>")`.
-   Two M cards go out in one message.
+3. **Dispatch** by the route's `runner`:
+   - `"kind": "subagent"`: `Agent(subagent_type="feature-ladder:<agent>", model="<model>", effort="<effort>", prompt="<Task Card>")`.
+     Two M cards go out in one message.
+   - `"kind": "external"` (the user chose OpenRouter workers): write the Task
+     Card to the route's `card_file`, then run the route's `command` with a
+     Bash timeout of 1800000 ms. Its stdout is the Evidence Packet plus one
+     `external worker:` line (model, turns, cost); treat it exactly like a
+     subagent's packet. Exit 3 means OpenRouter is unavailable (no key, no
+     CLI): fall back to the subagent form above for this card and note it in
+     the report. Exit 1 with a `partial` packet: handle like any failed task.
+     Two M cards: run both commands in one message (parallel Bash calls).
 4. **Verify with no model.** For each Evidence Packet:
    ```
    python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> --check "<cmd>" ... --scope <card scope> ... --changed <files from the packet's Changed: line> ...

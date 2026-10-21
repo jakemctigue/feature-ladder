@@ -232,6 +232,37 @@ on the never-list is still left for you.
 Without a remote or the `gh` CLI (or with `--no-pr`), the same branches are
 made locally and each PR description is saved in `.feature-ladder/checkpoints/`.
 
+### External workers: GLM 5.3 through OpenRouter
+
+Worker turns are where the tokens go, and they all count against the Claude
+plan. With `/feature-ladder:workers openrouter`, the cheap rungs (`mechanic`
+and `implementer`, which is every size S and M feature) run as a child
+`claude -p` whose environment points at OpenRouter
+(`ANTHROPIC_BASE_URL=https://openrouter.ai/api`, the key fetched from Google
+Secret Manager or `OPENROUTER_API_KEY`, the model pinned through
+`ANTHROPIC_DEFAULT_*_MODEL`). Same tools, same Evidence Packet, same guard
+hook; billed to OpenRouter credits at GLM prices (about $0.15/M in, $0.50/M
+out) instead of the plan's weekly limit.
+
+| Rung | Default model | Why |
+|---|---|---|
+| mechanic, implementer (medium) | `z-ai/glm-5.3-flash:nitro` | fastest provider, 1M context, SWE-bench-class coding |
+| implementer (high) | `z-ai/glm-5.3` | the stronger GLM for harder bounded work |
+| senior-implementer, experts, Fable rungs, codex-reviewer, memory-scribe | Claude | unchanged |
+
+`intake.py card` prints a `runner` with the exact command; the coordinator
+writes the Task Card to a file and runs it. A worker that fails its checks
+twice re-routes one band up, which lands back on Claude. Usage lands in the
+ledger with its OpenRouter cost. Override models in
+`~/.claude/feature-ladder/providers.json` or with
+`FEATURE_LADDER_WORKER_MODEL`; `/feature-ladder:workers check --probe`
+validates the key, shows remaining credit and pings each model.
+
+The child process is Claude Code itself, so OpenRouter's documented Claude
+Code integration applies ([their cookbook](https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration.md)).
+Their API is a single stable `v1` with changes announced in the changelog,
+so nothing is pinned ([versioning](https://openrouter.ai/docs/api_reference/versioning)).
+
 ### Changes outside the repo
 
 Code on a branch is always reversible, so `irreversible` only means effects
@@ -487,7 +518,7 @@ Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
 the start of a conversation it downloads `route.py`, `intake.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `select_skills.py`, `skill-rules.json` and `resolve_bank.py` from this repo, pinned to a release
-tag (currently `v1.8.0`), so the app and
+tag (currently `v1.9.0`), so the app and
 Claude Code always run identical logic. The app session needs code execution
 and network access to GitHub.
 

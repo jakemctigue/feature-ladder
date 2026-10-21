@@ -82,6 +82,29 @@ keeps it safe:
 Without a remote or the `gh` CLI the same happens on local branches and the PR
 bodies are saved in `.feature-ladder/checkpoints/`.
 
+## External workers (OpenRouter)
+
+The cheap rungs (`mechanic`, `implementer` at either effort) can run outside
+the Claude plan: `scripts/external_worker.py` launches a child `claude -p`
+whose environment points at OpenRouter (`ANTHROPIC_BASE_URL`,
+`ANTHROPIC_AUTH_TOKEN` from Google Secret Manager or the environment, model
+pinned through `ANTHROPIC_DEFAULT_*_MODEL`), feeds it the Task Card with the
+worker contract as its system prompt, and returns the Evidence Packet. Same
+tools, same contract, same guard hook; billed to OpenRouter credits.
+
+| Rung | Default model |
+|---|---|
+| mechanic, implementer (medium) | `z-ai/glm-5.3-flash:nitro` (fastest provider) |
+| implementer (high) | `z-ai/glm-5.3` |
+
+`senior-implementer`, the domain experts, every Fable rung, `codex-reviewer`
+and `memory-scribe` always stay on Claude. Switch with
+`/feature-ladder:workers openrouter|claude` (writes
+`~/.claude/feature-ladder/providers.json`); `intake.py card` then prints a
+`runner` with the exact command. A failed external worker re-routes one band
+up like any other, which lands on Claude Sonnet-high or Opus. Usage is added
+to the ledger with its OpenRouter cost.
+
 ## Changes outside the repo
 
 Code on a branch is always reversible. Steps with effects outside the repo
