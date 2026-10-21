@@ -1,0 +1,23 @@
+{
+  "name": "feature-ladder-gpt",
+  "owner": {
+    "name": "Jake McTigue"
+  },
+  "interface": {
+    "displayName": "Feature Ladder GPT"
+  },
+  "plugins": [
+    {
+      "name": "feature-ladder-gpt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/feature-ladder-gpt"
+      },
+      "category": "Developer Tools",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      }
+    }
+  ]
+}

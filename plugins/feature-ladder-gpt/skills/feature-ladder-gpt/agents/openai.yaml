@@ -1,0 +1,6 @@
+interface:
+  display_name: "Feature Ladder GPT"
+  short_description: "Deterministic GPT routing and explicit task skills"
+  default_prompt: "Use $feature-ladder-gpt to implement this feature with routed agents and verified checks."
+policy:
+  allow_implicit_invocation: true

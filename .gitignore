@@ -3,3 +3,7 @@ __pycache__/
 hindsight/hindsight.env
 .DS_Store
 FEATURE-REPORT.md
+.test-work/
+.test-tmp/
+dist/
+task-audit.json

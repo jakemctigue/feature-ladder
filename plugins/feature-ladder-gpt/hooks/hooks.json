@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}/hooks/dispatch_hook.py\"", "command_windows": "python \"${PLUGIN_ROOT}/hooks/dispatch_hook.py\"", "timeout": 15}]}],
+    "PreToolUse": [{"matcher": "Agent|spawn_agent|Bash|exec_command", "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}/hooks/dispatch_hook.py\"", "command_windows": "python \"${PLUGIN_ROOT}/hooks/dispatch_hook.py\"", "timeout": 30}]}],
+    "SubagentStop": [{"hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}/hooks/dispatch_hook.py\"", "command_windows": "python \"${PLUGIN_ROOT}/hooks/dispatch_hook.py\"", "timeout": 15}]}]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "T1",
+  "phase": "work",
+  "text": "Fix the retry helper's timeout bug and add a regression test.",
+  "kind": "code",
+  "files": 3,
+  "loc": 120,
+  "modules": 2,
+  "concurrency": true,
+  "ambiguity": 0,
+  "novelty": 0,
+  "blast_radius": 1,
+  "design_agreed": true,
+  "paths": ["src/retry.ts", "src/retry.test.ts"],
+  "checks": ["npm test -- src/retry.test.ts"],
+  "memory": "none"
+}

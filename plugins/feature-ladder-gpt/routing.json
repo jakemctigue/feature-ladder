@@ -1,0 +1,133 @@
+{
+  "models": {
+    "haiku": "gpt-5.6-luna",
+    "sonnet": "gpt-5.6-sol",
+    "opus": "gpt-6-astra",
+    "fable": "gpt-6-astra"
+  },
+  "roles": {
+    "architect-escalation": {
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "source_model": "fable",
+      "max_turns": 60,
+      "preload": [
+        "worker-contract"
+      ]
+    },
+    "codex-reviewer": {
+      "model": "gpt-5.6-luna",
+      "effort": "low",
+      "source_model": "haiku",
+      "max_turns": 10,
+      "preload": []
+    },
+    "coordinator": {
+      "model": "gpt-6-astra",
+      "effort": "medium",
+      "source_model": "fable",
+      "max_turns": 60,
+      "preload": [
+        "orchestration-ladder",
+        "complexity-router",
+        "hindsight-memory"
+      ]
+    },
+    "deep-verifier": {
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "source_model": "fable",
+      "max_turns": 50,
+      "preload": [
+        "worker-contract"
+      ]
+    },
+    "domain-expert-high": {
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "source_model": "opus",
+      "max_turns": 50,
+      "preload": [
+        "worker-contract"
+      ]
+    },
+    "domain-expert": {
+      "model": "gpt-6-astra",
+      "effort": "medium",
+      "source_model": "opus",
+      "max_turns": 40,
+      "preload": [
+        "worker-contract"
+      ]
+    },
+    "evidence-collector": {
+      "model": "gpt-5.6-luna",
+      "effort": "medium",
+      "source_model": "haiku",
+      "max_turns": 30,
+      "preload": []
+    },
+    "implementer": {
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "source_model": "sonnet",
+      "max_turns": 40,
+      "preload": [
+        "worker-contract"
+      ]
+    },
+    "mechanic": {
+      "model": "gpt-5.6-luna",
+      "effort": "low",
+      "source_model": "haiku",
+      "max_turns": 25,
+      "preload": []
+    },
+    "memory-scribe": {
+      "model": "gpt-5.6-luna",
+      "effort": "low",
+      "source_model": "haiku",
+      "max_turns": 12,
+      "preload": [
+        "hindsight-memory"
+      ]
+    },
+    "scoper": {
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "source_model": "sonnet",
+      "max_turns": 30,
+      "preload": [
+        "hindsight-memory"
+      ]
+    },
+    "second-opinion": {
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "source_model": "fable",
+      "max_turns": 8,
+      "preload": []
+    },
+    "senior-implementer": {
+      "model": "gpt-6-astra",
+      "effort": "medium",
+      "source_model": "opus",
+      "max_turns": 50,
+      "preload": [
+        "worker-contract"
+      ]
+    },
+    "ultra-investigator": {
+      "model": "gpt-6-astra",
+      "effort": "max",
+      "source_model": "fable",
+      "max_turns": 100,
+      "preload": [
+        "worker-contract"
+      ]
+    }
+  },
+  "review_engine": {
+    "model": "gpt-5.6-sol"
+  }
+}

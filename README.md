@@ -1,5 +1,7 @@
 # feature-ladder
 
+**GPT editions:** [Codex installation](CODEX.md) | [ChatGPT desktop installation](CHATGPT.md) | [Download v0.1.1](releases/feature-ladder-gpt/0.1.1). These editions preserve the ladder rules and use explicit GPT model routing.
+
 **An orchestration ladder for adding features to your applications with Claude
 subagents.** A top-tier coordinator plans and verifies, but delegates
 everything it can. Each task is sent to the cheapest model that can do it

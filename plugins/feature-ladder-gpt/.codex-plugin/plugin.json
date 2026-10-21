@@ -1,0 +1,27 @@
+{
+  "name": "feature-ladder-gpt",
+  "version": "0.1.1",
+  "description": "Feature Ladder with deterministic GPT routing and skill injection.",
+  "author": {
+    "name": "Jake McTigue"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/jakemctigue/feature-ladder",
+  "homepage": "https://github.com/jakemctigue/feature-ladder",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Feature Ladder GPT",
+    "shortDescription": "Deterministic GPT agents and task skills",
+    "longDescription": "Preserves Feature Ladder routing, role briefs and skill budgets. Requires local Python and a coding runtime with explicit GPT model selection.",
+    "developerName": "Jake McTigue",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Use $feature-ladder-gpt to implement this feature."
+    ]
+  }
+}
