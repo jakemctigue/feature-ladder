@@ -1,6 +1,6 @@
 ---
-description: Add a feature with the orchestration ladder. A Sonnet scout settles every routing variable from your code; you answer only what is uncertain, once; then it runs to completion on its own branch, live changes included under the policy you chose, and opens PRs. Usage - /feature-ladder:feature <description> [--auto] [--codex] [--adversarial] [--ultra]
-argument-hint: <feature description> [--auto] [--codex] [--adversarial] [--ultra]
+description: Add ONE feature with the orchestration ladder, atomically - just the code change and its tests. A Sonnet scout settles every routing variable; you answer only what is uncertain (and, once per session, how many subagents the session may spawn); then one worker (GLM 5.3 Flash or Sonnet medium for most work) builds it on its own branch and a PR opens. No reviews, no scribes, no Fable calls beyond the coordinator - those are /feature-ladder:wrap at the end of the session. Usage - /feature-ladder:feature <description> [--auto] [--second-opinion] [--escalate] [--ultra]
+argument-hint: <feature description> [--auto] [--second-opinion] [--escalate] [--ultra]
 ---
 
 Start a feature-ladder run for: $ARGUMENTS
@@ -11,14 +11,19 @@ scope, design, or implement anything yourself. Use `python` instead of
 
 ## 0. Switches
 
-Separate the request text from these switches. There are only four:
+Separate the request text from these switches:
 
 | Switch | Effect |
 |---|---|
-| `--auto` | Ask nothing. Use the scout's values and the recommended option for every decision. |
-| `--codex` | OpenAI Codex reviews all the code before acceptance; confirmed bugs are fixed. (Automatic only for size L features.) |
-| `--adversarial` | Codex also writes and runs attack tests. Implies `--codex`. Never automatic; use it at the end of a phased rollout. |
-| `--ultra` | Allows the ultra-investigator (Fable max) as the last escalation. |
+| `--auto` | Ask nothing. Use the scout's values and the recommended option for every decision (the session budget defaults to Small). |
+| `--second-opinion` | Allows the Fable `second-opinion` rung: one verdict before a production overwrite (otherwise those are left for you). |
+| `--escalate` | Allows `deep-verifier` (Fable high) and `architect-escalation` (Fable xhigh) for a bug the workers cannot isolate. |
+| `--ultra` | Also allows the ultra-investigator (Fable max). Implies `--escalate`. |
+
+Without these, nothing but the coordinator ever runs on Fable. `--codex` and
+`--adversarial` no longer run per feature: if given, say in one line that
+reviews run once at the end of the session with
+`/feature-ladder:wrap --review [--adversarial]`, and continue without them.
 
 Everything else is detected: the branch to start from is the current one; PRs
 open when there is a remote and the `gh` CLI, otherwise the same branches are
@@ -46,7 +51,10 @@ From the scout's `decide` output:
 1. Show a short summary: the predicted rung in one line, then the assumed
    values as one compact line each (`field = value - evidence`). Nothing more.
 2. Ask with AskUserQuestion, at most 4 questions per call, in this order:
-   `decisions` (the `workspace` one first if present), then `questions`.
+   `decisions` (the `session_agents` one first if present: it is asked once
+   per coding session and sets how many subagents the whole session may
+   spawn - Small 1-2, Medium 3-4, Large up to 8; then `workspace`), then
+   `questions`.
    Use each item's `header`, `question` and option `label`/`description` as
    given. Keep the recommended option first.
 3. Map each answer back to the option's `value` (for `decisions`, record the
@@ -56,16 +64,19 @@ From the scout's `decide` output:
 
 ## 3. Confirm
 
-Write `{"<field>": <value>, ..., "decisions": {"<id>": "<chosen label>"}, "notes": [...]}`
+Write `{"<field>": <value>, ..., "decisions": {"<id>": "<chosen label>"}, "switches": ["second-opinion", ...], "notes": [...]}`
+(with `--auto` and no session budget yet, add `"decisions": {"session_agents": "Small"}`)
 to `.feature-ladder/intake/<slug>-answers.json` and run:
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/intake.py" apply .feature-ladder/intake/<slug>-proposal.json .feature-ladder/intake/<slug>-answers.json
 ```
-It writes the confirmed intake to `.feature-ladder/intake/<slug>.json`. Tell
-the user in one line: the size and what it means (`budget.shape`), the rung,
-the outside-repo policy, and "Running to completion now; no more questions."
-For example: "Size M: one Sonnet-high worker, no design doc, no Codex. Live
-changes: all. Running now."
+It writes the confirmed intake to `.feature-ladder/intake/<slug>.json` and the
+session's subagent budget. Tell the user in one line: the size and what it
+means (`budget.shape`), the rung and where it runs (GLM or Claude), the
+subagents left in the session, the outside-repo policy, and "Running now; no
+more questions." For example: "Size S: one GLM 5.3 Flash worker, no design,
+no review. 3 of 4 session subagents left. Code only. Running now." If
+`budget.workers` is 0 the session budget is spent: say so and stop.
 
 ## 4. Branch
 
@@ -77,9 +88,7 @@ Exit 2 means the folder is not a git repo: continue without branches. Mention
 
 ## 5. Hand off
 
-Adversarial is ENABLED only if `--adversarial` was given. Codex review is
-ENABLED if `--codex` or adversarial was given, or the intake's `codex.review`
-is true (size L; quote its `why`). Secrets: the intake's `secrets.names`
+Switches are the intake's `switches`. Secrets: the intake's `secrets.names`
 lists the Secret Manager secrets the feature reads (names only).
 
 ```
@@ -94,12 +103,10 @@ Confirmed intake (binding): <path to .feature-ladder/intake/<slug>.json>
 Budget: size <S|M|L> - <budget.shape>
 Run branch: <branch from step 4, or 'none - not a git repo'>  Base: <base>  PRs: <enabled | disabled: reason>
 Project: infer the project name from the repo (package name, pyproject/package.json name, or directory name) and use it as the `project:<name>` tag for all Hindsight calls.
-Ultra rung: <ENABLED by the user (--ultra) | NOT enabled; never use ultra-investigator>.
-Codex second opinion: <ENABLED (--codex | intake: <why>) | not needed for this feature (intake)>.
-Codex adversarial tests: <ENABLED (--adversarial | intake: security) | not requested>.
+Switches ENABLED by the user: <second-opinion, escalate, ultra | none - no Fable rung but you, no reviews>.
 Secrets (Google Secret Manager, project <project>): <names, or 'none'>. Values never enter the transcript: workers run commands that need one through with_secrets.py.
 Run to completion. Do not stop to ask the user anything: decide non-critical choices yourself, park critical design decisions in checkpoint PRs, and run outside-repo steps under the intake's outside_policy exactly as your Run-to-completion rules say.
-Stay within the budget: it is the whole protocol for this feature. Recall once. Build each Task Card with intake.py card. Delegate everything. Finish with pr_checkpoint.py finish. Report back with FEATURE-REPORT.md path, files changed, the exact passing check commands, the PR stack in merge order, assumptions made, outside-repo actions taken or left, anything unverified, and what was retained."
+Implement only this feature and its tests. Stay within the budget: it is the whole protocol. Recall once. Build each Task Card with intake.py card. Verify with verify.py. Queue memory with session_budget.py remember. Finish with pr_checkpoint.py finish. Report back with FEATURE-REPORT.md path, files changed, the exact passing check commands, the PR stack in merge order, assumptions made, outside-repo actions left for the user, anything unverified."
 )
 ```
 
@@ -110,4 +117,5 @@ needs the user first. Last, run
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ledger.py" report
 ```
 and show its table: it now includes the coordinator's own tokens, which the report written
-during the run could not.
+during the run could not. End with one line:
+"Subagents left this session: <left from session_budget.py status>. At the end of the session run `/feature-ladder:wrap` (add `--review` for one Codex pass over everything)."

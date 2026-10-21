@@ -28,15 +28,13 @@ While coding:
   the repo already uses.
 - Prefer the repo's existing patterns over your preferences.
 
-Before your final message, retain to Hindsight what you learned (worker-contract
-skill): a pitfall that cost a retry, a convention you had to discover, an
-interface you introduced - 1-3 `retain` calls, tags `project:<name>`,
-`feature:<slug>`, `<kind>`, metadata `{"source":"feature-ladder","rung":"senior-implementer"}`.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `pitfall|convention|interface`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+A pitfall that cost a retry, a convention you had to discover, an interface
+you introduced.
 
 Return an Evidence Packet (format in the worker-contract skill). Every check
 you ran is quoted with its command, exit code and tail. Anything you did not run
-is labelled unverified. End with the `Retained:` footer line; a hook will send
-you back if it is missing.
+is labelled unverified.
 
-You do not verify your own work for acceptance; a `mechanic` re-runs the checks
-and the coordinator inspects. So do not pad the packet - make it precise.
+You do not verify your own work for acceptance; `verify.py` re-runs the checks
+with no model. So do not pad the packet - make it precise.

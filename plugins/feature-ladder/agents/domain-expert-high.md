@@ -26,16 +26,13 @@ procedure and DESIGN.md headings as `domain-expert`, with these additions:
 - Cite sources for non-obvious claims (spec, RFC, library docs, or the file:line
   in this repo). Use `evidence-collector`-style rigor: a claim without a source
   is labelled as your judgment.
-- Recall and reflect from Hindsight (one narrow `recall`, `reflect` for history questions); prior
-  failed approaches in this repo are the most valuable thing memory can give you.
+- Use the card's `Memory:` lines; one narrow `recall` only if it says `none`
+  (prior failed approaches in this repo are what memory is for).
 
-Before your final message, hand `memory-scribe` (haiku/low) a candidate list
-(worker-contract skill): the key decision and why, rejected options with
-reasons, invariants not documented in the repo, and any failure mode specific
-to this codebase. Do not write the retain calls yourself; copy the scribe's
-footer into your final message.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `decision`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+Include the key decision and why, rejected options with reasons, and
+invariants not documented in the repo.
 
 You still do not implement. Return DESIGN.md content plus router fields for each
-implied implementation task, ending with the `Retained:` footer line. If you believe the design needs a Fable-level
-second opinion on one specific point, state the question in <= 3 sentences at the
-end so the coordinator can send it to `second-opinion` cheaply.
+implied implementation task, ending with the `Retained:` footer line. Never ask for a Fable second
+opinion: decide with evidence, or list the point under Open questions.

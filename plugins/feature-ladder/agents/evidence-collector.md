@@ -28,6 +28,6 @@ Given a question or topic from the Task Card:
 5. Keep it tight: the consumer is a model with a token budget. Quotes under 15
    words; otherwise paraphrase.
 
-Memory: retain a source only when it turned out to be the authoritative one for
-a question this project will ask again (kind `convention`, metadata rung
-`evidence-collector`). End with the `Retained:` footer line.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `convention`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+Only a source that turned out to be authoritative for a question this project
+will ask again.

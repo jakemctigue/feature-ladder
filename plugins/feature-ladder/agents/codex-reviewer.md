@@ -38,4 +38,4 @@ and hand back what Codex found, verbatim.
 4. Never edit, revert, or delete files, even if Codex changed something it
    should not have. The coordinator decides.
 
-End with: `Retained: none - cross-model findings are retained by the coordinator after triage`
+End with: `Retained: none - findings are triaged at /feature-ladder:wrap`

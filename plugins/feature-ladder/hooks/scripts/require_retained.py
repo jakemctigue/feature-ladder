@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-SubagentStop hook: make sure every feature-ladder subagent wrote its memories
-to Hindsight (or explicitly said why not) before finishing.
+SubagentStop hook: make sure the coordinator queued the feature's memories for
+the end of the session (session_budget.py remember) before finishing.
 
-Reads the hook payload from stdin. If the subagent's last assistant message does
-not contain a line starting with "Retained:", the hook blocks the stop once with
-a reason that tells the agent what to do. Mechanics, the Codex driver and the
-memory scribe are exempt: their footer is always "none" or written by design,
-so a bounce would only cost an extra turn. It never blocks twice in a row
-(stop_hook_active guard), so a stubborn agent cannot loop forever.
+Memory is written once per session, at /feature-ladder:wrap, so workers no
+longer retain anything: their `Memory candidates:` line carries it and a bounce
+would only cost an extra turn. Only the coordinator is checked: if its last
+message has no line starting with "Retained:", the stop is blocked once with a
+reason that says what to do. It never blocks twice in a row (stop_hook_active
+guard), so a stubborn agent cannot loop forever.
 
 Exit 0 with {"decision":"block","reason":...} to send the agent back;
 exit 0 with no output to allow the stop.
@@ -19,7 +19,7 @@ import re
 import sys
 
 MARK = re.compile(r"^\s*Retained:\s*\S", re.MULTILINE)
-EXEMPT = {"mechanic", "codex-reviewer", "memory-scribe"}
+CHECKED = {"coordinator"}
 
 
 def last_assistant_text(transcript_path: str) -> str:
@@ -55,19 +55,9 @@ def main() -> int:
     except Exception:
         return 0  # malformed input: never block on hook failure
 
-    # Only police our own agents.
+    # Only the coordinator: everyone else defers memory in its packet.
     agent_type = str(payload.get("agent_type") or payload.get("subagent_type") or "")
-    if "feature-ladder" not in agent_type and agent_type not in {
-        "coordinator", "domain-expert", "domain-expert-high", "senior-implementer",
-        "implementer", "mechanic", "evidence-collector", "second-opinion",
-        "deep-verifier", "architect-escalation", "ultra-investigator",
-    }:
-        return 0
-
-    # Rungs whose footer is always "Retained: none" (mechanic, the Codex driver)
-    # or who write the footer by construction (memory-scribe): a bounce would
-    # cost a whole extra turn to produce a line that carries no information.
-    if agent_type.split(":")[-1] in EXEMPT:
+    if agent_type.split(":")[-1] not in CHECKED:
         return 0
 
     if payload.get("stop_hook_active"):
@@ -86,11 +76,10 @@ def main() -> int:
         return 0
 
     reason = (
-        "feature-ladder: before finishing, retain what you learned to Hindsight "
-        "(tools mcp__plugin_feature-ladder_hindsight__retain; see the hindsight-memory "
-        "skill), then end your final message with a footer line of the exact form "
-        "'Retained: <n> - <kind>: <summary>; ...' or "
-        "'Retained: none - <nothing durable learned | hindsight unreachable>'."
+        "feature-ladder: before finishing, queue the outcome line and the packets' memory "
+        "candidates in one call (session_budget.py remember --line ... --line ...; do not "
+        "call retain), then end your final message with "
+        "'Retained: deferred - <n> lines queued for /feature-ladder:wrap'."
     )
     print(json.dumps({"decision": "block", "reason": reason}))
     return 0

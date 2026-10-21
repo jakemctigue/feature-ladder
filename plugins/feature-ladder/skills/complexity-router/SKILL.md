@@ -1,6 +1,6 @@
 ---
 name: complexity-router
-description: Deterministic model/effort selection for coding tasks (Haiku Low .. Sonnet High .. Opus High, or escalate to the Fable coordinator). Use before dispatching any implementation task.
+description: Deterministic model/effort/provider selection for coding tasks (GLM 5.3 Flash or Haiku for T0, GLM or Sonnet Medium for T2, Sonnet High, Opus with an agreed design). Never picks Fable. Use before dispatching any implementation task.
 ---
 
 # Complexity router
@@ -23,7 +23,11 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/route.py '{
 }'
 ```
 
-Output includes `agent`, `model`, `effort`. Spawn exactly that:
+Output includes `agent`, `model`, `effort`, `provider` (`glm` for T0 and
+implementer/medium with score <= 6, else `claude`), `size` (from the score
+alone) and `design_first` (one design step before the worker). `intake.py card`
+turns `provider: glm` into an external OpenRouter runner when it is set up.
+Spawn exactly what it returns:
 
 ```
 Agent(subagent_type="feature-ladder:<agent>", model="<model>", effort="<effort>", prompt=<Task Card>)
@@ -58,23 +62,22 @@ The coordinator treats the confirmed intake as binding for per-task fields.
 ## Filling the fields
 
 - `files`, `loc`, `modules`: estimate from a quick `Grep`/`Glob` of the area, not from the feature description.
-- `ambiguity`: 0 if the task card names the exact approach; 2+ if a worker would have to choose an approach. Ambiguity >= 2 always escalates - fix the ambiguity (domain expert or a decision) rather than sending it down the ladder.
-- `novelty`: does a pattern for this already exist in the repo? Ask Hindsight (`recall`) and grep before answering.
-- `blast_radius`: 3 means "every user or the whole app breaks if this is wrong". 3 escalates.
-- `design_agreed`: true only if an ACCEPTED `DESIGN.md` section covers this task. Opus rungs are refused without it.
+- `ambiguity`: 0 if the task card names the exact approach; 2+ only if a worker would have to choose between real alternatives. Never from the request's length.
+- `novelty`: does a pattern for this already exist in the repo? Grep before answering.
+- `blast_radius`: 3 means "every user or the whole app breaks if this is wrong".
+- `irreversible`: only for a step the run itself performs outside the repo. Code that writes to Firestore is not irreversible.
+- `design_agreed`: true if the request plus the answered decisions specify the approach. Opus rungs need it.
 
-## When the router says ESCALATE
+## Hard flags and design
 
-It is not a request for Fable to write code. The coordinator does one of:
-1. Remove the ambiguity (decide, or dispatch a `domain-expert` to produce a design), then re-route.
-2. Split the task into smaller cards that each route cleanly.
-3. If the task is inherently consequential (blast radius 3), keep it on the Opus rung but add a `deep-verifier` (Fable High) review of the Evidence Packet before acceptance.
-
-`irreversible` (effects outside the repo) is a +3 risk weight, not a stop: the
-step runs under the intake's outside-repo policy (orchestration-ladder skill).
+`ambiguity >= 2` and `blast_radius = 3` are hard flags. A hard flag (or an
+Opus rung without an agreed design) sets `design_first`: ONE `domain-expert`
+step before the worker, or the coordinator decides the open point itself. It
+never changes the size, never adds a review, a Fable rung or a scribe.
 
 ## Re-routing after failure
 
-A worker that returns `blocked` or whose checks fail twice gets the task re-routed
-one band up (T2->T3->T4->T5). Never skip a band. After T5 fails, the coordinator
-escalates to `deep-verifier` to diagnose, not to implement.
+A worker whose checks fail is re-dispatched once with the failure; a second
+failure goes one band up once (GLM -> Sonnet medium -> Sonnet high). After
+that the feature is reported `partial`. Fable rungs (`deep-verifier`,
+`architect-escalation`) are reached only with the user's `--escalate`.

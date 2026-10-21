@@ -19,7 +19,8 @@ plan limit alone. Opus rungs and the Fable coordinator stay on Anthropic.
       Runs the card. Prints the worker's Evidence Packet followed by one
       `external worker:` line (model, turns, cost). Writes
       .feature-ladder/evidence/<id>-external.json and a ledger row.
-      Exit 0 packet returned, 3 unavailable, 1 error/timeout.
+      Exit 0 packet returned, 3 unavailable, 1 error/timeout,
+      4 refused by the session subagent budget (session_budget.py).
 
   external_worker.py config
       Prints the merged configuration (never the key).
@@ -31,8 +32,12 @@ Configuration, merged in this order (later wins):
   env FEATURE_LADDER_WORKERS=openrouter|claude, FEATURE_LADDER_WORKER_MODEL=<id>
 
   {
-    "workers": "openrouter",                     # or "claude" (in-session subagents)
+    "workers": "auto",                           # default: GLM-tier cards run here when the
+                                                 # CLI and a key are present; "openrouter"
+                                                 # the same; "claude" turns the tier off
     "openrouter": {
+      "preset": "glm",                           # or "jev" (typesafe/jev-router); a preset
+                                                 # replaces "models"
       "base_url": "https://openrouter.ai/api",
       "key_env": "OPENROUTER_API_KEY",           # environment variable, if set
       "key_secret": "OPENROUTER_API_KEY",        # else Google Secret Manager name
@@ -65,7 +70,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[2] / "hooks" / "scripts"))
 
 DEFAULTS = {
-    "workers": "claude",
+    "workers": "auto",
     "openrouter": {
         "base_url": "https://openrouter.ai/api",
         "key_env": "OPENROUTER_API_KEY",
@@ -80,7 +85,18 @@ DEFAULTS = {
         "timeout": 1500,
     },
 }
+# Presets for the cheap tier. "glm" is the default; "jev" hands each request to
+# TypeSafe's Jev Router, which picks the model and effort per request (variable
+# price; the ledger shows what each card cost).
+PRESETS = {
+    "glm": {"mechanic": "z-ai/glm-5.3-flash:nitro", "implementer": "z-ai/glm-5.3-flash:nitro",
+            "implementer-high": "z-ai/glm-5.3"},
+    "jev": {"mechanic": "typesafe/jev-router", "implementer": "typesafe/jev-router",
+            "implementer-high": "typesafe/jev-router"},
+}
 EXTERNAL_RUNGS = {"mechanic", "implementer"}  # never senior-implementer, experts, Fable, scribe, codex-reviewer
+# intake.py card sends a card here only when the router's provider is "glm"
+# (T0 and implementer/medium with score <= route.GLM_MAX_SCORE).
 TOOLS = "Bash,Read,Edit,Write,MultiEdit,Glob,Grep,mcp__plugin_feature-ladder_hindsight__retain,mcp__plugin_feature-ladder_hindsight__recall"
 DISALLOWED = "Agent,Task,Skill,WebSearch,WebFetch,NotebookEdit"
 
@@ -115,6 +131,9 @@ def load_config(cwd):
                 cfg = _merge(cfg, json.loads(f.read_text(encoding="utf-8-sig")))
             except ValueError as e:
                 print(f"external_worker: ignoring {f}: {e}", file=sys.stderr)
+    preset = str(cfg["openrouter"].get("preset") or "").lower()
+    if preset in PRESETS:
+        cfg["openrouter"]["models"] = dict(PRESETS[preset])
     if os.environ.get("FEATURE_LADDER_WORKERS"):
         cfg["workers"] = os.environ["FEATURE_LADDER_WORKERS"].strip().lower()
     if os.environ.get("FEATURE_LADDER_WORKER_MODEL"):
@@ -145,6 +164,25 @@ def claude_bin():
         if p:
             return p
     return None
+
+
+def available(cfg):
+    """Cheap readiness check with no network and no secret fetch: the CLI is
+    on PATH and a key source exists (the env var, or gcloud for the secret)."""
+    if not claude_bin():
+        return False, "claude CLI not found on PATH"
+    env_name = cfg["openrouter"].get("key_env")
+    if env_name and os.environ.get(env_name):
+        return True, f"env {env_name}"
+    if cfg["openrouter"].get("key_secret"):
+        try:
+            import with_secrets  # noqa: E402
+            if with_secrets.gcloud():
+                return True, "Secret Manager " + cfg["openrouter"]["key_secret"]
+        except Exception:  # noqa: BLE001
+            pass
+        return False, "no OPENROUTER_API_KEY in the environment and no gcloud CLI for the secret"
+    return False, "no key_env or key_secret configured"
 
 
 def get_key(cfg):
@@ -208,6 +246,7 @@ def child_env(cfg, key, model):
     env["ANTHROPIC_BASE_URL"] = cfg["openrouter"]["base_url"]
     env["ANTHROPIC_AUTH_TOKEN"] = key
     env["ANTHROPIC_API_KEY"] = ""  # OpenRouter's docs: must be set and empty
+    env["FEATURE_LADDER_CHILD"] = "1"  # the child's hooks must not reset the session budget
     m = with_context_marker(cfg, model)
     for tier in ("OPUS", "SONNET", "HAIKU", "FABLE"):
         env[f"ANTHROPIC_DEFAULT_{tier}_MODEL"] = m
@@ -317,6 +356,15 @@ def run(args):
         print(f"external_worker: no OpenRouter key ({source})", file=sys.stderr)
         return 3
     model = model_for(cfg, rung, effort, args.get("--model"))
+    try:
+        import session_budget  # noqa: E402
+        ok, why = session_budget.check(session_budget.find_root(cwd), rung, model, via="external")
+    except Exception:  # noqa: BLE001 - budget bookkeeping must not break a worker
+        ok, why = True, ""
+    if not ok:
+        print(f"TASK {task_id} - blocked\nChanged: none\nChecks run: none\nClaims: {why}\n"
+              "Risks: none\nMemory candidates: none\nRetained: none - budget")
+        return 4
     timeout = int(args.get("--timeout") or cfg["openrouter"]["timeout"])
     max_turns = int(args.get("--max-turns") or cfg["openrouter"]["max_turns"])
     card = Path(card_path).read_text(encoding="utf-8-sig")
@@ -365,7 +413,8 @@ def run(args):
 
 def check(args):
     cfg = load_config(os.getcwd())
-    status = {"workers": cfg["workers"], "claude_cli": claude_bin() is not None,
+    status = {"workers": cfg["workers"], "preset": cfg["openrouter"].get("preset") or "glm",
+              "claude_cli": claude_bin() is not None,
               "models": cfg["openrouter"]["models"]}
     key, source = get_key(cfg)
     status["key"] = source if key else None

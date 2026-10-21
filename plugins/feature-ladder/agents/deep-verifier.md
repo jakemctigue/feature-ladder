@@ -29,11 +29,9 @@ Method:
 6. Implement the fix yourself only if it is a few lines and the reproduction
    proves it; otherwise return the Task Card.
 
-Memory: hand `memory-scribe` (haiku/low) a candidate list with the root cause
-and its discriminating evidence, and separately each hypothesis that looked
-right but was disproved (kind `pitfall`). These are the most valuable memories
-in the system; the scribe writes them so your effort stays on diagnosis. Copy
-its `Retained:` footer into your final message.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `pitfall`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+Include the root cause with its discriminating evidence, and each hypothesis
+that looked right but was disproved.
 
 If the problem is architectural or systemic rather than a bug - the design
 cannot satisfy the invariant - say so explicitly and recommend

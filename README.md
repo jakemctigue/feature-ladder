@@ -18,41 +18,38 @@ Both use the same scripts and rules.
 **What it does**
 
 - Takes a feature request ("add rate limiting to /search, 100 req/min per key")
-  and runs it end to end in your repo: recall memory, scope, decompose into
-  task cards, design where needed, implement, verify, accept, remember.
+  and implements **just that change and its tests**, atomically: one scoped
+  recall, one Task Card, one cheap worker, a scripted check, a PR.
 - **Asks first, then finishes.** Before anything is delegated, a Sonnet scout
   works out every routing variable from your code, with evidence and a
   confidence level. You're asked only about the ones that are uncertain *and*
-  would change which model does the work, plus the design choices a worker
-  would otherwise guess. After that the run goes to completion without
-  stopping.
-- **Works on its own branch and finishes the job.** A critical design decision
-  that comes up mid-run becomes a draft PR with the assumption, and work
-  continues on a stacked branch. Changes outside the repo (Firestore or
-  database writes, migrations, deploys) are run too, under a policy you pick
-  once at intake: routine ones at once, production data overwrites after one
-  Fable verdict, and a short never-list left for you.
+  would change which model does the work, the design choices a worker would
+  otherwise guess, and, once per coding session, **how many subagents the
+  session may spawn** (Small 1-2, Medium 3-4, Large up to 8). After that the
+  run goes to completion without stopping.
+- **Pushes the work down.** Sonnet medium is the default implementation rung,
+  and mechanical and small coding cards run on **GLM 5.3 Flash** through
+  OpenRouter (billed to OpenRouter credits, not your Claude plan) whenever a
+  key is present.
+- **No Fable unless you ask.** The router never picks Fable; the coordinator
+  is the only Fable call in a run. Second opinions, deep verification and
+  production-write verdicts need an explicit switch.
+- **Reviews and memory once per session, not per feature.** Codex review,
+  adversarial tests and a Fable second opinion run only when you schedule
+  them with `/feature-ladder:wrap`, once, over everything the session built.
+  Memory is written at the same point, by a script, through a strict gate.
+- **Hooks enforce the budget.** A spawn hook denies any subagent past the
+  session budget, a second mechanic or design step, and any review, scribe or
+  Fable rung inside a run. The coordinator is capped at 24 turns.
 - Decides **which model and effort level** handles each task with a fixed
-  scoring function (`route.py`), from Haiku low for mechanical edits up to
-  Opus high for hard, designed work.
-- Decides **which skills** each worker gets with a fixed rule engine
-  (`select_skills.py`), writes their text to a file the worker reads (so it
-  never passes through the coordinator), and in Claude Code physically
-  prevents workers from loading any others.
-- **Lean by default.** The intake sizes the feature (S, M or L) and that size
-  is a binding budget. S and M, which is most features, get one worker (two
-  at most), no design doc, no Codex, no memory scribe, and a coordinator loop
-  of about a dozen turns. The full protocol only runs for L: Opus-tier or
-  escalated work.
-- Keeps the expensive model (Fable 5.1) on a short leash: its turns are
-  budgeted per size, and escalations are one step at a time with a written
-  justification.
-- Requires evidence: every worker returns real command output for its checks,
-  and acceptance checks are re-run by a script (`verify.py`), not by the author
-  and not by another model.
-- Records durable lessons (decisions, pitfalls, interfaces, test gates) in
-  Hindsight after each task and each feature, using the cheapest model that
-  can summarize correctly.
+  scoring function (`route.py`), and **which skills** each worker gets with a
+  fixed rule engine (`select_skills.py`); the skill text goes to a file only
+  the worker reads.
+- Works on its own branch: a critical decision mid-run becomes a draft PR and
+  work continues stacked on it. Outside-repo steps (deploys, data writes) run
+  only as far as the policy you pick at intake; the default is code only.
+- Requires evidence: every worker quotes real command output, and acceptance
+  checks are re-run by a script (`verify.py`), not by another model.
 
 **What it does not do**
 
@@ -74,63 +71,48 @@ Both use the same scripts and rules.
 | Level | Agent | Model / effort | Daily job |
 |---|---|---|---|
 | I | `scoper` | Sonnet 5.5 / medium | Intake: settles every routing variable with evidence before anything is delegated |
-| T0 | `mechanic` | Haiku / low | Mechanical patches, docs drafts, fixtures, executing defined checks |
+| T0 | `mechanic` | GLM 5.3 Flash, else Haiku / low | Mechanical patches, docs drafts, fixtures; at most one per feature |
 | T1 | `evidence-collector` | Haiku / medium | Collect current sources, extract claims, prepare evidence |
-| T2–T3 | `implementer` | Sonnet 5.5 / medium–high | Bounded coding, regression tests, domain analysis |
+| T2 | `implementer` | GLM 5.3 Flash (score <= 6), else **Sonnet 5.5 / medium** | Bounded coding and its tests: the default rung |
+| T3 | `implementer` | Sonnet 5.5 / high | Bounded coding, harder |
 | T4–T5 | `senior-implementer` | Opus 5.5 / medium–high | Difficult implementation under an agreed design |
-| D | `domain-expert`, `domain-expert-high` | Opus 5.5 / medium–high | Design: options, trade-offs, interfaces, test plan |
-| M | `memory-scribe` | Haiku / low | Writes Hindsight memories for the expensive rungs |
-| F-Low | `second-opinion` | Fable 5.1 / low | Short, focused second opinions that save a larger handoff |
-| **F-Med** | **`coordinator`** | **Fable 5.1 / medium** | **Plan, direct workers, fact-check, inspect evidence, accept** |
-| F-High | `deep-verifier` | Fable 5.1 / high | Subtle bugs, conflicting evidence, cross-system correctness |
-| F-Extra | `architect-escalation` | Fable 5.1 / xhigh | Architecture or systemic problems unresolved after High |
-| F-Ultra | `ultra-investigator` | Fable 5.1 / max | Optional deep investigations (opt-in with `--ultra`) |
-| X | `codex-reviewer` | Haiku / low driving **OpenAI Codex** | Cross-model second opinion on every feature; adversarial tests with `--adversarial` |
+| D | `domain-expert`, `domain-expert-high` | Opus 5.5 / medium–high | One design step, only on a hard flag |
+| **F-Med** | **`coordinator`** | **Fable 5.1 / medium** | **Card, dispatch, verify.py, accept: 12-24 turns** |
+| F-Low | `second-opinion` | Fable 5.1 / low | Only with `--second-opinion` |
+| F-High | `deep-verifier` | Fable 5.1 / high | Only with `--escalate` |
+| F-Extra | `architect-escalation` | Fable 5.1 / xhigh | Only with `--escalate` |
+| F-Ultra | `ultra-investigator` | Fable 5.1 / max | Only with `--ultra` |
+| X | `codex-reviewer` | Haiku / low driving **OpenAI Codex** | Only at `/feature-ladder:wrap --review`, once per session |
 
 ### How a feature run flows
 
 0. **Intake.** The scoper scans the repo and reads the code the feature will
    touch, and proposes a value, confidence and evidence for every routing
-   variable. `intake.py decide` picks the questions: only uncertain variables
-   whose answer changes the model, plus open design decisions. You answer
-   once; the confirmed intake is binding. The run then moves to its own
-   branch, `feature-ladder/<slug>`.
-1. **Recall.** The coordinator asks Hindsight for this project's conventions,
-   past decisions and pitfalls in the area.
-2. **Scope.** It reads only what it needs, and writes `FEATURE-REPORT.md`
-   with the goal, acceptance criteria and out-of-scope items.
-3. **Decompose and route.** Each task card is scored by `route.py`. The score
-   picks the rung. Hard flags (ambiguous, cross-system plus security,
-   whole-app blast radius) force escalation instead.
-4. **Select skills.** `select_skills.py` picks the card's skills, writes
-   their full text to `.feature-ladder/cards/<task>-skills.md`, and the card
-   tells the worker to read that file first.
-5. **Design if needed.** Ambiguous or novel work goes to a domain expert
-   first. Opus implementation is refused until a design is accepted.
-6. **Execute.** Workers run in parallel where independent, each returning an
-   *Evidence Packet*: files changed, checks run with real output, claims and
-   how they were verified.
-7. **Verify.** `verify.py` re-runs the "done when" checks with no model,
-   records exit codes and output tails, and flags any file changed outside the
-   card's scope or a changed-files claim that does not match. The coordinator
-   spot-checks the remaining claims against the diff.
-8. **Get a second opinion from another model.** OpenAI Codex reviews the
-   whole feature diff (read-only). With `--adversarial` it also writes tests
-   that try to break the change and runs them. Real problems go back through
-   the router as fix tasks; disputed findings are settled by a short Fable
-   second opinion.
-9. **Escalate only when warranted.** One rung at a time, each climb justified
-   in the report.
-10. **Accept and remember.** The coordinator finishes the report (including
-   the per-rung token table from the ledger), the durable facts go to
-   Hindsight, and the final PR opens on top of any checkpoint PRs.
+   variable. `intake.py decide` picks the questions: the session's subagent
+   budget (first feature only), uncertain variables whose answer changes the
+   model, open design decisions, and the live-changes policy. You answer once;
+   the confirmed intake is binding. The run moves to `feature-ladder/<slug>`.
+1. **Recall once.** One Hindsight recall, scoped by a hook to this repo's
+   bank and capped at 1000 tokens; only the snippets that bear on the card go
+   into it.
+2. **One Task Card.** `intake.py card` routes it and picks its skills in one
+   call. A hard flag adds one design step before the worker; nothing else.
+3. **One worker.** GLM 5.3 Flash or Sonnet medium does the change and its
+   tests and returns an *Evidence Packet* with real check output.
+4. **Verify with no model.** `verify.py` re-runs the checks and flags files
+   outside the card's scope. A failure is re-dispatched once, then one band
+   up once, then reported `partial`.
+5. **Accept.** The coordinator queues the packet's memory candidates (through
+   the memory gate), writes `FEATURE-REPORT.md` with the token table, and
+   opens the PR.
+
+At the end of a session (many features), `/feature-ladder:wrap` writes the
+queued memories with a script and, only if you ask, runs one Codex review,
+adversarial tests or a Fable second opinion over the whole session.
 
 Throughout, nothing stops for you. Non-critical choices are decided and
-listed under Assumptions. A **critical decision** (costly to undo, could go
-either way) is decided with the recommended option and parked in a draft PR
-that explains how to switch, and work continues on the next stacked branch.
-Steps with effects outside the repo run under the intake policy (next
-section); none of them stops the run.
+listed under Assumptions. A **critical decision** is decided with the
+recommended option and parked in a draft PR that explains how to switch.
 
 ---
 
@@ -142,29 +124,35 @@ section); none of them stops the run.
 in, rung out. Points come from files, lines changed, modules touched, new
 dependencies, public API changes, persistence, security, concurrency,
 cross-system work, missing tests, ambiguity, novelty and blast radius. Score
-bands map to Haiku low (0–3), Sonnet medium (4–9), Sonnet high (10–19), Opus
-medium (20–23), Opus high (24–28), and escalate (29+). The weights are
-calibrated for application work: an endpoint plus a database change plus
-tests stays on Sonnet even with every risk flag set; Opus needs novelty or
-real scale on top. Run `route.py --table` for the full table. Workers never
-choose their own model.
+bands: mechanic (0–3), implementer medium (4–14; 4–6 is the GLM tier), Sonnet
+high (15–19), Opus medium (20–23), Opus high (24+, design required). The
+router never returns Fable. A hard flag (approach genuinely open, whole-app
+blast radius) adds one design step and never changes the size. A short
+request is not an ambiguous one: ambiguity is judged from the code. Run
+`route.py --table` for the full table.
 
-### Size budgets
+### Budgets: the session and the feature
 
-The score also sets the feature's size, and the size is a budget the
-coordinator cannot exceed. Cost scales with agents × turns × context, because
-every turn of every agent re-reads its whole context, so the budget limits
-agents first.
+Cost scales with agents × turns × context, because every turn of every agent
+re-reads its whole context. Two budgets cap it, both enforced by hooks:
 
-| Size | Score | Workers | Design doc | Check re-run | Codex | Memory scribe | Coordinator turns |
-|---|---|---|---|---|---|---|---|
-| S | 0–9 | 1 | no | `verify.py` (no model) | no | no | ~12 |
-| M | 10–19 | 1–2 | no | `verify.py` (no model) | `--codex` only | no | ~20 |
-| L | 20+ or a hard flag | up to 4 | if not agreed | `verify.py` + mechanic for Codex repros | once, no retries | one | ~45 |
+**Session** (asked once per coding session): Small = 2 subagents, Medium = 4,
+Large = 8. The intake scout and the coordinator aren't counted; every
+worker, expert, reviewer and GLM worker is. A new Claude Code session asks
+again.
 
-Adversarial Codex tests never run on their own; add `--adversarial` at the
-end of a phased rollout. Workers preload a short contract instead of the full
-protocol skills, and the selector caps injected skill text per role.
+**Feature** (from the score):
+
+| Size | Score | Workers | Coordinator turns |
+|---|---|---|---|
+| S | 0–9 | 1 | ~12 |
+| M | 10–19 | 1, or 2 for two independent file sets | ~20 |
+| L | 20+ | up to 4 | ~24 (hard cap at every size) |
+
+Every size: at most one mechanic, a design step only on a hard flag, no Codex,
+no scribe, no Fable rung, no check-runner. For the Firestore-write class of
+feature this is one GLM or Sonnet-medium worker and a coordinator of about a
+dozen turns (a test pins it).
 
 ### Intake: ask once, up front
 
@@ -187,10 +175,10 @@ protocol skills, and the selector caps injected skill text per role.
 `/feature-ladder:scope` runs intake alone and saves it; the next
 `/feature-ladder:feature` with the same request text reuses it without asking.
 
-Those are the only switches: `--auto`, `--codex` (second-model review; on by
-itself for complex work), `--adversarial` (attack tests; on by itself when
-the intake says the feature touches security) and `--ultra`. The branch, PR
-availability and review scope are detected.
+Switches: `--auto`, `--second-opinion` (allows one Fable verdict, e.g.
+before a production overwrite), `--escalate` (allows the Fable debugging
+rungs) and `--ultra`. Reviews are not feature switches: they belong to
+`/feature-ladder:wrap`.
 
 ### Secrets from Google Secret Manager
 
@@ -212,11 +200,8 @@ access`, `cat .env`, `printenv`, `echo $X_KEY`). Deleting, disabling or
 re-sharing a secret is on the never-list; creating one on production is a
 risky step. Values never reach a report, PR, commit, memory or Codex prompt.
 
-The guard classifies the command after `--` exactly as if it ran on its own.
-Most commands that need a key (deploys, dev or staging targets, reads) run at
-once with no Fable call. One that deletes or overwrites production data gets
-the same single Fable verdict it would get without the wrapper, and anything
-on the never-list is still left for you.
+The guard classifies the command after `--` exactly as if it ran on its own,
+so a production overwrite inside the wrapper is still left for you.
 
 ### Run to completion: branches and checkpoint PRs
 
@@ -232,33 +217,30 @@ on the never-list is still left for you.
 Without a remote or the `gh` CLI (or with `--no-pr`), the same branches are
 made locally and each PR description is saved in `.feature-ladder/checkpoints/`.
 
-### External workers: GLM 5.3 through OpenRouter
+### The GLM tier: GLM 5.3 Flash through OpenRouter
 
-Worker turns are where the tokens go, and they all count against the Claude
-plan. With `/feature-ladder:workers openrouter`, the cheap rungs (`mechanic`
-and `implementer`, which is every size S and M feature) run as a child
+Worker turns are where the tokens go, and on Claude they all count against
+the plan. Cards whose route says `provider: glm` (every mechanic card, and
+implementer cards at medium effort with a score of 6 or less) run as a child
 `claude -p` whose environment points at OpenRouter
-(`ANTHROPIC_BASE_URL=https://openrouter.ai/api`, the key fetched from Google
-Secret Manager or `OPENROUTER_API_KEY`, the model pinned through
+(`ANTHROPIC_BASE_URL=https://openrouter.ai/api`, the key from Google Secret
+Manager or `OPENROUTER_API_KEY`, the model pinned through
 `ANTHROPIC_DEFAULT_*_MODEL`). Same tools, same Evidence Packet, same guard
 hook; billed to OpenRouter credits at GLM prices (about $0.15/M in, $0.50/M
-out) instead of the plan's weekly limit.
+out). It is on by default whenever the Claude CLI and a key are present;
+without them the card runs on the routed Claude rung and says why.
 
-| Rung | Default model | Why |
-|---|---|---|
-| mechanic, implementer (medium) | `z-ai/glm-5.3-flash:nitro` | fastest provider, 1M context, SWE-bench-class coding |
-| implementer (high) | `z-ai/glm-5.3` | the stronger GLM for harder bounded work |
-| senior-implementer, experts, Fable rungs, codex-reviewer, memory-scribe | Claude | unchanged |
+| Setting | Cheap cards run on |
+|---|---|
+| `/feature-ladder:workers glm` (default) | `z-ai/glm-5.3-flash:nitro` |
+| `/feature-ladder:workers jev` | `typesafe/jev-router` (picks a model and effort per request; variable price) |
+| `/feature-ladder:workers claude` | Haiku / Sonnet-medium subagents |
 
-`intake.py card` prints a `runner` with the exact command; the coordinator
-writes the Task Card to a file and runs it. A worker that fails its checks
-twice re-routes one band up, which lands back on Claude. Usage lands in the
-ledger with what OpenRouter actually charged (measured from the key's usage
-counter around the run; Claude Code's own cost figure assumes Anthropic
-prices and is ignored). Override models in
-`~/.claude/feature-ladder/providers.json` or with
-`FEATURE_LADDER_WORKER_MODEL`; `/feature-ladder:workers check --probe`
-validates the key, shows remaining credit and pings each model.
+Everything else (Sonnet medium by default, Opus, the coordinator) stays on
+Claude. External workers count against the session budget like any other.
+Usage lands in the ledger with what OpenRouter actually charged.
+`/feature-ladder:workers check --probe` validates the key, shows remaining
+credit and pings each model.
 
 The child process is Claude Code itself, so OpenRouter's documented Claude
 Code integration applies ([their cookbook](https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration.md)).
@@ -276,11 +258,12 @@ classifies every shell command during a run, with no model tokens, and the
 | Tier | Examples | What happens |
 |---|---|---|
 | **mundane** | emulator, dev or staging targets; `firebase deploy`; index builds; exports; dry runs; anything that doesn't destroy production data | runs at once, logged |
-| **risky** | `firestore:delete`, `firestore import`, destructive SQL, migration/backfill scripts against production | denied once; the coordinator gets one `second-opinion` (Fable low) verdict on the exact command, approves it with `irreversible.py approve`, and it runs |
+| **risky** | `firestore:delete`, `firestore import`, destructive SQL, migration/backfill scripts against production | left for you with the exact command; with `--second-opinion`, one Fable verdict, `irreversible.py approve`, then it runs |
 | **never** | deleting a project, database, repo or backups; weakening database protection; merging PRs; pushing to your base branch; force-pushing or deleting `main`; `rm -rf` of `/` or your home folder | left for you, logged |
 
-The intake policy narrows this: *non-production only* leaves every production
-action for you; *nothing outside the repo* leaves all of them. Production is
+The intake policy narrows this: *nothing outside the repo* (the recommended
+default) leaves all of them for you; *non-production only* leaves every
+production action. Production is
 recognised from `.firebaserc` aliases, `--project` flags and words like
 `prod`/`staging` in the command; an unknown target on a real cloud tool is
 treated as production. Only the executable part of a command is classified
@@ -311,78 +294,52 @@ complete table after the coordinator has finished, so the coordinator's own
 cost is included. The ledger is what the router bands, skill budgets and rung
 choices get tuned against; without it those are guesses.
 
-### Hindsight memory
+### Hindsight memory, tightly controlled
 
-- **Recall before work:** the coordinator queries project memory first and
-  quotes the useful snippets into each Task Card; a worker queries Hindsight
-  itself only when its card's `Memory:` line is `none`.
-- **Retain when each subagent finishes:** every rung ends its report with a
-  `Retained:` line. A `SubagentStop` hook sends a worker back once if that
-  line is missing; mechanics, the Codex driver and the memory scribe are
-  exempt, since their footer is always `none` or written by design and a
-  bounce would only cost a turn.
-- **Cheapest model writes memories:** Haiku and Sonnet workers write their own
-  1–3 facts. Fable and Opus rungs hand a raw list to `memory-scribe`
-  (Haiku low) instead of spending their own tokens. A sample self-hosted
-  Hindsight config pins Hindsight's own extraction and consolidation to Haiku.
-- **Tagged and scoped:** memories are tagged `project:<name>`,
-  `feature:<slug>` and a kind (`decision`, `pitfall`, `interface`,
-  `test-strategy`, `convention`, `outcome`). Secrets and personal data are
-  never stored.
-- **One bank per repository, found or created deterministically:** at session
-  start, `resolve_bank.py` identifies the repo (main worktree folder name plus
-  the `origin` owner/repo). It uses a bank pinned in
-  `.feature-ladder/hindsight.json` if there is one. Otherwise it reuses the first
-  bank that already exists among `coding-agent::<project>` (the naming used by
-  Hindsight's own coding-agents integration), `<owner>-<repo>` and `<project>`.
-  Only if none exists does it create `coding-agent::<project>`. The choice is
-  cached per repo, and a `PreToolUse` hook adds that `bank_id` to every
-  Hindsight call, so agents never pick a bank. Folders that aren't git repos
-  (and your home folder) use the default bank.
-- **Health check:** the same session-start step reports the bank in use, or
-  that Hindsight is unreachable. If memory is down, work continues without it.
+Every Hindsight call goes through a hook (`resolve_bank.py` plus
+`memory_gate.py`), with no model in the loop:
 
-### Cross-model second opinion (OpenAI Codex)
+- **The right bank:** one bank per repository, found or created
+  deterministically (a pinned id in `.feature-ladder/hindsight.json`, else
+  `coding-agent::<owner>-<repo>`, `<owner>-<repo>`, `coding-agent::<project>`,
+  `<project>`); the hook adds the `bank_id` to every call.
+- **Scoped reads:** `recall` only, tags forced to `project:<name>`, at most
+  1000 tokens, at most 3 recalls per feature (scout, coordinator, one worker
+  without a Memory line). `reflect`, knowledge pages and bank edits are
+  denied: `reflect` is a free-form summary by the server's model.
+- **No writes during a run.** Workers list facts as `[kind] fact` under
+  `Memory candidates:`; the coordinator queues the ones a future task could
+  act on, and the gate checks each line on the spot.
+- **Only useful facts:** a memory must be one fact of 25–280 characters, of
+  kind `decision`, `convention`, `pitfall`, `interface` or `test-strategy`,
+  name a path, identifier, command or flag in the repo, contain no narration
+  or summary, and not duplicate anything already stored. There is no
+  `outcome` kind: what a feature did is in git.
+- **Written once, verbatim:** `/feature-ladder:wrap` runs
+  `memory_gate.py flush`, which writes the queue straight to the bank over MCP.
+  No scribe agent, no rewording.
 
-A different model family catches different mistakes, so complex code is
-never graded by Claude alone. The feature's full diff is reviewed by OpenAI
-Codex through the official Codex CLI, using your own Codex sign-in (ChatGPT
-plan or API key; usage counts toward your Codex limits). The plugin never
-touches credentials.
+### Cross-model review (OpenAI Codex), once per session
 
-- **When:** with `--codex`, or automatically when the confirmed intake shows
-  complex work: any task routed to Opus, a complexity score of 10 or more, a
-  risk flag (security, persistence, concurrency, cross-system, live changes,
-  public API), novelty, or algorithmic work (parsers, schedulers, RNG,
-  ranking, sync, concurrency and the like). Small, well-trodden Sonnet or
-  Haiku work skips it, and the report says why.
-- **Review:** Codex runs in a read-only sandbox and returns structured
-  findings (severity, file, line, why, fix). Reasoning effort is chosen
-  deterministically, the same way for review and adversarial runs: medium for
-  routine work, high when any task routed to Opus or escalated, or touched
-  security, persistence, concurrency, cross-system, live or public-API code.
-- **Trim, verify, then fix:** the script drops `low` findings (kept in the
-  record) and duplicates with no model tokens, asks Codex for a `repro`
-  command per finding, and writes one verification card. A single Haiku
-  mechanic runs every repro in one dispatch and returns a verdict per finding.
-  Confirmed bugs become fix tasks routed through the router, with the
-  reproduction as the "done when" check, then Codex reviews again. Claims
-  that can't be reproduced go to a one-question Fable second opinion.
-- **Adversarial tests (`--adversarial`):** Codex writes tests that attack the
-  change (edge cases, hostile input, error paths, concurrency) only under
-  `.feature-ladder/adversarial/<slug>/`, runs them with your test runner, and
-  marks which failures are real bugs. A before-and-after `git status` check
-  flags anything it touched outside that folder.
-- **Limits:** at most two review rounds, then `deep-verifier`. Adversarial
-  tests that exposed real bugs are moved into your test suite once fixed.
-  Confirmed findings and false alarms are both saved to Hindsight.
-- **Cheap to drive:** a Haiku-low agent runs Codex and hands back its findings
-  verbatim, so Fable never spends tokens reading raw review output.
-- **Optional:** if Codex isn't installed or signed in, the run says so and continues.
+A different model family catches different mistakes, but paying for it on
+every small feature is what burned the budget. Codex reviews run only at
+`/feature-ladder:wrap --review`, once, over the whole session's diff, through
+the official Codex CLI and your own Codex sign-in.
 
-Records are saved to `.feature-ladder/reviews/`. That folder and
-`.feature-ladder/adversarial/` are git-ignored automatically. On demand, for
-any branch or uncommitted work: `/feature-ladder:codex-review [--adversarial]`.
+- **Review:** read-only sandbox, structured findings (severity, file, line,
+  why, fix, repro). The script drops `low` findings and duplicates with no
+  model tokens.
+- **Adversarial tests (`--adversarial`):** Codex writes attack tests only
+  under `.feature-ladder/adversarial/<slug>/` and runs them; a `git status`
+  check flags anything it touched outside that folder.
+- **Report, don't loop:** findings are listed with their repro commands; each
+  confirmed bug becomes its own `/feature-ladder:feature` request. No fix
+  rounds, no re-review, no mechanic per finding. A disputed finding gets a
+  Fable answer only with `--second-opinion`.
+- **Optional:** if Codex isn't installed or signed in, wrap says so.
+
+Records are saved to `.feature-ladder/reviews/`. On demand, for any branch or
+uncommitted work: `/feature-ladder:codex-review [--adversarial]`.
 
 ### Evidence and escalation discipline
 
@@ -393,11 +350,10 @@ any branch or uncommitted work: `/feature-ladder:codex-review [--adversarial]`.
   runs the card's checks exactly as written, saves exit codes and output
   tails to `.feature-ladder/evidence/<task>.json`, and compares the files that
   really changed with the card's scope and the worker's claim. A check that
-  would touch production data or print a secret is refused, not run. A mechanic
-  is dispatched only when a check's output needs interpreting.
-- Failed or blocked tasks move up **one** band at a time.
-- Escalation means "fix the task" (decide, design, or split), never "the
-  coordinator writes the code".
+  would touch production data or print a secret is refused, not run. No
+  subagent re-checks the work.
+- A failed task is re-dispatched once, then moves up **one** band once, then
+  is reported `partial`.
 
 ---
 
@@ -422,7 +378,7 @@ repeatable and auditable.
    in `skill-rules.json`.
 3. It returns at most `max_skills` skills (default 3) within a character
    budget of skill text: `max_chars_by_role` per router role (shipped
-   defaults: mechanic 0, implementer 15,000, senior implementer and domain
+   defaults: mechanic 0, implementer 8,000, senior implementer and domain
    experts 30,000), else `max_chars` (default 20,000). Anything cut is
    reported, never silently included.
 4. `--inject --out .feature-ladder/cards/<task>-skills.md` writes those
@@ -519,8 +475,9 @@ for the hooks (Claude Code already requires it).
 Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
 the start of a conversation it downloads `route.py`, `intake.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
-`select_skills.py`, `skill-rules.json` and `resolve_bank.py` from this repo, pinned to a release
-tag (currently `v1.9.0`), so the app and
+`external_worker.py`, `session_budget.py`, `select_skills.py`,
+`skill-rules.json`, `resolve_bank.py` and `memory_gate.py` from this repo, pinned to a release
+tag (currently `v1.10.0`), so the app and
 Claude Code always run identical logic. The app session needs code execution
 and network access to GitHub.
 
@@ -550,7 +507,9 @@ one, the app skill skips memory and says so.
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto] [--codex] [--adversarial] [--ultra]` | Intake, then run a feature to completion on its own branch and open PRs |
+| `/feature-ladder:feature <request> [--auto] [--second-opinion] [--escalate] [--ultra]` | Intake, then implement one feature atomically on its own branch and open its PR |
+| `/feature-ladder:wrap [--review] [--adversarial] [--second-opinion]` | End of session: write the queued memories (script), and only if asked, one review over everything the session built |
+| `/feature-ladder:workers [glm \| jev \| claude \| check]` | Where the cheap cards run, and a setup check |
 | `/feature-ladder:scope <request>` | Intake only; the next `/feature-ladder:feature` with the same request reuses it |
 | `/feature-ladder:codex-review [--adversarial]` | Codex second opinion on the commits since main, or your uncommitted work |
 | `/feature-ladder:route <task or JSON>` | Dry-run the model router |
@@ -563,10 +522,12 @@ one, the app skill skips memory and says so.
 |---|---|---|
 | Deterministic model routing | ✅ plugin script | ✅ same script, fetched from this repo |
 | Deterministic skill selection | ✅ enforced (`Skill` tool removed from workers) | ✅ selected and injected; enforcement by instruction |
-| Named ladder agents (13 rungs + scoper) | ✅ | General-purpose subagents with role briefs |
+| Named ladder agents (12 rungs + scoper) | ✅ | General-purpose subagents with role briefs |
 | Hindsight memory | ✅ plugin MCP server, per-repo bank via hooks | ✅ if a Hindsight connector is added; per-repo bank via the same resolver |
-| Retain gate and startup hooks | ✅ | — (no hooks in the app) |
-| Codex second opinion and adversarial tests | ✅ via your local Codex CLI | — (needs your local Codex sign-in) |
+| Session subagent budget | ✅ enforced by a spawn hook | ✅ `session_budget.py charge` before each subagent |
+| Memory gate (scoped recall, gated writes) | ✅ enforced by the Hindsight hook | ✅ same script, run by the skill |
+| GLM tier through OpenRouter | ✅ | ✅ when the Claude CLI and a key are on that machine |
+| Codex review at end of session | ✅ via your local Codex CLI | ✅ when the Codex CLI is signed in there |
 | Intake (ask once, up front) | ✅ scoper agent + question cards | ✅ same script; questions asked in chat |
 | Branches and checkpoint PRs | ✅ plus guard hook | ✅ only when the work is a git repo with `gh` |
 | Token ledger per rung | ✅ `SubagentStop` hook, table in the report | — (no hooks in the app) |
@@ -578,16 +539,15 @@ one, the app skill skips memory and says so.
 plugins/feature-ladder/
   .claude-plugin/plugin.json
   .mcp.json                            Hindsight HTTP MCP server (env-driven)
-  agents/                              14 agents (13 rungs + scoper)
-  commands/                            feature, scope, route, skills, recall, codex-review
-  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py, verify.py
-  skills/worker-contract/              the short contract workers preload instead of the full protocol
+  agents/                              13 agents (12 rungs + scoper)
+  commands/                            feature, wrap, scope, route, skills, recall, codex-review, workers
+  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py, verify.py, session_budget.py, external_worker.py
   skills/complexity-router/            route.py + intake.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/worker-contract/              the short contract every worker preloads instead of the full protocol
-  skills/hindsight-memory/             recall / retain protocol + resolve_bank.py
+  skills/hindsight-memory/             memory rules + resolve_bank.py + memory_gate.py
   skills/cross-model-review/           codex_review.py (Codex review + adversarial tests)
-  hooks/                               bank resolution, per-call bank routing, retain gate, token ledger, irreversible-command guard
+  hooks/                               bank resolution and memory gate, session budget and spawn rules, retain gate, token ledger, irreversible-command guard
   hindsight/                           self-host env, start script, round-trip test
 claude-app/model-ladder-router/        the Claude app skill
 ```

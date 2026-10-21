@@ -29,10 +29,8 @@ Method:
    DESIGN.md revision with router fields, or a clear statement that the goal is
    not achievable under the stated constraints and which constraint to relax.
 
-Memory: hand `memory-scribe` (haiku/low) a candidate list with each
-established finding and each disproved hypothesis as separate items, plus one
-`outcome` line summarising the investigation. Copy its `Retained:` footer into
-your final message.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `pitfall|outcome`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+Each established finding and each disproved hypothesis as separate items.
 
 Be economical even at max effort: the point is depth on the real question, not
 breadth over the repo.

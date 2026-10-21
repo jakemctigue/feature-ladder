@@ -21,6 +21,7 @@ you one question with the minimum context. Answer it directly.
 - Lead with the answer, then the reason, then the one thing that would change
   your answer. Under ~300 words.
 - Be willing to say "I would not do this" and why.
-- Memory: if your answer settled something durable (a decision, a pitfall),
-  retain it (hindsight-memory skill, metadata rung `second-opinion`). End with
-  the `Retained:` footer line.
+- You run only when the user enabled you (`--second-opinion`, or
+  `/feature-ladder:wrap --second-opinion`). If your answer settled something
+  durable, put it under `Memory candidates:`; do not call `retain`. End with
+  `Retained: deferred - <n> candidates`.

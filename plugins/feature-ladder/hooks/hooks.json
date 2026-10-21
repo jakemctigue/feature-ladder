@@ -1,5 +1,5 @@
 {
-  "description": "feature-ladder: resolve this repository's Hindsight bank at session start (find existing or create), route every Hindsight tool call to it, require every ladder subagent to retain memories (or say why not) before it finishes, record each subagent's token usage in the run's ledger, and block irreversible shell commands while a ladder run is active.",
+  "description": "feature-ladder: resolve this repository's Hindsight bank at session start (find existing or create) and start a new session subagent budget, route every Hindsight tool call to it, enforce the session subagent budget and the per-feature spawn rules (no reviews, scribes or Fable calls inside a run), record each subagent's token usage in the run's ledger, and block irreversible shell commands while a ladder run is active.",
   "hooks": {
     "SessionStart": [
       {
@@ -9,6 +9,11 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/resolve_bank.py\" --session-start",
             "timeout": 30,
             "statusMessage": "Resolving Hindsight bank for this repository"
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/session_budget.py\" --session-start",
+            "timeout": 15
           }
         ]
       }
@@ -30,6 +35,16 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/guard_irreversible.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/session_budget.py\" --pretooluse",
             "timeout": 15
           }
         ]
