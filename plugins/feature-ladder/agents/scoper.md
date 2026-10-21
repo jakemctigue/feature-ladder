@@ -4,8 +4,6 @@ description: Sonnet Medium intake scout. Runs before anything is delegated - sca
 model: sonnet
 effort: medium
 color: cyan
-skills:
-  - feature-ladder:hindsight-memory
 disallowedTools:
   - Skill
   - Edit
@@ -29,9 +27,11 @@ later. You estimate; the user confirms what is uncertain. You change no code.
    the output). It gives a first guess for every field, the candidate files,
    the test command, the deployment targets and the git state.
 
-2. **Recall.** One Hindsight `recall` for this feature area: prior decisions,
-   pitfalls, how similar features were built. It feeds `novelty` and the open
-   decisions.
+2. **Recall.** One Hindsight `recall` (tool
+   `mcp__plugin_feature-ladder_hindsight__recall`, query = the feature area,
+   tags `project:<name>`; a hook picks the bank) for prior decisions,
+   pitfalls and how similar features were built. It feeds `novelty` and the
+   open decisions. If the server is down, skip it.
 
 3. **Read.** The candidate files that matter (at most ~15; use Grep/Glob to
    find the real entry points, callers and tests). Do not read the whole repo.
@@ -56,7 +56,10 @@ later. You estimate; the user confirms what is uncertain. You change no code.
      outside service). Code on a branch is never irreversible. Such steps run
      under the policy the user picks at intake, so say in the evidence what
      they are (e.g. "backfill of the monsters collection on bossforge-prod").
-   - `ambiguity`: 0 if the request plus the code leave one obvious approach;
+     Code that writes to Firestore or a database is NOT irreversible, and
+     neither is it `cross_system` when the repo already talks to that
+     database; only running a data step against real data is.
+   - `ambiguity` (never from the request's length): 0 if the request plus the code leave one obvious approach;
      1 if small gaps you can fill with the repo's conventions; 2+ if a worker
      would have to choose between real alternatives.
    - `novelty`: 0 copy an existing pattern (name it), 1 similar exists,
@@ -93,4 +96,4 @@ later. You estimate; the user confirms what is uncertain. You change no code.
 8. Return: the proposal path, then the `decide` output JSON verbatim, then a
    table of every field (value, confidence, one-line evidence), the secret
    names, then
-   `Retained: none - intake only (the coordinator retains at acceptance)`.
+   `Retained: none - intake only`.

@@ -27,10 +27,13 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           {"<id>": "<chosen option>"}}) into the final, user-confirmed intake,
           routes it, and writes .feature-ladder/intake/<slug>.json (git-ignored).
 
-          The output also carries `codex` ({"review": bool, "why": [...]}: a
-          second-model review is recommended for Opus-tier, risk-flagged,
-          novel or algorithmic work) and `secrets` (names the feature needs,
-          from the scan or the scoper's `secrets` list in ANSWERS; never values).
+          The output also carries `budget` (binding: workers, design step,
+          coordinator turns; never a review, a scribe or a Fable call),
+          `codex` ({"review": false, "at_wrap": [...]}: reviews never run
+          during a feature; the hints say why /feature-ladder:wrap --review
+          may be worth it at the end of the session), `switches` and
+          `secrets` (names the feature needs, never values). A
+          `session_agents` decision sets the session's subagent budget.
 
   card    '<task json>'
           Route one task AND select its skills in one call. The JSON takes
@@ -58,6 +61,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import route as router  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "orchestration-ladder" / "scripts"))
+import session_budget  # noqa: E402
+
+
+def session_status(repo_root):
+    try:
+        return session_budget.status(session_budget.find_root(repo_root or os.getcwd()))
+    except Exception:  # noqa: BLE001 - never fail the intake over this
+        return {}
 
 BOOL_FIELDS = ["public_api", "persistence", "security", "concurrency",
                "cross_system", "new_dependency", "no_tests", "irreversible"]
@@ -115,7 +128,7 @@ QUESTION_TEXT = {
     "cross_system": ("Other systems", "Does it talk to another service, repo or third-party API?"),
     "new_dependency": ("New package", "Will it need a new library or package?"),
     "no_tests": ("Tests", "Is this area untested today (no existing tests to run)?"),
-    "irreversible": ("Live changes", "Does any step have effects outside the repo (migrate or delete real data, deploy, publish, call an outside service)? They run under the policy you pick; production data overwrites get a Fable check first."),
+    "irreversible": ("Live changes", "Does the run itself have to do something outside the repo (migrate or delete real data, deploy, publish)? Code that writes to a database is not this; running it against real data is."),
     "ambiguity": ("Approach", "How precisely is the approach specified?"),
     "novelty": ("Novelty", "Has this repo done something like this before?"),
     "blast_radius": ("Blast radius", "If this is wrong, what breaks?"),
@@ -319,39 +332,53 @@ ALGORITHMIC = ["algorithm", "parser", "lexer", "compiler", "interpreter", "sched
 
 
 def codex_recommendation(fields, text, route):
-    """Deterministic: a second model's review is automatic only for size L
-    (Opus-tier or escalated work). Anything else lists reasons the user might
-    want --codex, but does not spend Codex time on its own."""
-    size = route.get("size", "S")
-    why = []
-    if size == "L":
-        why.append(f"size L: routed {route.get('agent')} ({route.get('model')}/{route.get('effort')}), score {route.get('score')}")
+    """Deterministic. A feature run never reviews: Codex, adversarial tests and
+    second opinions are an end-of-session step (/feature-ladder:wrap --review).
+    The hints only say why that step may be worth scheduling."""
     hints = []
+    if route.get("size") == "L" or route.get("model") == "opus":
+        hints.append(f"routed {route.get('agent')} ({route.get('model')}/{route.get('effort')}), score {route.get('score')}")
     if int(fields.get("novelty", 0) or 0) >= 2:
         hints.append("novel to this repo")
     hits = [k for k in ALGORITHMIC if router.keyword_hit(text.lower(), [k])]
     if hits:
         hints.append("algorithmic: " + ", ".join(hits[:4]))
-    return {"review": bool(why), "why": why, "consider_codex": hints if not why else []}
+    return {"review": False, "why": [], "at_wrap": hints}
 
 
-def budget_for(route, fields):
-    """What a feature of this size may spend. Binding for the coordinator."""
+# Coordinator turns per size. The coordinator's maxTurns (agents/coordinator.md)
+# is the hard ceiling over all of them.
+COORDINATOR_TURNS = {"S": 12, "M": 20, "L": 24}
+WORKERS = {"S": 1, "M": 2, "L": 4}
+
+
+def budget_for(route, fields, agents_left=None):
+    """What one feature may spend. Binding for the coordinator; the spawn hook
+    (session_budget.py) enforces the agent part."""
     size = route.get("size", "S")
-    if size == "S":
-        return {"size": "S", "workers": 1, "design": False, "independent_check": False,
-                "codex": False, "adversarial": False, "scribe": False, "escalation": "one band up on failure only",
-                "coordinator_turns": 12,
-                "shape": "one worker does the whole feature and quotes its own check output; the coordinator writes the card, reads the packet, accepts"}
-    if size == "M":
-        return {"size": "M", "workers": 2, "design": False, "independent_check": False,
-                "codex": False, "adversarial": False, "scribe": False, "escalation": "one band up on failure only",
-                "coordinator_turns": 20,
-                "shape": "one worker unless the work splits into two independent file sets; no design doc, no separate check-runner, no Codex unless --codex"}
-    return {"size": "L", "workers": 4, "design": not fields.get("design_agreed", False), "independent_check": True,
-            "codex": True, "adversarial": False, "scribe": True, "escalation": "ladder as written",
-            "coordinator_turns": 45,
-            "shape": "full protocol: design if not agreed, split into cards, independent check-runner, Codex review once (no retries), one scribe at the end"}
+    workers = WORKERS[size]
+    design = bool(route.get("design_first"))
+    notes = []
+    if agents_left is not None:
+        left = max(0, int(agents_left))
+        if design and left < 2:
+            design = False
+            notes.append("design step dropped: the session budget leaves room for the worker only")
+        workers = max(1, min(workers, left - (1 if design else 0))) if left else 0
+        if not left:
+            notes.append("session subagent budget is spent: nothing can be dispatched")
+    shape = {"S": "one worker does the whole feature",
+             "M": "one worker; two only if the files form two independent sets",
+             "L": f"up to {workers} workers on independent cards"}[size]
+    if design:
+        shape += ", after one design step (hard flag)"
+    return {"size": size, "workers": workers, "design": design, "mechanic_max": 1,
+            "independent_check": False, "codex": False, "adversarial": False, "scribe": False,
+            "second_opinion": False, "fable": False,
+            "escalation": "re-dispatch once, then one band up once; then report partial",
+            "coordinator_turns": COORDINATOR_TURNS[size],
+            "shape": shape + "; verify.py checks it; no review, no scribe, no Fable call",
+            "notes": notes}
 
 
 # --------------------------------------------------------------------- scan --
@@ -410,7 +437,8 @@ def scan(text, cwd):
                                    f'request mentions "{kw}"' if kw else "nothing outside the repo mentioned")
 
     words = len(text.split())
-    fields["ambiguity"] = field(2 if words < 8 else 1, "low", f"request is {words} words; approach not yet checked")
+    # Word count says nothing about ambiguity; the scoper judges it from the code.
+    fields["ambiguity"] = field(1, "low", f"request is {words} words; approach not yet checked")
     fields["novelty"] = field(1, "low", "not yet checked against the repo or memory")
     fields["blast_radius"] = field(1, "low", "not yet checked")
     fields["design_agreed"] = field(False, "low", "no accepted design yet")
@@ -589,6 +617,21 @@ def decide(prop, mode="default", max_q=8):
                                          {"label": "Stash them", "description": "git stash; you get them back with git stash pop"},
                                          {"label": "Stop", "description": "Do not start; I will commit them myself"}]})
 
+    # Session subagent budget: asked once per coding session, in this round.
+    sess = session_status(prop.get("repo_root"))
+    if sess.get("budget") == "unset" and mode != "auto":
+        rec = base.get("size", "S")
+        opts = [{"label": f"{session_budget.SIZE_LABELS[k]}" + (" (Recommended)" if k == rec else ""),
+                 "description": {"S": "Enough for one or two small features",
+                                 "M": "Several features, or one with a design step",
+                                 "L": "A long session of many features"}[k]}
+                for k in ("S", "M", "L")]
+        opts.sort(key=lambda o: 0 if o["label"].endswith("(Recommended)") else 1)
+        decisions.insert(0, {"id": "session_agents", "header": "Subagents",
+                             "question": "How many subagents may the ladder spawn in this whole coding session? "
+                                         "(The intake scout and the coordinator are not counted; GLM workers are.)",
+                             "options": opts})
+
     # Outside-repo policy: asked once when the feature may touch real data or
     # deployments (a production target is known, or the scout flagged it).
     env = prop.get("environments") or {}
@@ -597,9 +640,9 @@ def decide(prop, mode="default", max_q=8):
         prod = ", ".join(str(p) for p in env.get("production", [])[:3]) or "the production target"
         decisions.append({"id": "outside_policy", "header": "Live changes",
                           "question": f"This may change things outside the repo (data, deploys, {prod}). How far may it go on its own?",
-                          "options": [{"label": "All of it (Recommended)", "description": "Routine changes run at once; production data overwrites/deletes get one Fable check first; a short never-list is left for you"},
+                          "options": [{"label": "Nothing outside the repo (Recommended)", "description": "Code and tests only; every deploy or data step is listed for you to run"},
                                       {"label": "Non-production only", "description": "Emulator, dev and staging targets run; anything on production is left for you"},
-                                      {"label": "Nothing outside the repo", "description": "Code only; every outside step is listed for you to run"}]})
+                                      {"label": "All of it", "description": "Routine changes run at once; production overwrites/deletes are left for you (Fable checks them only with --second-opinion)"}]})
 
     asks.sort(key=lambda a: (a[0], ALL_FIELDS.index(a[1])))
     budget = max_q
@@ -665,7 +708,7 @@ def apply(prop, answers):
     # Answering every design decision the scout raised removes the ambiguity
     # that would otherwise escalate. Built-in questions (workspace, policy) are
     # not design decisions, and an explicit user answer for ambiguity stands.
-    builtin = {"workspace", "outside_policy"}
+    builtin = {"workspace", "outside_policy", "session_agents"}
     scout_ids = {d.get("id") or slugify(d.get("question", "decision")) for d in prop.get("open_decisions", [])}
     answered = [k for k in decisions if k in scout_ids and k not in assumed_decisions]
     unresolved = [k for k in answered if not decisions[k] or str(decisions[k]).lower().startswith("you decide")]
@@ -675,6 +718,16 @@ def apply(prop, answers):
         sources["ambiguity"] = "user (open decisions answered)"
     decisions = {k: v for k, v in decisions.items() if k in scout_ids or k in builtin}
     r = router.route(final)
+    sess_size = str(decisions.get("session_agents", "")).strip()[:1].upper() or None
+    if sess_size not in session_budget.SIZES:
+        sess_size = None
+    agents_left = answers.get("agents_left")
+    if agents_left is None and sess_size:
+        agents_left = session_budget.SIZES[sess_size]
+    if agents_left is None:
+        agents_left = session_status(prop.get("repo_root")).get("left")
+    switches = sorted({str(x).strip().lstrip("-").replace("-", "_") for x in answers.get("switches") or []}
+                      & {"second_opinion", "escalate", "ultra"})
     secrets = prop.get("secrets") or {}
     needed = answers.get("secrets") if isinstance(answers.get("secrets"), list) else secrets.get("names", [])
     return {
@@ -685,7 +738,9 @@ def apply(prop, answers):
         "fields": final,
         "sources": sources,
         "codex": codex_recommendation(final, prop.get("request", ""), r),
-        "budget": budget_for(r, final),
+        "budget": budget_for(r, final, agents_left),
+        "session_agents": sess_size,
+        "switches": switches,
         "secrets": {"provider": secrets.get("provider"), "project": secrets.get("project"),
                     "names": needed, "template_keys": secrets.get("template_keys", [])},
         "decisions": decisions,
@@ -695,8 +750,8 @@ def apply(prop, answers):
                       else "stop" if str(decisions.get("workspace", "")).lower().startswith("stop")
                       else "include"),
         "outside_policy": ("nonprod" if str(decisions.get("outside_policy", "")).lower().startswith("non")
-                           else "none" if str(decisions.get("outside_policy", "")).lower().startswith("nothing")
-                           else "all"),
+                           else "all" if str(decisions.get("outside_policy", "")).lower().startswith("all")
+                           else "none"),
         "environments": prop.get("environments", {}),
         "test_command": (prop.get("repo") or {}).get("test_command"),
         "candidate_files": prop.get("candidate_files", []),
@@ -710,7 +765,8 @@ def _ensure_ignore(root):
     gi = d / ".gitignore"
     lines = gi.read_text(encoding="utf-8").splitlines() if gi.is_file() else []
     changed = False
-    for entry in ("intake/", "reviews/", "adversarial/", "checkpoints/", "run.json"):
+    for entry in ("intake/", "reviews/", "adversarial/", "checkpoints/", "run.json", "session.json", "session-memory*.md",
+              "memory-gate.json", "memory-ledger.jsonl"):
         if entry not in lines:
             lines.append(entry)
             changed = True
@@ -770,20 +826,24 @@ def main(argv):
                    "exclude": task.get("exclude", [])}
             root, _ = repo_root(os.getcwd())
             tid = re.sub(r"[^A-Za-z0-9_-]", "-", str(task.get("id") or "task"))
-            # External (OpenRouter) workers for the cheap rungs, when configured.
+            # The GLM tier: T0 and small T2 run on GLM 5.3 Flash through
+            # OpenRouter whenever it is set up (workers "auto", the default, or
+            # "openrouter"); otherwise on the Claude rung the router named.
             try:
-                sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "orchestration-ladder" / "scripts"))
                 import external_worker as ew
                 cfg = ew.load_config(str(root))
-                if cfg.get("workers") == "openrouter" and r["agent"] in ew.EXTERNAL_RUNGS:
-                    rung_arg = r["agent"] + ("-high" if r.get("effort") == "high" else "")
+                ready, why = ew.available(cfg) if r.get("provider") == "glm" else (False, "")
+                if r.get("provider") == "glm" and cfg.get("workers") in ("auto", "openrouter") and ready:
                     card_file = root / ".feature-ladder" / "cards" / f"{tid}.md"
                     r["runner"] = {"kind": "external", "provider": "openrouter",
                                    "model": ew.model_for(cfg, r["agent"], r.get("effort")),
                                    "card_file": str(card_file),
-                                   "command": f'python3 "{ew.HERE / "external_worker.py"}" run --card "{card_file}" --id {tid} --rung {rung_arg}'}
+                                   "command": f'python3 "{ew.HERE / "external_worker.py"}" run --card "{card_file}" --id {tid} --rung {r["agent"]}'}
                 else:
                     r["runner"] = {"kind": "subagent"}
+                    if r.get("provider") == "glm":
+                        r["runner"]["note"] = ("GLM tier off: workers=claude" if cfg.get("workers") == "claude"
+                                               else f"GLM tier unavailable: {why}")[:160]
             except Exception as e:  # noqa: BLE001 - routing must never fail because of this
                 r["runner"] = {"kind": "subagent", "note": f"external worker config ignored: {e}"[:160]}
             print(json.dumps(r, indent=2))
@@ -829,6 +889,9 @@ def main(argv):
             prop = _load(rest[0])
             answers = _load(rest[1]) if len(rest) > 1 else {}
             result = apply(prop, answers)
+            if result.get("session_agents"):
+                result["session"] = session_budget.set_size(
+                    session_budget.find_root(prop.get("repo_root") or os.getcwd()), result["session_agents"])
             if not out:
                 root = prop.get("repo_root") or os.getcwd()
                 _ensure_ignore(root)

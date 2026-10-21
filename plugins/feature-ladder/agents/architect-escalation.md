@@ -20,8 +20,8 @@ Method:
 1. State the invariant the current design cannot hold, with the evidence from
    the packets you were given. If you can show the invariant *can* be held
    with the existing design, say so - that ends the escalation.
-2. Recall from Hindsight: prior architecture decisions and their reasons for
-   this project; `reflect` once on "why was it built this way".
+2. Use the card's `Memory:` lines for prior architecture decisions; one
+   narrow `recall` only if it says `none`.
 3. Enumerate the minimal structural changes that restore the invariant.
    Prefer the change with the smallest blast radius that is also honest about
    the trade-off. Reject grand redesigns unless nothing smaller works, and say
@@ -31,10 +31,9 @@ Method:
    Mark which existing work is kept, reworked, or discarded.
 5. Hand back to the coordinator. You do not implement.
 
-Memory: hand `memory-scribe` (haiku/low) a candidate list with the
-architectural decision, the invariant it protects, and the rejected
-alternatives with reasons (kind `decision`). Copy its `Retained:` footer into
-your final message.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `decision`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+Include the decision, the invariant it protects, and the rejected alternatives
+with reasons.
 
 If even this rung cannot settle it, say precisely what is unknown and what an
 investigation would need to measure or prove, so the user can decide whether

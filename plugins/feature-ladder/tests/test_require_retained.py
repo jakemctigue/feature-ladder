@@ -1,4 +1,5 @@
-"""Tests for the retain gate: who is bounced for a missing Retained footer, who is exempt.
+"""Tests for the retain gate: only the coordinator is bounced for a missing Retained footer;
+workers defer memory to /feature-ladder:wrap and are never bounced.
 
 Run from the repo root:  python3 -m unittest discover -s plugins/feature-ladder/tests
 """
@@ -18,22 +19,25 @@ def hook(payload):
 
 
 class RetainGate(unittest.TestCase):
-    def test_worker_without_footer_is_bounced_once(self):
-        code, out = hook({"agent_type": "feature-ladder:implementer", "last_assistant_message": "TASK T1 - done\nChanged: a.py"})
+    def test_coordinator_without_footer_is_bounced_once(self):
+        code, out = hook({"agent_type": "feature-ladder:coordinator", "last_assistant_message": "Done. PR #3"})
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["decision"], "block")
+        self.assertIn("session_budget.py remember", json.loads(out)["reason"])
 
-    def test_worker_with_footer_passes(self):
-        code, out = hook({"agent_type": "feature-ladder:implementer", "last_assistant_message": "...\nRetained: none - nothing durable"})
+    def test_coordinator_with_footer_passes(self):
+        code, out = hook({"agent_type": "feature-ladder:coordinator",
+                          "last_assistant_message": "...\nRetained: deferred - 2 lines queued for /feature-ladder:wrap"})
         self.assertEqual((code, out), (0, ""))
 
-    def test_exempt_rungs_are_never_bounced(self):
-        for agent in ("feature-ladder:mechanic", "mechanic", "feature-ladder:codex-reviewer", "feature-ladder:memory-scribe"):
+    def test_workers_are_never_bounced(self):
+        for agent in ("feature-ladder:implementer", "feature-ladder:mechanic", "mechanic", "feature-ladder:domain-expert",
+                      "feature-ladder:codex-reviewer", "feature-ladder:memory-scribe"):
             code, out = hook({"agent_type": agent, "last_assistant_message": "TASK check - done\nChecks run: pytest -> 0"})
             self.assertEqual((code, out), (0, ""), agent)
 
     def test_second_stop_is_not_bounced_again(self):
-        code, out = hook({"agent_type": "feature-ladder:implementer", "stop_hook_active": True,
+        code, out = hook({"agent_type": "feature-ladder:coordinator", "stop_hook_active": True,
                           "last_assistant_message": "no footer"})
         self.assertEqual((code, out), (0, ""))
 

@@ -268,20 +268,34 @@ def session_start():
 
 
 def pretooluse():
+    """Route the call to this repository's bank and apply the memory gate
+    (memory_gate.py): which tools, how much recall, which writes."""
     data = _stdin_json()
     tool = str(data.get("tool_name", ""))
-    short = tool.rsplit("__", 1)[-1]
     tin = data.get("tool_input") or {}
-    if "hindsight" not in tool or short in SKIP_TOOLS or not isinstance(tin, dict):
+    if "hindsight" not in tool or not isinstance(tin, dict):
         return 0
+    cwd = data.get("cwd") or os.getcwd()
     try:
-        r = resolve(data.get("cwd") or os.getcwd())
-    except Exception:
-        return 0  # leave the call unchanged; the server's default bank applies
-    if not r or not r.get("bank_id") or tin.get("bank_id") == r["bank_id"]:
+        import memory_gate
+        ident = identity(cwd)
+        ok, reason, tin2 = memory_gate.gate(tool, tin, ident["root"], ident["project"])
+    except Exception:  # noqa: BLE001 - a broken gate must not break the session
+        ok, reason, tin2 = True, "", dict(tin)
+    if not ok:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": reason}}))
         return 0
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                             "updatedInput": {**tin, "bank_id": r["bank_id"]}}}))
+    if tool.rsplit("__", 1)[-1] not in SKIP_TOOLS:
+        try:
+            r = resolve(cwd)
+        except Exception:
+            r = None  # the server's default bank applies
+        if r and r.get("bank_id"):
+            tin2["bank_id"] = r["bank_id"]
+    if tin2 != tin:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                                 "updatedInput": tin2}}))
     return 0
 
 

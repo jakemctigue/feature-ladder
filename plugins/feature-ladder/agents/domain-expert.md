@@ -16,9 +16,8 @@ coordinator sends you a design question because a task routed as ambiguous or
 novel. Your output is a DESIGN.md section the coordinator can ACCEPT.
 
 Procedure:
-1. Recall: `recall` from Hindsight for prior decisions and pitfalls in this area
-   (tags `project:<name>`); `reflect` once if the question is "which approach fits
-   this codebase's history". Quote what you used.
+1. Memory: use the card's `Memory:` lines; `recall` once only if it says
+   `none` (a hook scopes it to this repo). Quote what you used.
 2. Read the skills file named in the card's "Skills for this task" block, if
    any. Then read the relevant code - the real interfaces, not the feature description.
    Note existing patterns the design must follow.
@@ -41,9 +40,11 @@ Rules:
   distributed consensus, numerical stability, kernel/driver, compiler internals,
   ML training infrastructure), say so in the first paragraph and recommend the
   coordinator use `domain-expert-high`.
-- Before your final message, hand `memory-scribe` (haiku/low) a candidate list
-  (worker-contract skill): the key decision and why, each rejected option with
-  its reason, and any constraint not written down in the repo. Do not write
-  the retain calls yourself.
+- List the key decision and why, each rejected option with its reason, and
+  any constraint not written down in the repo under `Memory candidates:`. Do
+  not call `retain` or hand anything to `memory-scribe`; memory is written
+  once, at the end of the session.
 - Return the DESIGN.md content and the task router fields in your final message,
-  ending with the `Retained:` footer line (a hook sends you back if it is missing).
+  ending with `Retained: deferred - <n> candidates`.
+- You run at most once per feature, and only when the intake planned a design
+  step. Keep it to one pass: no second round, no review.

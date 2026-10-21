@@ -10,7 +10,8 @@ irreversible.py and the guard hook, not by branches.
              Uncommitted changes are committed first as a separate commit
              marked as the user's (include, default) or stashed (stash).
              Writes .feature-ladder/run.json (with the intake's outside-repo
-             policy and environments), which switches on the guard hook.
+             policy, environments, budget and switches), which switches on
+             the guard hook and the spawn rules (session_budget.py).
 
   checkpoint --title T --body-file F
              For a critical decision: commit everything, push, open a DRAFT PR
@@ -72,7 +73,8 @@ def save(root, run):
     p.parent.mkdir(parents=True, exist_ok=True)
     gi = p.parent / ".gitignore"
     lines = gi.read_text(encoding="utf-8").splitlines() if gi.is_file() else []
-    for e in ("intake/", "reviews/", "adversarial/", "checkpoints/", "cards/", "evidence/", "runs/", "run.json"):
+    for e in ("intake/", "reviews/", "adversarial/", "checkpoints/", "cards/", "evidence/", "runs/", "run.json", "session.json", "session-memory*.md",
+              "memory-gate.json", "memory-ledger.jsonl"):
         if e not in lines:
             lines.append(e)
     gi.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -200,7 +202,9 @@ def cmd_start(root, a):
             environments = _scan("", str(root)).get("environments", {})
         except Exception:  # noqa: BLE001 - best effort
             environments = {}
-    run = {"outside_policy": intake.get("outside_policy", "all"),
+    run = {"outside_policy": intake.get("outside_policy", "none"),
+           "budget": intake.get("budget") or {"size": "S", "workers": 1, "design": False},
+           "switches": intake.get("switches") or [],
            "environments": environments,
            "slug": slug, "base": base, "branch": branch, "stack_base": base,
            "active": True, "started": now(), "pr_enabled": ok,

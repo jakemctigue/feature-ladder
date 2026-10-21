@@ -37,7 +37,15 @@ Input fields (all optional; missing = 0 / false)
   blast_radius      0-3   0 isolated ... 3 whole app / customers affected if wrong
   design_agreed     bool  an accepted design/spec exists for this task (required for Opus rungs)
 
-Output: JSON {rung, agent, model, effort, score, hard_flags, breakdown, reason}
+Output: JSON {rung, agent, model, effort, provider, score, size, design_first,
+              hard_flags, breakdown, reason}
+
+  provider      "glm" for T0 and small T2 (runs on GLM 5.3 Flash through
+                OpenRouter when it is set up, else on the Claude rung named),
+                "claude" for everything else.
+  design_first  true when a hard flag or an Opus rung without an agreed design
+                means ONE design step (domain-expert) comes before the worker.
+                A hard flag never changes the size or adds any other step.
 """
 import json
 import re
@@ -67,21 +75,23 @@ POINTS = {
     "blast_radius": lambda v: [0, 1, 2, 4][max(0, min(3, int(v)))],
 }
 
-# Rungs are chosen by score band. "escalate" means: hand to the coordinator
-# (Fable 5.1 Medium), who decides the Fable rung or re-scopes the task.
-# Size (S/M/L) sets the feature's budget: how many agents, whether a design,
-# an independent check, Codex or a scribe are used at all (intake.py).
+# Rungs are chosen by score band. Sonnet Medium is the default implementation
+# rung; GLM 5.3 Flash (provider "glm") takes T0 and small T2 work. The router
+# never picks a Fable rung: Fable is reached only when the user asks for it.
+# Size (S/M/L) sets how many workers a feature may use (intake.py budget_for).
 BANDS = [
-    (0,  3,  "mechanic",            "haiku",  "low",    "T0 Haiku Low - mechanical patch"),
-    (4,  9,  "implementer",         "sonnet", "medium", "T2 Sonnet Medium - bounded coding"),
-    (10, 19, "implementer",         "sonnet", "high",   "T3 Sonnet High - bounded coding, harder"),
+    (0,  3,  "mechanic",            "haiku",  "low",    "T0 GLM Flash / Haiku Low - mechanical patch"),
+    (4,  6,  "implementer",         "sonnet", "medium", "T2 GLM Flash / Sonnet Medium - small bounded coding"),
+    (7,  14, "implementer",         "sonnet", "medium", "T2 Sonnet Medium - bounded coding"),
+    (15, 19, "implementer",         "sonnet", "high",   "T3 Sonnet High - bounded coding, harder"),
     (20, 23, "senior-implementer",  "opus",   "medium", "T4 Opus Medium - difficult implementation"),
-    (24, 28, "senior-implementer",  "opus",   "high",   "T5 Opus High - difficult implementation"),
-    (29, 10**6, "escalate",         "fable",  "medium", "ESCALATE - coordinator decides (Fable rung or re-scope)"),
+    (24, 10**6, "senior-implementer", "opus", "high",   "T5 Opus High - difficult implementation"),
 ]
+GLM_MAX_SCORE = 6  # T0 and small T2 go to the GLM tier
 SIZE = [(0, 9, "S"), (10, 19, "M"), (20, 10**6, "L")]
 
-# Any of these forces escalation regardless of score.
+# Any of these means one design step before the worker. They do not change
+# the size, the rung or anything else in the budget.
 HARD_FLAGS = {
     "ambiguity>=2": "approach not specified (ambiguity >= 2)",
     "blast_radius=3": "whole-app blast radius",
@@ -162,41 +172,50 @@ def route(task: dict) -> dict:
     task = clean(task)
     kind = str(task.get("kind") or "code").lower()
     total, breakdown, flags = score(task)
+    agreed = bool(task.get("design_agreed", False))
 
-    if kind in NON_CODE_KINDS and not flags:
+    if kind in NON_CODE_KINDS:
         agent, model, effort, label = NON_CODE_KINDS[kind]
         if kind == "analysis" and _num(task.get("novelty", 0)) >= 3:
             agent, effort, label = "domain-expert-high", "high", "T5 Opus High - domain analysis, novel area"
         return _out(label, agent, model, effort, total, flags, breakdown,
-                    f"kind={kind} routes by kind, not score")
-
-    if flags:
-        return _out(BANDS[-1][5], "escalate", "fable", "medium", total, flags, breakdown,
-                    "hard flag present: " + "; ".join(flags))
+                    f"kind={kind} routes by kind, not score", design_first=False)
 
     for lo, hi, agent, model, effort, label in BANDS:
         if lo <= total <= hi:
             reason = f"score {total} in band {lo}-{hi}"
-            # Opus rungs require an agreed design; otherwise bounce to coordinator.
-            if model == "opus" and not task.get("design_agreed", False):
-                return _out("ESCALATE - Opus rung needs an agreed design first", "escalate",
-                            "fable", "medium", total, flags, breakdown,
-                            reason + "; design_agreed=false so coordinator must settle design (domain-expert) before implementation")
-            return _out(label, agent, model, effort, total, flags, breakdown, reason)
+            design = bool(flags) and not agreed
+            if flags:
+                reason += "; hard flag (" + "; ".join(flags) + ")"
+            # Opus rungs require an agreed design; one design step comes first.
+            if model == "opus" and not agreed:
+                design = True
+                reason += "; Opus rung needs an agreed design first (one domain-expert step)"
+            return _out(label, agent, model, effort, total, flags, breakdown, reason, design_first=design)
     raise RuntimeError("unreachable")
 
 
-def _out(label, agent, model, effort, total, flags, breakdown, reason):
+def provider_for(agent, effort, total):
+    if agent == "mechanic":
+        return "glm"
+    if agent == "implementer" and effort == "medium" and total <= GLM_MAX_SCORE:
+        return "glm"
+    return "claude"
+
+
+def _out(label, agent, model, effort, total, flags, breakdown, reason, design_first=False):
     return {
         "rung": label,
         "agent": agent,
         "model": model,
         "effort": effort,
+        "provider": provider_for(agent, effort, total),
         "score": total,
+        "size": next((s for lo, hi, s in SIZE if lo <= total <= hi), "L"),
+        "design_first": design_first,
         "hard_flags": flags,
         "breakdown": breakdown,
         "reason": reason,
-        "size": next((s for lo, hi, s in SIZE if lo <= total <= hi), "L") if not flags else "L",
     }
 
 
@@ -221,7 +240,9 @@ def describe(text: str) -> dict:
     for flag, words in KEYWORDS.items():
         if keyword_hit(t, words):
             task[flag] = True
-    task["ambiguity"] = 2 if len(t.split()) < 8 else 1
+    # A short request is not an ambiguous one: ambiguity is judged from the
+    # code by the scoper, never from word count.
+    task["ambiguity"] = 1
     return task
 
 
@@ -233,13 +254,14 @@ def table():
     print("  new_dependency +1   public_api +1   no_tests +1")
     print("  persistence +2  security +2  concurrency +2  cross_system +2  irreversible +2")
     print("  ambiguity 0/1/3/5   novelty 0/1/3/5   blast_radius 0/1/2/4")
-    print("Size: S 0-9 (one worker, nothing else)  M 10-19 (<=2 workers)  L 20+ or hard flag (full protocol)")
+    print("Size: S 0-9 (1 worker)  M 10-19 (<=2 workers)  L 20+ (<=4 workers); never reviews, never Fable")
     print("Bands:")
     for lo, hi, agent, model, effort, label in BANDS:
         hi_s = "+" if hi >= 10**6 else str(hi)
         print(f"  {lo:>2}-{hi_s:<3} {label:<58} -> {agent} ({model}/{effort})")
-    print("Hard flags (always escalate): " + "; ".join(HARD_FLAGS.values()))
-    print("Opus rungs additionally require design_agreed=true.")
+    print(f"Provider: glm for mechanic and implementer/medium with score <= {GLM_MAX_SCORE}; claude otherwise")
+    print("Hard flags (one design step first, nothing else): " + "; ".join(HARD_FLAGS.values()))
+    print("Opus rungs additionally require design_agreed=true (else one design step first).")
 
 
 def main(argv):

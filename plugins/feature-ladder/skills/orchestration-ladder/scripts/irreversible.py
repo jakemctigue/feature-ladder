@@ -9,7 +9,8 @@ command during a ladder run:
              targets, deploys, index builds, exports, previews, dry runs, and
              anything else that doesn't destroy existing production data)
   risky      production data overwritten or deleted, or production resources
-             deleted. Needs one short Fable verdict first:
+             deleted. Left for the user, unless the run has the
+             --second-opinion switch; then it needs one short Fable verdict:
                irreversible.py approve --cmd "<exact command>" --verdict-file F
              F must contain "VERDICT: APPROVE" (from second-opinion, fable/low).
              Then the exact command runs and is logged.
@@ -310,6 +311,12 @@ def gate(cmd, run):
         record(run, cmd, c, "ran (mundane)")
         return True, "", True
     if c["decision"] == "needs_verdict":
+        if "second_opinion" not in (run.get("switches") or []):
+            # No Fable call unless the user asked for one (--second-opinion).
+            record(run, cmd, c, "left for user: production overwrite/delete (no --second-opinion)")
+            return False, (f"feature-ladder: '{c['label']}' on production overwrites or deletes data. It is left "
+                           "for the user: put the exact command under 'Left for you' in FEATURE-REPORT.md and "
+                           "carry on. Do not ask for a second opinion."), True
         for a in run.get("approved", []):
             if a["cmd"] == norm(cmd) and not a.get("used"):
                 a["used"] = now()

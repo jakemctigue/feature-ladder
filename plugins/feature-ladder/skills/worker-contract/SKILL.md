@@ -1,6 +1,6 @@
 ---
 name: worker-contract
-description: The short contract every feature-ladder worker (implementer, senior-implementer, domain experts, Fable verifiers) carries - how to read a Task Card, stay in scope, handle secrets, use memory sparingly, and return an Evidence Packet with the Retained footer. Workers load this instead of the full orchestration protocol.
+description: The short contract every feature-ladder worker (implementer, senior-implementer, domain experts, Fable verifiers) carries - how to read a Task Card, stay in scope, handle secrets, defer memory to the end of the session, and return an Evidence Packet with the Retained footer. Workers load this instead of the full orchestration protocol.
 ---
 
 # Worker contract
@@ -29,19 +29,19 @@ unreadable secret is `blocked: secret NAME`; finish what does not depend on it.
 
 **Memory.** The card's `Memory:` lines are the recall; query Hindsight yourself
 only when that line is `none` and the area is unfamiliar (one narrow `recall`,
-tags `project:<name>`). Before your final message retain what is durable and
-new: implementers call `retain` directly for 0-3 facts
-(`content`: one concrete fact; `context`: `feature-ladder`; `tags`:
-`project:<name>`, `feature:<slug>`, one of `decision|convention|pitfall|interface|test-strategy|outcome`;
-`metadata`: `{"source":"feature-ladder","rung":"<your agent>"}`). Opus and
-Fable rungs hand a candidate list to `memory-scribe` (haiku/low) instead and
-copy its footer. Never store secrets or personal data; skip anything already
-in the repo's docs or in a `Retained:` line you were given.
+tags `project:<name>`). Never call `retain` and never hand anything to
+`memory-scribe`: put 0-3 durable, new facts under `Memory candidates:`, one
+per line as `[kind] fact` (kind: `decision|convention|pitfall|interface|test-strategy`),
+naming the path, identifier or command it is about. Only what a future task
+in this repo would act on; never a summary of what you did.
+The coordinator queues them and memory is written once, at the end of the
+session (`/feature-ladder:wrap`). Never include secrets or personal data, or
+anything already in the repo's docs.
 
-**Live changes.** Commands with effects outside the repo (deploys, data
-migrations, outside services) are part of your task; a guard hook sorts them
-by the intake's policy. Follow a denial message exactly; never work around it
-and never write undo scripts or rehearsals.
+**Atomic.** Do the change the card asks for and its tests, nothing more: no
+refactors, hardening, reviews or deploys it did not ask for. Commands with
+effects outside the repo run only as far as the intake's policy allows (a
+guard hook decides); follow a denial exactly and never work around it.
 
 **Economy.** Read only the files in Scope and what they import. Do not survey
 the repo, reformat untouched code, add tests beyond `Done when`, or write
@@ -56,7 +56,7 @@ Checks run: <command -> exit code -> last 5 lines>
 Claims: <each factual claim with how it was verified; "unverified" is allowed and honest>
 Risks: <anything you are unsure about>
 Memory candidates: <facts worth retaining, one line each, or "none">
-Retained: <n> - <kind>: <first ~10 words>; ...   |   Retained: none - <reason>
+Retained: deferred - <n> candidates   |   Retained: none - <reason>
 ```
 Never say "should work": a check ran and is quoted, or the claim is unverified.
 A verifier that specifies a fix returns it as a Task Card the coordinator can
