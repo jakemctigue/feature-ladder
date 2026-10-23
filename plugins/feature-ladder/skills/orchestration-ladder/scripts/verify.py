@@ -28,10 +28,12 @@ Paths under .feature-ladder/ are ignored. Without --scope the scope check is
 skipped; without --changed the claim check is skipped; outside a git repo both
 are skipped and the evidence says so.
 
-Refused checks: every command is classified by irreversible.py first. A check
-is a test, so anything that would overwrite or delete production data, is on
-the never-list, or would print a secret is not run and counts as failed.
-Commands that need a key go through with_secrets.py as on any Task Card.
+Refused checks: every command is classified by irreversible.py first. The one
+refusal is a command whose output would print a secret value; it is not run
+and counts as failed (run it through with_secrets.py, as on any Task Card).
+Everything else runs as written; a check with effects outside the repo (a
+deploy, a merge, a data step) is recorded in run.json like any other
+outside-repo command, with review: pending where it touched production.
 """
 import fnmatch
 import json
@@ -88,16 +90,38 @@ def load_run(root):
 
 
 def refusal(cmd, run):
-    """None if the check may run; otherwise why not."""
+    """None if the check may run; otherwise why not. Only a secret exposure is
+    refused; a check with effects outside the repo runs and is logged."""
     try:
         from irreversible import classify
     except ImportError:
         return None
     c = classify(cmd, run)
-    tier = c.get("tier", "none")
-    if tier in ("none", "mundane"):
-        return None
-    return f"refused: {tier} ({c.get('label') or c.get('reason') or 'not a check'})"
+    if c.get("decision") == "deny":
+        return f"refused: {c.get('tier')} ({c.get('label') or c.get('reason') or 'not a check'})"
+    if c.get("tier", "none") != "none":
+        _log_outside(cwd_of(run), cmd, c)
+    return None
+
+
+def cwd_of(run):
+    return run.get("_root")
+
+
+def _log_outside(root, cmd, c):
+    """Record a check with effects outside the repo in run.json (audit, not a gate)."""
+    if not root:
+        return
+    p = Path(root) / ".feature-ladder" / "run.json"
+    if not p.is_file():
+        return
+    try:
+        from irreversible import record
+        live = json.loads(p.read_text(encoding="utf-8"))
+        record(live, cmd, c, "ran as a check")
+        p.write_text(json.dumps(live, indent=2) + "\n", encoding="utf-8")
+    except (OSError, ValueError, ImportError):
+        pass
 
 
 def run_check(cmd, cwd, timeout, run):
@@ -182,6 +206,7 @@ def verify(card, cwd, timeout):
     root = repo_root(cwd)
     home = main_checkout(root) if root else cwd  # evidence and run.json live in the main checkout
     run = load_run(home)
+    run["_root"] = str(home)  # where an outside-repo check is logged (audit, not a gate)
     checks = [run_check(c, cwd, timeout, run) for c in card.get("checks") or []]
     result = {"task": card.get("id") or "task", "at": now(), "cwd": str(cwd), "checks": checks,
               "git": bool(root), "scope": card.get("scope") or [], "claimed": card.get("changed") or []}

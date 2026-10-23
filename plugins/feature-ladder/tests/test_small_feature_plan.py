@@ -100,7 +100,8 @@ class SmallFirestoreWrite(unittest.TestCase):
         self.assert_one_cheap_worker(final)
         self.assertEqual(final["route"]["provider"], "glm")  # score 5: T2 small -> GLM tier
         self.assertEqual(final["session_agents"], "S")
-        self.assertEqual(final["outside_policy"], "none")  # code only unless the user picks more
+        self.assertEqual(final["outside_policy"], "all")  # informational since v1.11: the hook logs, never gates
+        self.assertNotIn("outside_policy", [d["id"] for d in dec["decisions"]])  # no "Live changes" question
 
     def test_cautious_flags_still_plan_one_sonnet_medium_worker(self):
         # The scoper over-flags (cross_system, irreversible, a 3-file guess): size M by
@@ -198,9 +199,23 @@ class SpawnHook(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(session_budget.status(self.root)["used"], 0)
 
+    def test_integrator_runs_only_after_two_coding_agents_and_once(self):
+        self.start_run({"size": "M", "workers": 2, "design": False})
+        session_budget.set_size(self.root, "L")
+        ok, out = self.spawn("integrator", "fable")
+        self.assertFalse(ok)
+        self.assertIn("integrator", out)
+        self.assertTrue(self.spawn("implementer", "sonnet")[0])
+        self.assertFalse(self.spawn("integrator", "fable")[0])  # one coding agent is not an integration
+        self.assertTrue(self.spawn("mechanic", "haiku")[0])
+        self.assertTrue(self.spawn("integrator", "fable")[0])   # two different coding agents: Fable integrates
+        self.assertFalse(self.spawn("integrator", "fable")[0])  # once per feature
+        self.assertTrue(self.spawn("implementer", "sonnet")[0])  # the retry slot is still free: not a worker
+        self.assertEqual(session_budget.status(self.root)["used"], 4)
+
     def test_one_worker_one_mechanic_and_the_coordinator_is_free(self):
         self.start_run()
-        self.assertTrue(self.spawn("coordinator", "fable")[0])
+        self.assertTrue(self.spawn("coordinator", "opus")[0])
         self.assertTrue(self.spawn("scoper", "sonnet")[0])
         self.assertTrue(self.spawn("implementer", "sonnet")[0])
         self.assertTrue(self.spawn("mechanic", "haiku")[0])
@@ -248,19 +263,25 @@ class SpawnHook(unittest.TestCase):
         self.assertEqual(session_budget.status(self.root)["budget"], "S")
 
 
-class ProductionWritesWithoutFable(unittest.TestCase):
-    def test_risky_write_is_left_for_the_user_without_the_switch(self):
+class ProductionWritesRunAndAreLogged(unittest.TestCase):
+    """Since v1.11 a production write is not gated: it runs, is recorded with
+    review: pending, and no Fable verdict is ever requested for it."""
+
+    def test_risky_write_runs_and_is_pending_review(self):
         from irreversible import gate
-        run = {"active": True, "outside_policy": "all",
+        run = {"active": True,
                "environments": {"production": ["bossforge-prod"], "nonproduction": []}}
-        ok, reason, _ = gate("firebase firestore:delete /users --project bossforge-prod", run)
-        self.assertFalse(ok)
-        self.assertIn("left", reason)
-        self.assertNotIn("second-opinion (fable", reason)
-        run["switches"] = ["second_opinion"]
-        ok, reason, _ = gate("firebase firestore:delete /users --project bossforge-prod", run)
-        self.assertFalse(ok)
-        self.assertIn("VERDICT", reason)
+        for switches in ([], ["second_opinion"]):
+            run["switches"] = switches
+            ok, reason, changed = gate("firebase firestore:delete /users --project bossforge-prod", run)
+            self.assertTrue(ok, switches)
+            self.assertEqual(reason, "")
+            self.assertTrue(changed)
+        actions = run["outside_actions"]
+        self.assertEqual(len(actions), 2)
+        self.assertEqual((actions[0]["tier"], actions[0]["environment"], actions[0]["review"]),
+                         ("risky", "prod", "pending"))
+        self.assertNotIn("VERDICT", json.dumps(run))
 
 
 if __name__ == "__main__":

@@ -31,32 +31,51 @@ Both use the same scripts and rules.
   and mechanical and small coding cards run on **GLM 5.3 Flash** through
   OpenRouter (billed to OpenRouter credits, not your Claude plan) whenever a
   key is present.
-- **No Fable unless you ask.** The router never picks Fable; the coordinator
-  is the only Fable call in a run. Second opinions, deep verification and
-  production-write verdicts need an explicit switch.
+- **Never waits for you.** Deploys, index builds, data steps and the merge
+  happen when the feature needs them. An audit hook logs each one, labels it
+  `review: pending` when it touched production or was on the former
+  never-list, and the report and the PR list them for you to look at
+  afterwards. There is no live-changes policy, no verdict and no approve
+  step; the only command refused is one that would print a secret value.
+- **Confidence instead of gates.** Before each Task Card the coordinator runs
+  `confidence.py`: one Hindsight recall becomes a sentiment-scored,
+  relevance-weighted surface of what the project remembers about these
+  files (pitfalls weigh as warnings, conventions and test strategies as
+  steady ground). At or above 0.60 the card proceeds; below it the card is
+  **resharded** into smaller cards. Advice about size, never a block.
+- **Fable only to integrate.** The router never picks Fable and the
+  coordinator runs on Opus. Fable comes in once, as the `integrator`, only
+  when two or more different coding agents wrote code for one feature, with
+  no coding tools (Read, Glob, Grep and the superpowers skills) and a
+  React + Vite integration checklist. Second opinions and deep verification
+  still need an explicit switch.
 - **Reviews and memory once per session, not per feature.** Codex review,
   adversarial tests and a Fable second opinion run only when you schedule
   them with `/feature-ladder:wrap`, once, over everything the session built.
   Memory is written at the same point, by a script, through a strict gate.
 - **Hooks enforce the budget.** A spawn hook denies any subagent past the
-  session budget, a second mechanic or design step, and any review, scribe or
-  Fable rung inside a run. The coordinator is capped at 24 turns.
+  session budget, a second mechanic or design step, the integrator before two
+  coding agents have returned, and any review, scribe or other Fable rung
+  inside a run. The coordinator is capped at 24 turns.
 - Decides **which model and effort level** handles each task with a fixed
   scoring function (`route.py`), and **which skills** each worker gets with a
   fixed rule engine (`select_skills.py`); the skill text goes to a file only
   the worker reads.
 - Works on its own branch: a critical decision mid-run becomes a draft PR and
-  work continues stacked on it. Outside-repo steps (deploys, data writes) run
-  only as far as the policy you pick at intake; the default is code only.
+  work continues stacked on it. `finish` opens the final PR, labels the
+  stack `review: pending` and merges it in order (`--no-merge` to leave it
+  open; a merge GitHub refuses is reported, never forced).
 - Requires evidence: every worker quotes real command output, and acceptance
   checks are re-run by a script (`verify.py`), not by another model.
 
 **What it does not do**
 
-- It does not merge, push to your base branch, or force-push. It pushes its
-  own `feature-ladder/...` branches and opens PRs for you to review. It never
-  deletes a project, database, repo or backup, and never weakens database
-  protection; a guard hook enforces that list while a run is active.
+- It does not stop to ask. Nothing in a run waits for a verdict: not a
+  deploy, not a data step, not the merge. What it did outside the repo is
+  the first thing in the report, labelled `review: pending`.
+- It does not print secret values. A command whose output would put one in
+  the transcript is the one thing the audit hook refuses; workers use
+  `with_secrets.py`.
 - It does not write undo scripts, backups or rehearsals for live changes.
   Tokens go to the feature; the services' own safeguards are relied on.
 - It does not invent a design when the request is ambiguous. It asks at
@@ -77,7 +96,8 @@ Both use the same scripts and rules.
 | T3 | `implementer` | Sonnet 5.5 / high | Bounded coding, harder |
 | T4–T5 | `senior-implementer` | Opus 5.5 / medium–high | Difficult implementation under an agreed design |
 | D | `domain-expert`, `domain-expert-high` | Opus 5.5 / medium–high | One design step, only on a hard flag |
-| **F-Med** | **`coordinator`** | **Fable 5.1 / medium** | **Card, dispatch, verify.py, accept: 12-24 turns** |
+| **C** | **`coordinator`** | **Opus 5.5 / medium** | **Confidence, card, dispatch, verify.py, accept, merge: 12-24 turns** |
+| **FI** | **`integrator`** | **Fable 5.1 / medium** | **Once per feature, only after two or more different coding agents wrote code; no coding tools, superpowers skills only** |
 | F-Low | `second-opinion` | Fable 5.1 / low | Only with `--second-opinion` |
 | F-High | `deep-verifier` | Fable 5.1 / high | Only with `--escalate` |
 | F-Extra | `architect-escalation` | Fable 5.1 / xhigh | Only with `--escalate` |
@@ -90,21 +110,29 @@ Both use the same scripts and rules.
    touch, and proposes a value, confidence and evidence for every routing
    variable. `intake.py decide` picks the questions: the session's subagent
    budget (first feature only), uncertain variables whose answer changes the
-   model, open design decisions, and the live-changes policy. You answer once;
-   the confirmed intake is binding. The run moves to `feature-ladder/<slug>`.
+   model, and open design decisions. You answer once; the confirmed intake
+   is binding. The run moves to `feature-ladder/<slug>`.
 1. **Recall once.** One Hindsight recall, scoped by a hook to this repo's
-   bank and capped at 1000 tokens; only the snippets that bear on the card go
-   into it.
-2. **One Task Card.** `intake.py card` routes it and picks its skills in one
-   call. A hard flag adds one design step before the worker; nothing else.
+   bank and capped at 1000 tokens, saved to the run folder; only the snippets
+   that bear on the card go into it.
+2. **Confidence, then one Task Card.** `confidence.py card` scores the recall
+   against the card's files: at or above 0.60 the card proceeds, below it the
+   card is resharded into smaller ones (once). `intake.py card` routes each
+   card and picks its skills in one call. A hard flag adds one design step
+   before the worker; nothing else.
 3. **One worker.** GLM 5.3 Flash or Sonnet medium does the change and its
    tests and returns an *Evidence Packet* with real check output.
-4. **Verify with no model.** `verify.py` re-runs the checks and flags files
+4. **Integrate, only for multi-agent work.** If two or more different coding
+   agents wrote code for the feature, the Fable `integrator` reads the packets
+   and the combined diff, names the seams, and returns one integration card
+   or `coherent`. One worker's work skips this step.
+5. **Verify with no model.** `verify.py` re-runs the checks and flags files
    outside the card's scope. A failure is re-dispatched once, then one band
    up once, then reported `partial`.
-5. **Accept.** The coordinator queues the packet's memory candidates (through
-   the memory gate), writes `FEATURE-REPORT.md` with the token table, and
-   opens the PR.
+6. **Accept and merge.** The coordinator queues the packet's memory
+   candidates (through the memory gate), writes `FEATURE-REPORT.md` with the
+   confidence lines, the `review: pending` list and the token table, and
+   `pr_checkpoint.py finish` opens the PR, labels the stack and merges it.
 
 At the end of a session (many features), `/feature-ladder:wrap` writes the
 queued memories with a script and, only if you ask, runs one Codex review,
@@ -150,7 +178,8 @@ again.
 | L | 20+ | up to 4 | ~24 (hard cap at every size) |
 
 Every size: at most one mechanic, a design step only on a hard flag, no Codex,
-no scribe, no Fable rung, no check-runner. For the Firestore-write class of
+no scribe, no check-runner, and no Fable rung but the integrator (once, after
+two coding agents; it is not counted as a worker). For the Firestore-write class of
 feature this is one GLM or Sonnet-medium worker and a coordinator of about a
 dozen turns (a test pins it).
 
@@ -167,18 +196,17 @@ dozen turns (a test pins it).
   flipping it changes the rung. It also checks whether several small guesses
   together would change the rung. Open design decisions are always asked.
   Uncommitted changes in your checkout get one question: include them as their
-  own commit, stash them, or stop. If a production target is detected
-  (`.firebaserc` aliases, for instance), you get one more: how far live
-  changes may go (all, non-production only, nothing outside the repo).
+  own commit, stash them, or stop. There is no live-changes question: what
+  the feature needs outside the repo runs and is logged for review.
 
 `--auto` asks nothing and takes the scout's values and recommended options.
 `/feature-ladder:scope` runs intake alone and saves it; the next
 `/feature-ladder:feature` with the same request text reuses it without asking.
 
-Switches: `--auto`, `--second-opinion` (allows one Fable verdict, e.g.
-before a production overwrite), `--escalate` (allows the Fable debugging
-rungs) and `--ultra`. Reviews are not feature switches: they belong to
-`/feature-ladder:wrap`.
+Switches: `--auto`, `--no-merge` (leave the PR stack open instead of merging
+it), `--second-opinion` (allows one Fable answer to one sharp question),
+`--escalate` (allows the Fable debugging rungs) and `--ultra`. Reviews are
+not feature switches: they belong to `/feature-ladder:wrap`.
 
 ### Secrets from Google Secret Manager
 
@@ -194,14 +222,15 @@ with_secrets.py --secret NAME[=ENV_VAR] -- <command>
 ```
 
 which fetches the value with your own `gcloud` sign-in, puts it in that one
-command's environment and masks it in the output. The guard denies anything
-that would print a value into the transcript (`gcloud secrets versions
-access`, `cat .env`, `printenv`, `echo $X_KEY`). Deleting, disabling or
-re-sharing a secret is on the never-list; creating one on production is a
-risky step. Values never reach a report, PR, commit, memory or Codex prompt.
+command's environment and masks it in the output. The audit hook denies
+anything that would print a value into the transcript (`gcloud secrets
+versions access`, `cat .env`, `printenv`, `echo $X_KEY`); that is its only
+denial. Deleting, disabling, re-sharing or creating a secret runs and is
+logged `review: pending`. Values never reach a report, PR, commit, memory or
+Codex prompt.
 
-The guard classifies the command after `--` exactly as if it ran on its own,
-so a production overwrite inside the wrapper is still left for you.
+The hook classifies the command after `--` exactly as if it ran on its own,
+so a production step inside the wrapper is logged like any other.
 
 ### Run to completion: branches and checkpoint PRs
 
@@ -209,13 +238,14 @@ so a production overwrite inside the wrapper is still left for you.
 
 | Step | What it does |
 |---|---|
-| `start` | Creates `feature-ladder/<slug>` from your branch, records the intake policy, and turns on the guard hook for this repo |
+| `start` | Creates `feature-ladder/<slug>` from your branch, records the budget and switches, and turns on the audit hook for this repo |
 | `checkpoint` | Commits, pushes and opens a **draft PR** saying what was assumed and how to switch, then continues on `feature-ladder/<slug>-pt2` |
-| `finish` | Opens the final PR on top of the stack and prints the merge order |
-| `abort` | Turns the guard off after a run died midway; branches and commits stay |
+| `finish` | Opens the final PR on top of the stack, labels every PR `review: pending`, merges the stack in order (checkpoints first) and prints each result; `--no-merge` leaves it open; a merge GitHub refuses is reported, never forced |
+| `abort` | Turns the hook off after a run died midway; branches and commits stay |
 
-Without a remote or the `gh` CLI (or with `--no-pr`), the same branches are
-made locally and each PR description is saved in `.feature-ladder/checkpoints/`.
+Without a remote or the `gh` CLI, the same branches are made locally, each
+PR description is saved in `.feature-ladder/checkpoints/`, and `finish`
+merges the stack into your base branch locally.
 
 ### The GLM tier: GLM 5.3 Flash through OpenRouter
 
@@ -247,32 +277,63 @@ Code integration applies ([their cookbook](https://openrouter.ai/docs/cookbook/c
 Their API is a single stable `v1` with changes announced in the changelog,
 so nothing is pinned ([versioning](https://openrouter.ai/docs/api_reference/versioning)).
 
-### Changes outside the repo
+### Changes outside the repo: an audit log, not a gate
 
 Code on a branch is always reversible, so `irreversible` only means effects
 outside the repo (in routing it is a +3 risk weight, not a stop). Those steps
-are run, not parked. `skills/orchestration-ladder/scripts/irreversible.py`
-classifies every shell command during a run, with no model tokens, and the
-`PreToolUse` guard applies the result:
+are run when the feature needs them, never parked.
+`skills/orchestration-ladder/scripts/irreversible.py` classifies every shell
+command during a run, with no model tokens, and the `PreToolUse` hook records
+the result in `run.json`:
 
 | Tier | Examples | What happens |
 |---|---|---|
-| **mundane** | emulator, dev or staging targets; `firebase deploy`; index builds; exports; dry runs; anything that doesn't destroy production data | runs at once, logged |
-| **risky** | `firestore:delete`, `firestore import`, destructive SQL, migration/backfill scripts against production | left for you with the exact command; with `--second-opinion`, one Fable verdict, `irreversible.py approve`, then it runs |
-| **never** | deleting a project, database, repo or backups; weakening database protection; merging PRs; pushing to your base branch; force-pushing or deleting `main`; `rm -rf` of `/` or your home folder | left for you, logged |
+| **mundane** | emulator, dev or staging targets; `firebase deploy`; index builds; exports; dry runs; anything that doesn't destroy production data | runs, logged |
+| **risky** | `firestore:delete`, `firestore import`, destructive SQL, migration/backfill scripts against production | runs, logged `review: pending` |
+| **never** | the former never-list: merging PRs; pushing or force-pushing your base branch; deleting a project, database, repo or backups; weakening database protection; `rm -rf` of `/` or your home folder | runs, logged `review: pending`, named first in the report and the PR |
+| **secret** | `gcloud secrets versions access`, `cat .env`, `printenv`, `echo $X_KEY` | **refused** - the one denial; use `with_secrets.py` |
 
-The intake policy narrows this: *nothing outside the repo* (the recommended
-default) leaves all of them for you; *non-production only* leaves every
-production action. Production is
-recognised from `.firebaserc` aliases, `--project` flags and words like
-`prod`/`staging` in the command; an unknown target on a real cloud tool is
-treated as production. Only the executable part of a command is classified
-(quoted strings, heredocs and comments are stripped), so a commit message or a
-`grep` that mentions `DROP TABLE` is not a command. Code a shell still runs is
-classified too: `bash -c '...'`, `eval`, a heredoc fed to a shell, `$(...)`,
-backticks, and the command after `--` in `with_secrets.py`. Recursively
-deleting `/` or your home folder is on the never-list. Every action, approved,
-rejected or left for you, is listed in a table in `FEATURE-REPORT.md`.
+Production is recognised from `.firebaserc` aliases, `--project` flags and
+words like `prod`/`staging` in the command; an unknown target on a real cloud
+tool is treated as production. Only the executable part of a command is
+classified (quoted strings, heredocs and comments are stripped), so a commit
+message or a `grep` that mentions `DROP TABLE` is not a command. Code a shell
+still runs is classified too: `bash -c '...'`, `eval`, a heredoc fed to a
+shell, `$(...)`, backticks, and the command after `--` in `with_secrets.py`.
+Every action is listed in a table in `FEATURE-REPORT.md` with its review
+status; `irreversible.py pending` prints the `review: pending` rows as a
+checklist and `finish` puts the same list in the PR body.
+
+### The confidence surface
+
+What the gates used to decide is decided from the project's own memory.
+`skills/orchestration-ladder/scripts/confidence.py` takes the feature's
+Hindsight recall and the card (or the command) and returns one number:
+
+- **An emotionally textured surface.** Every remembered fact is scored for
+  sentiment with a lexicon (no tokens) or, with `--scorer jev`, by Jev
+  through OpenRouter: a `[pitfall]` reads as a warning, a `[convention]` or
+  `[test-strategy]` as steady ground, and the words in the fact ("timed out",
+  "passes green") move it further. Each fact is weighted by how closely it
+  touches the card's files and commands. The result has a mood: `unknown`,
+  `wary`, `steady` or `confident`, and a one-line texture that quotes the
+  facts that weighed most.
+- **One number.** A prior from the card's size (S 0.75, M 0.65, L 0.55) or
+  the command's tier (mundane 0.72, risky 0.55, never 0.50), plus a quarter of
+  the surface's sentiment, minus a little for each relevant pitfall, plus or
+  minus the checks that have passed or failed so far. Clamped to [0.05, 0.98].
+- **Two outcomes, no block.** At or above `0.60`
+  (`FEATURE_LADDER_CONFIDENCE_THRESHOLD`) the card proceeds. Below it the
+  card is **resharded**: split into the number of smaller cards it names, by
+  independent file sets, one concern each, with a fresh score per shard
+  (once per feature, then proceed and record the number). For a command,
+  "reshard" means run its preview or dry-run form first when the tool has
+  one, then the real one. Everything is written next to the action in
+  `FEATURE-REPORT.md`.
+
+`confidence.py card --action "<title>" --paths <files> --size S --memories recall.json`
+is the call; `--live --query "<text>"` lets it recall on its own through the
+same gate. `confidence.py score "<text>"` shows the lexicon's view of a line.
 
 ### Deterministic skill selection
 
@@ -307,6 +368,9 @@ Every Hindsight call goes through a hook (`resolve_bank.py` plus
   1000 tokens, at most 3 recalls per feature (scout, coordinator, one worker
   without a Memory line). `reflect`, knowledge pages and bank edits are
   denied: `reflect` is a free-form summary by the server's model.
+- **Read twice, written once:** the coordinator's recall is saved to the run
+  folder and feeds `confidence.py`, so the same memories that go on the card
+  also size it.
 - **No writes during a run.** Workers list facts as `[kind] fact` under
   `Memory candidates:`; the coordinator queues the ones a future task could
   act on, and the gate checks each line on the spot.
@@ -464,7 +528,7 @@ claude plugin install feature-ladder@feature-ladder
 
 Or inside a session: `/plugin marketplace add jakemctigue/feature-ladder`,
 then `/plugin install feature-ladder@feature-ladder`. To check the install,
-`/agents` should list the thirteen `feature-ladder:*` agents, and `/mcp` should
+`/agents` should list the fourteen `feature-ladder:*` agents, and `/mcp` should
 show `plugin:feature-ladder:hindsight`.
 
 Requirements: Python 3 on PATH (`python3` or `python`). On Windows, Git Bash
@@ -475,9 +539,9 @@ for the hooks (Claude Code already requires it).
 Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
 the start of a conversation it downloads `route.py`, `intake.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
-`external_worker.py`, `session_budget.py`, `select_skills.py`,
+`confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
 `skill-rules.json`, `resolve_bank.py` and `memory_gate.py` from this repo, pinned to a release
-tag (currently `v1.10.0`), so the app and
+tag (currently `v1.11.0`), so the app and
 Claude Code always run identical logic. The app session needs code execution
 and network access to GitHub.
 
@@ -507,7 +571,7 @@ one, the app skill skips memory and says so.
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto] [--second-opinion] [--escalate] [--ultra]` | Intake, then implement one feature atomically on its own branch and open its PR |
+| `/feature-ladder:feature <request> [--auto] [--no-merge] [--second-opinion] [--escalate] [--ultra]` | Intake, then implement one feature atomically on its own branch; the PR stack is merged and labelled `review: pending` (`--no-merge` leaves it open) |
 | `/feature-ladder:wrap [--review] [--adversarial] [--second-opinion]` | End of session: write the queued memories (script), and only if asked, one review over everything the session built |
 | `/feature-ladder:workers [glm \| jev \| claude \| check]` | Where the cheap cards run, and a setup check |
 | `/feature-ladder:scope <request>` | Intake only; the next `/feature-ladder:feature` with the same request reuses it |
@@ -522,14 +586,15 @@ one, the app skill skips memory and says so.
 |---|---|---|
 | Deterministic model routing | ✅ plugin script | ✅ same script, fetched from this repo |
 | Deterministic skill selection | ✅ enforced (`Skill` tool removed from workers) | ✅ selected and injected; enforcement by instruction |
-| Named ladder agents (12 rungs + scoper) | ✅ | General-purpose subagents with role briefs |
+| Named ladder agents (13 rungs + scoper) | ✅ | General-purpose subagents with role briefs |
+| Confidence surface (recall -> sentiment -> proceed / reshard) | ✅ `confidence.py` | ✅ same script |
 | Hindsight memory | ✅ plugin MCP server, per-repo bank via hooks | ✅ if a Hindsight connector is added; per-repo bank via the same resolver |
 | Session subagent budget | ✅ enforced by a spawn hook | ✅ `session_budget.py charge` before each subagent |
 | Memory gate (scoped recall, gated writes) | ✅ enforced by the Hindsight hook | ✅ same script, run by the skill |
 | GLM tier through OpenRouter | ✅ | ✅ when the Claude CLI and a key are on that machine |
 | Codex review at end of session | ✅ via your local Codex CLI | ✅ when the Codex CLI is signed in there |
 | Intake (ask once, up front) | ✅ scoper agent + question cards | ✅ same script; questions asked in chat |
-| Branches and checkpoint PRs | ✅ plus guard hook | ✅ only when the work is a git repo with `gh` |
+| Branches, checkpoint PRs, merge with `review: pending` | ✅ plus audit hook | ✅ only when the work is a git repo with `gh` |
 | Token ledger per rung | ✅ `SubagentStop` hook, table in the report | — (no hooks in the app) |
 
 ## Repository layout
@@ -539,15 +604,15 @@ one, the app skill skips memory and says so.
 plugins/feature-ladder/
   .claude-plugin/plugin.json
   .mcp.json                            Hindsight HTTP MCP server (env-driven)
-  agents/                              13 agents (12 rungs + scoper)
+  agents/                              14 agents (13 rungs + scoper)
   commands/                            feature, wrap, scope, route, skills, recall, codex-review, workers
-  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, with_secrets.py, verify.py, session_budget.py, external_worker.py
+  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, confidence.py, with_secrets.py, verify.py, session_budget.py, external_worker.py
   skills/complexity-router/            route.py + intake.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/worker-contract/              the short contract every worker preloads instead of the full protocol
   skills/hindsight-memory/             memory rules + resolve_bank.py + memory_gate.py
   skills/cross-model-review/           codex_review.py (Codex review + adversarial tests)
-  hooks/                               bank resolution and memory gate, session budget and spawn rules, retain gate, token ledger, irreversible-command guard
+  hooks/                               bank resolution and memory gate, session budget and spawn rules, retain gate, token ledger, outside-repo audit log
   hindsight/                           self-host env, start script, round-trip test
 claude-app/model-ladder-router/        the Claude app skill
 ```
@@ -560,12 +625,14 @@ claude-app/model-ladder-router/        the Claude app skill
   `Skill` tool, so the protocol skills should still load with `Skill`
   disabled. Confirm this on your first run by asking an agent whether its
   orchestration protocol is in context.
-- The guard hook matches command patterns; it's a safety net behind the
-  agents' instructions, not a sandbox. A production write hidden inside a
-  script whose name doesn't look like a migration isn't caught by it, and a
-  step on a target it can't recognise is treated as production.
-- Checkpoint PRs stack: merge them in the order the final report lists.
-  GitHub retargets the next PR when you merge one and delete its branch.
+- The audit hook matches command patterns; it is a log, not a sandbox. A
+  production write hidden inside a script whose name doesn't look like a
+  migration isn't labelled by it, and a step on a target it can't recognise
+  is labelled as production. The `review: pending` list is only as complete
+  as those patterns.
+- Checkpoint PRs stack and `finish` merges them in order. If GitHub refuses
+  one (branch protection, a conflict) the report says which and the rest
+  stays open; merge or fix it yourself.
 - Subagents have a fixed startup cost. Acceptance checks therefore run through
   `verify.py` rather than a mechanic; for other very small jobs, running them
   directly can be cheaper than delegating.
