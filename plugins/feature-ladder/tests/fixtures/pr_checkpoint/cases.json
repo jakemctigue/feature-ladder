@@ -13,12 +13,12 @@
     {"name": "ready", "origin": "ok", "gh": "ok", "expect": [true, ""]}
   ],
   "stack_note": [
-    {"name": "empty-stack", "checkpoints": [], "expect": "\n---\n**feature-ladder PR stack** (merge in this order):\n"},
+    {"name": "empty-stack", "checkpoints": [], "expect": "\n---\n**feature-ladder PR stack** (merged in this order):\n"},
     {"name": "decision-then-final-in-merge-order",
      "checkpoints": [
        {"branch": "feature-ladder/x", "kind": "decision", "title": "Pick storage", "pr": "https://github.com/o/r/pull/1"},
        {"branch": "feature-ladder/x-pt2", "kind": "final", "title": "Feature x"}],
-     "expect": "\n---\n**feature-ladder PR stack** (merge in this order):\n1. `feature-ladder/x` (decision): Pick storage https://github.com/o/r/pull/1\n2. `feature-ladder/x-pt2` (final): Feature x\n"}
+     "expect": "\n---\n**feature-ladder PR stack** (merged in this order):\n1. `feature-ladder/x` (decision): Pick storage https://github.com/o/r/pull/1\n2. `feature-ladder/x-pt2` (final): Feature x\n"}
   ],
   "open_pr": [
     {"name": "pr-disabled-saves-the-body-for-the-user", "pr_enabled": false, "push_error": null, "draft": false,
