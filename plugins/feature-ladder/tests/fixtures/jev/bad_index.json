@@ -1,0 +1,15 @@
+{
+  "id": "gen-recorded",
+  "model": "typesafe/jev-router",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"scores\": [{\"i\": 0, \"score\": -0.6}, {\"i\": 7, \"score\": 0.9}, {\"i\": -1, \"score\": 0.9}, {\"i\": 1, \"score\": 0.4}, {\"i\": 2, \"score\": 0.1}, {\"i\": 2, \"score\": 0.9}]}"
+      }
+    }
+  ]
+}
