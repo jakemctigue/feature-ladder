@@ -1,0 +1,17 @@
+2026-03-02T10:25:30.7010000Z ##[group]Run python -m unittest discover -v -s plugins/feature-ladder/tests
+2026-03-02T10:25:30.7011000Z shell: /usr/bin/bash -e {0}
+2026-03-02T10:25:30.7012000Z ##[endgroup]
+2026-03-02T10:25:31.1020000Z test_pr_checkpoint_cases (unittest.loader._FailedTest.test_pr_checkpoint_cases) ... ERROR
+2026-03-02T10:25:31.1100000Z ======================================================================
+2026-03-02T10:25:31.1101000Z ERROR: test_pr_checkpoint_cases (unittest.loader._FailedTest.test_pr_checkpoint_cases)
+2026-03-02T10:25:31.1102000Z ----------------------------------------------------------------------
+2026-03-02T10:25:31.1103000Z ImportError: Failed to import test module: test_pr_checkpoint_cases
+2026-03-02T10:25:31.1104000Z Traceback (most recent call last):
+2026-03-02T10:25:31.1105000Z   File "/opt/hostedtoolcache/Python/3.11.9/x64/lib/python3.11/unittest/loader.py", line 407, in _find_test_path
+2026-03-02T10:25:31.1106000Z     module = self._get_module_from_name(name)
+2026-03-02T10:25:31.1107000Z   File "/home/runner/work/feature-ladder/feature-ladder/plugins/feature-ladder/tests/test_pr_checkpoint_cases.py", line 20, in <module>
+2026-03-02T10:25:31.1108000Z     import pr_checkpoint as pc
+2026-03-02T10:25:31.1109000Z ModuleNotFoundError: No module named 'pr_checkpoint'
+2026-03-02T10:25:31.1200000Z Ran 1 test in 0.000s
+2026-03-02T10:25:31.1201000Z FAILED (errors=1)
+2026-03-02T10:25:31.1400000Z ##[error]Process completed with exit code 1.

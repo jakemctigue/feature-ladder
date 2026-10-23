@@ -1,0 +1,10 @@
+2026-03-02T10:20:11.0011100Z ##[group]Run python -m compileall -q plugins
+2026-03-02T10:20:11.0012200Z python -m compileall -q plugins
+2026-03-02T10:20:11.0013300Z shell: /usr/bin/bash -e {0}
+2026-03-02T10:20:11.0014400Z ##[endgroup]
+2026-03-02T10:20:11.3120010Z *** Error compiling 'plugins/feature-ladder/skills/complexity-router/scripts/route.py'...
+2026-03-02T10:20:11.3121020Z   File "plugins/feature-ladder/skills/complexity-router/scripts/route.py", line 132
+2026-03-02T10:20:11.3121830Z     def score(task: dict)
+2026-03-02T10:20:11.3122500Z                          ^
+2026-03-02T10:20:11.3123150Z SyntaxError: expected ':'
+2026-03-02T10:20:11.3300000Z ##[error]Process completed with exit code 1.

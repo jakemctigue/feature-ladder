@@ -1,0 +1,43 @@
+{
+  "_doc": "Decision cases for pr_checkpoint.py's deterministic surface. git, gh and the filesystem outside a temp dir are mocked; nothing is pushed. NOT covered, because pr_checkpoint.py has no code for it: a refused merge becoming a 'Left for you' line in the final report. Merging and the report are coordinator behaviour written in agents/coordinator.md, not a function here, so there is nothing deterministic to pin.",
+  "free_branch": [
+    {"name": "no-collision-keeps-the-name", "taken": [], "ask": "feature-ladder/x", "expect": "feature-ladder/x"},
+    {"name": "stale-branch-from-an-earlier-run-gets-suffix-2", "taken": ["feature-ladder/x"], "ask": "feature-ladder/x", "expect": "feature-ladder/x-2"},
+    {"name": "suffixes-keep-counting", "taken": ["feature-ladder/x", "feature-ladder/x-2", "feature-ladder/x-3"], "ask": "feature-ladder/x", "expect": "feature-ladder/x-4"},
+    {"name": "only-the-exact-name-collides", "taken": ["feature-ladder/x-2"], "ask": "feature-ladder/x", "expect": "feature-ladder/x"}
+  ],
+  "pr_ready": [
+    {"name": "no-origin-remote", "origin": "missing", "gh": "ok", "expect": [false, "no git remote 'origin'"]},
+    {"name": "gh-not-installed", "origin": "ok", "gh": "not-installed", "expect": [false, "gh CLI not installed"]},
+    {"name": "gh-not-signed-in", "origin": "ok", "gh": "unauthenticated", "expect": [false, "gh CLI not signed in (gh auth login)"]},
+    {"name": "ready", "origin": "ok", "gh": "ok", "expect": [true, ""]}
+  ],
+  "stack_note": [
+    {"name": "empty-stack", "checkpoints": [], "expect": "\n---\n**feature-ladder PR stack** (merge in this order):\n"},
+    {"name": "decision-then-final-in-merge-order",
+     "checkpoints": [
+       {"branch": "feature-ladder/x", "kind": "decision", "title": "Pick storage", "pr": "https://github.com/o/r/pull/1"},
+       {"branch": "feature-ladder/x-pt2", "kind": "final", "title": "Feature x"}],
+     "expect": "\n---\n**feature-ladder PR stack** (merge in this order):\n1. `feature-ladder/x` (decision): Pick storage https://github.com/o/r/pull/1\n2. `feature-ladder/x-pt2` (final): Feature x\n"}
+  ],
+  "open_pr": [
+    {"name": "pr-disabled-saves-the-body-for-the-user", "pr_enabled": false, "push_error": null, "draft": false,
+     "expect": {"url": null, "saved_locally": true, "warnings": 0, "gh_draft": null}},
+    {"name": "rejected-push-falls-back-to-a-local-file-and-warns", "pr_enabled": true, "push_error": "rejected: non-fast-forward", "draft": true,
+     "expect": {"url": null, "saved_locally": true, "warnings": 1, "gh_draft": null}},
+    {"name": "draft-checkpoint-pr-opens-and-returns-the-url", "pr_enabled": true, "push_error": null, "draft": true,
+     "expect": {"url": "https://github.com/o/r/pull/7", "saved_locally": false, "warnings": 0, "gh_draft": true}},
+    {"name": "final-pr-is-not-a-draft", "pr_enabled": true, "push_error": null, "draft": false,
+     "expect": {"url": "https://github.com/o/r/pull/7", "saved_locally": false, "warnings": 0, "gh_draft": false}}
+  ],
+  "flow": [
+    {"name": "two-checkpoints-then-final-stack-in-order", "checkpoints": 2, "ahead": "3",
+     "expect": {"branches": ["feature-ladder/x", "feature-ladder/x-pt2", "feature-ladder/x-pt3"],
+                "bases": ["main", "feature-ladder/x", "feature-ladder/x-pt2"],
+                "kinds": ["decision", "decision", "final"]}},
+    {"name": "finish-with-no-new-commits-opens-no-final-pr", "checkpoints": 0, "ahead": "0",
+     "expect": {"branches": [], "bases": [], "kinds": []}},
+    {"name": "checkpoint-then-empty-final-keeps-only-the-decision-pr", "checkpoints": 1, "ahead": "0",
+     "expect": {"branches": ["feature-ladder/x"], "bases": ["main"], "kinds": ["decision"]}}
+  ]
+}
