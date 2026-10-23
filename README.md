@@ -171,8 +171,9 @@ fill in the keys, then `./start.sh` and `python3 roundtrip_test.py`.
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto] [--no-merge] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
+| `/feature-ladder:feature <request> [--auto] [--no-merge] [--researcher] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
 | `/feature-ladder:scope <request>` | Intake alone; the next `feature` with the same text reuses it without asking |
+| `/feature-ladder:research <request>` | A short research brief, no build and no questions: what the feature wants from this codebase, a qualitative cost label per agent (never a number) and what to expect |
 | `/feature-ladder:wrap [--review] [--adversarial] [--second-opinion]` | End of session: optional reviews over the whole session's diff, then the memory flush |
 | `/feature-ladder:route <task or JSON>` | Dry-run the router: which rung, why |
 | `/feature-ladder:skills <task> [--list]` | Dry-run skill selection; `--list` shows installed skills and broken rules |
@@ -185,6 +186,17 @@ the recommended options; `--no-merge` leaves the PR stack open;
 `--second-opinion` allows one Fable answer to one sharp question;
 `--escalate` allows the Fable debugging rungs; `--ultra` also allows the
 ultra-investigator. Reviews are not feature switches: they belong to `wrap`.
+
+**Researcher.** `/feature-ladder:research` (or `--researcher` on `feature`) reuses
+the intake scan, the scout's proposal, the router and the skill selector, and
+writes `.feature-ladder/intake/<slug>-brief.md`: what the feature touches
+(files, tests, secret names, outside-repo steps, open decisions), a
+"low", "medium" or "high token cost" label per agent with whether it bills to
+the Claude plan or OpenRouter credits (no numbers anywhere), and what to
+expect. It uses no Opus and no Fable, and at most one Haiku collector call for
+an external library the repo does not use. With `--researcher` the run
+continues from the same confirmed intake; a later `feature` with the same
+request text reuses the brief.
 
 ---
 
