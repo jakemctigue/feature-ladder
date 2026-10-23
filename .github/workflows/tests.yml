@@ -25,3 +25,5 @@ jobs:
         run: python -m compileall -q plugins
       - name: Run tests
         run: python -m unittest discover -v -s plugins/feature-ladder/tests
+      - name: Check security evidence is current
+        run: python plugins/feature-ladder/scripts/evidence/generate_evidence.py --check

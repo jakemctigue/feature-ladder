@@ -1,0 +1,20 @@
+2026-03-02T10:14:01.1021110Z ##[group]Run python -m unittest discover -v -s plugins/feature-ladder/tests
+2026-03-02T10:14:01.1023220Z python -m unittest discover -v -s plugins/feature-ladder/tests
+2026-03-02T10:14:01.1024100Z shell: /usr/bin/bash -e {0}
+2026-03-02T10:14:01.1024980Z ##[endgroup]
+2026-03-02T10:14:02.4410020Z test_band_edges (test_routing_golden.RoutingGolden.test_band_edges) ... ok
+2026-03-02T10:14:02.4521130Z test_every_case_matches_the_router (test_routing_golden.RoutingGolden.test_every_case_matches_the_router) ... FAIL
+2026-03-02T10:14:02.4701200Z 
+2026-03-02T10:14:02.4702010Z ======================================================================
+2026-03-02T10:14:02.4702890Z FAIL: test_every_case_matches_the_router (test_routing_golden.RoutingGolden.test_every_case_matches_the_router) (case='code-band-7-14-lower-boundary-leaves-glm')
+2026-03-02T10:14:02.4703660Z ----------------------------------------------------------------------
+2026-03-02T10:14:02.4704330Z Traceback (most recent call last):
+2026-03-02T10:14:02.4705010Z   File "/home/runner/work/feature-ladder/feature-ladder/plugins/feature-ladder/tests/test_routing_golden.py", line 41, in test_every_case_matches_the_router
+2026-03-02T10:14:02.4705790Z     self.assertEqual(got[key], want, f"{case['name']}: {key}")
+2026-03-02T10:14:02.4706420Z AssertionError: 'glm' != 'claude' : code-band-7-14-lower-boundary-leaves-glm: provider
+2026-03-02T10:14:02.4707000Z 
+2026-03-02T10:14:02.4707590Z ----------------------------------------------------------------------
+2026-03-02T10:14:02.4708110Z Ran 62 tests in 1.204s
+2026-03-02T10:14:02.4708600Z 
+2026-03-02T10:14:02.4709100Z FAILED (failures=1)
+2026-03-02T10:14:02.5001000Z ##[error]Process completed with exit code 1.

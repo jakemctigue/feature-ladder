@@ -1,0 +1,313 @@
+{
+  "_doc": "Skill ranking cases for select_skills.select() using the SHIPPED skill-rules.json (personal and project rules are not read). 'installed' picks a synthetic inventory: claude-code (every skill the rules name), claude-app (no superpowers:* skills) or none. 'body_chars' overrides the size of a skill's text. 'expect_order' is the exact chosen order; 'expect_dropped' maps skill -> reason fragment; 'expect_absent' lists skills that must not be chosen.",
+  "cases": [
+    {
+      "expect_dropped": {
+        "engineering:debug": "group 'debugging' already filled",
+        "engineering:testing-strategy": "group 'testing' already filled"
+      },
+      "expect_order": [
+        "superpowers:systematic-debugging",
+        "superpowers:test-driven-development"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "implementer-bugfix-code-gets-debugging-then-tdd",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "fix the crash when the queue is empty"
+      }
+    },
+    {
+      "expect_absent": [
+        "superpowers:systematic-debugging"
+      ],
+      "expect_dropped": {},
+      "expect_order": [
+        "engineering:debug",
+        "engineering:testing-strategy"
+      ],
+      "expect_unresolved": [
+        "superpowers:systematic-debugging",
+        "superpowers:test-driven-development"
+      ],
+      "installed": "claude-app",
+      "name": "implementer-bugfix-claude-app-gets-app-equivalents",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "fix the crash when the queue is empty"
+      }
+    },
+    {
+      "expect_dropped": {
+        "engineering:testing-strategy": "group 'testing' already filled"
+      },
+      "expect_order": [
+        "superpowers:test-driven-development"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "implementer-plain-feature-gets-tdd-only",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "add a retry wrapper around the upload"
+      }
+    },
+    {
+      "expect_absent": [
+        "superpowers:test-driven-development",
+        "engineering:testing-strategy"
+      ],
+      "expect_dropped": {},
+      "expect_order": [],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "prototype-keyword-cancels-tdd",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "quick prototype of the retry wrapper"
+      }
+    },
+    {
+      "expect_dropped": {
+        "engineering:testing-strategy": "group 'testing' already filled"
+      },
+      "expect_order": [
+        "data:sql-queries",
+        "superpowers:test-driven-development"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "sql-file-in-scope-adds-sql-skill",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [
+          "db/report.sql"
+        ],
+        "role": "implementer",
+        "text": "add the report view"
+      }
+    },
+    {
+      "expect_dropped": {
+        "engineering:testing-strategy": "group 'testing' already filled"
+      },
+      "expect_order": [
+        "figma:figma-design-to-code",
+        "frontend-design",
+        "superpowers:test-driven-development"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "figma-keyword-outranks-everything-for-implementer",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [
+          "web/settings.tsx"
+        ],
+        "role": "implementer",
+        "text": "build the settings page from the figma frame"
+      }
+    },
+    {
+      "expect_dropped": {
+        "engineering:testing-strategy": "group 'testing' already filled"
+      },
+      "expect_order": [
+        "data-agent-kit:accidental-data-loss-prevention",
+        "superpowers:test-driven-development"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "data-loss-keyword-has-top-priority",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "drop table legacy_users and add the new schema"
+      }
+    },
+    {
+      "expect_dropped": {
+        "data:sql-queries": "over max_skills",
+        "engineering:code-review": "group 'review' already filled",
+        "engineering:debug": "group 'debugging' already filled",
+        "engineering:testing-strategy": "over max_skills",
+        "superpowers:test-driven-development": "over max_skills"
+      },
+      "expect_order": [
+        "figma:figma-design-to-code",
+        "superpowers:systematic-debugging",
+        "superpowers:receiving-code-review"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "max-skills-3-drops-the-rest",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [
+          "a.sql"
+        ],
+        "role": "implementer",
+        "text": "fix the failing code review feedback in the figma export"
+      }
+    },
+    {
+      "expect_absent": [
+        "engineering:documentation"
+      ],
+      "expect_dropped": {
+        "engineering:documentation": "over max_chars for this role (100 chars, budget 0)"
+      },
+      "expect_order": [],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "mechanic-docs-gets-no-skill-text",
+      "task": {
+        "flags": {},
+        "kind": "docs",
+        "paths": [
+          "README.md"
+        ],
+        "role": "mechanic",
+        "text": "draft the readme"
+      }
+    },
+    {
+      "expect_dropped": {
+        "engineering:system-design": "group 'planning' already filled"
+      },
+      "expect_order": [
+        "context7-mcp",
+        "superpowers:writing-plans"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "domain-expert-library-docs-and-plans",
+      "task": {
+        "flags": {},
+        "kind": "analysis",
+        "paths": [],
+        "role": "domain-expert",
+        "text": "choose a framework library and plan the migration"
+      }
+    },
+    {
+      "expect_dropped": {
+        "engineering:testing-strategy": "group 'testing' already filled"
+      },
+      "expect_order": [
+        "superpowers:test-driven-development",
+        "superpowers:verification-before-completion"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "senior-implementer-gets-tdd-and-verification",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "senior-implementer",
+        "text": "add the lock manager"
+      }
+    },
+    {
+      "expect_absent": [
+        "superpowers:test-driven-development"
+      ],
+      "expect_dropped": {},
+      "expect_order": [
+        "engineering:testing-strategy"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "explicit-exclude-removes-a-rule-skill",
+      "task": {
+        "exclude": [
+          "superpowers:test-driven-development"
+        ],
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "add a retry wrapper"
+      }
+    },
+    {
+      "expect_dropped": {
+        "engineering:testing-strategy": "group 'testing' already filled"
+      },
+      "expect_order": [
+        "docx",
+        "superpowers:test-driven-development"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "explicit-add-ranks-first",
+      "task": {
+        "add": [
+          "docx"
+        ],
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "add a retry wrapper"
+      }
+    },
+    {
+      "expect_dropped": {},
+      "expect_order": [],
+      "expect_unresolved": [
+        "engineering:testing-strategy",
+        "superpowers:test-driven-development"
+      ],
+      "installed": "none",
+      "name": "nothing-installed-everything-is-unresolved",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "add a retry wrapper"
+      }
+    },
+    {
+      "body_chars": {
+        "superpowers:test-driven-development": 9000
+      },
+      "expect_dropped": {
+        "superpowers:test-driven-development": "over max_chars for this role (9000 chars, budget 8000)"
+      },
+      "expect_order": [
+        "engineering:testing-strategy"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "oversize-skill-body-is-dropped-for-the-role-budget",
+      "task": {
+        "flags": {},
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "add a retry wrapper"
+      }
+    }
+  ]
+}

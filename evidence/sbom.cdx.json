@@ -1,0 +1,233 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "file:plugins/feature-ladder/hooks/scripts/guard_irreversible.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c819ff73eadb8768e5186bc61a073947145c14fdd5d2b486d6973c20ab5c61db"
+        }
+      ],
+      "name": "plugins/feature-ladder/hooks/scripts/guard_irreversible.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/hooks/scripts/ledger.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "57f7255824b20dd2d6052f087c8f0c5a19584d07c03f1a31aaf70b8f46bd72e2"
+        }
+      ],
+      "name": "plugins/feature-ladder/hooks/scripts/ledger.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/hooks/scripts/require_retained.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4771aae3a25d32054829b5e52e34d92ef25d0221b0c63d727f45707cb9decaac"
+        }
+      ],
+      "name": "plugins/feature-ladder/hooks/scripts/require_retained.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/scripts/evidence/ci_log_classifier.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c7367ccb216cd7716ad3b8db1c8376ed734376cda87b7b6a9847f9b239d139fc"
+        }
+      ],
+      "name": "plugins/feature-ladder/scripts/evidence/ci_log_classifier.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/scripts/evidence/generate_evidence.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9f5ca4248943f7f4d2330a61b76f2036f6ae90f37e9ac42ae2de13601bbd1c6c"
+        }
+      ],
+      "name": "plugins/feature-ladder/scripts/evidence/generate_evidence.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/complexity-router/scripts/intake.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7627a8a35b4db2e85f5cfa9b7356286e5ed020080e89bf604778b8f657ddcafc"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/complexity-router/scripts/intake.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/complexity-router/scripts/route.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "91c248ba73499351529487863ce5985849df24afd2c4c2f438d9d0b4c23fdc8d"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/complexity-router/scripts/route.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/cross-model-review/scripts/codex_review.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "05d0f8d06c4c43cc9c055f44c964fd3d56a26b027157c89722a5bfa89a71fea0"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/cross-model-review/scripts/codex_review.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/hindsight-memory/scripts/memory_gate.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8c291462a0cf19b90284238170822c222793a7e6d8b73cfb8bbb83277a67b337"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/hindsight-memory/scripts/memory_gate.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/hindsight-memory/scripts/resolve_bank.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a000b2ba4bae487d63c888fa1ad0651d819deb7736128cb6fbfed028b6c7d921"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/hindsight-memory/scripts/resolve_bank.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/external_worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a51b3074e3d788f733a3c881f75c9869b8e40c845006eb1b1ed233a7896f4632"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/external_worker.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/irreversible.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6a5ef8a221e33b194a4f2034fc2fb3dfa5cbd5f051db4fe53e22b4cedcc558d0"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/irreversible.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/pr_checkpoint.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7823d1e33fbeed6529cc4fdde9dbbdf99bfab668a208978db67e4025d6fe9536"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/pr_checkpoint.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/session_budget.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4db2adc06ad5c3f72059c230e03fcbf5c22390708555ef18e9f1139fa2d0750c"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/session_budget.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/verify.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6795bbbd48dd582bbeb3cb5dae98642eb8899d084965ad30119ca3e06c3f054d"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/verify.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/with_secrets.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a4136bf04304f4b2e6ee7323d4ab580b80068cf3be09ee6a529056f562fd5f6b"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/with_secrets.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/skill-selector/scripts/select_skills.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "453c7f5222816a22418297b9db6180907341a7795697a14152c265cf9d68fcdf"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/skill-selector/scripts/select_skills.py",
+      "type": "file"
+    }
+  ],
+  "dependencies": [
+    {
+      "dependsOn": [],
+      "ref": "feature-ladder"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "feature-ladder",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "feature-ladder",
+      "type": "application",
+      "version": "1.10.0"
+    },
+    "tools": {
+      "components": [
+        {
+          "name": "feature-ladder-evidence",
+          "type": "application"
+        }
+      ]
+    }
+  },
+  "properties": [
+    {
+      "name": "feature-ladder:third-party-dependencies",
+      "value": "0"
+    },
+    {
+      "name": "feature-ladder:third-party-names",
+      "value": ""
+    }
+  ],
+  "specVersion": "1.5",
+  "version": 1
+}

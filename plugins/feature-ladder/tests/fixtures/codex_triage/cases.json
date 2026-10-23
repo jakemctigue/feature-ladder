@@ -1,0 +1,308 @@
+{
+  "_doc": "Golden cases for codex_review.triage(). Class mapping onto the classes the code really has: 'actionable' = needs a response (critical/high/medium, and any unknown severity); 'low' = informational (listed in the record, never acted on); 'duplicates' = answered (a finding that repeats an earlier one is collapsed into it and only counted). There is NO 'no-response' class in the code: every non-duplicate, non-low finding is actionable, so no case asserts one. Findings are [severity, file, line, title] objects; expected values are the CURRENT classifier output.",
+  "cases": [
+    {
+      "expect": {
+        "actionable": [],
+        "duplicates": 0,
+        "low": []
+      },
+      "findings": [],
+      "name": "no-findings"
+    },
+    {
+      "expect": {
+        "actionable": [],
+        "duplicates": 0,
+        "low": [
+          "naming",
+          "comment typo"
+        ]
+      },
+      "findings": [
+        {
+          "file": "a.py",
+          "line": 1,
+          "severity": "low",
+          "title": "naming"
+        },
+        {
+          "file": "b.py",
+          "line": 2,
+          "severity": "low",
+          "title": "comment typo"
+        }
+      ],
+      "name": "only-low-findings-are-informational"
+    },
+    {
+      "expect": {
+        "actionable": [
+          "crit",
+          "h-a3",
+          "h-a20",
+          "m-a50",
+          "m-b9"
+        ],
+        "duplicates": 0,
+        "low": []
+      },
+      "findings": [
+        {
+          "file": "b.py",
+          "line": 9,
+          "severity": "medium",
+          "title": "m-b9"
+        },
+        {
+          "file": "z.py",
+          "line": 1,
+          "severity": "critical",
+          "title": "crit"
+        },
+        {
+          "file": "a.py",
+          "line": 20,
+          "severity": "high",
+          "title": "h-a20"
+        },
+        {
+          "file": "a.py",
+          "line": 3,
+          "severity": "high",
+          "title": "h-a3"
+        },
+        {
+          "file": "a.py",
+          "line": 50,
+          "severity": "medium",
+          "title": "m-a50"
+        }
+      ],
+      "name": "ordered-by-severity-then-file-then-line"
+    },
+    {
+      "expect": {
+        "actionable": [
+          "Unchecked None"
+        ],
+        "duplicates": 1,
+        "low": []
+      },
+      "findings": [
+        {
+          "file": "a.py",
+          "line": 10,
+          "severity": "high",
+          "title": "Unchecked None"
+        },
+        {
+          "file": "a.py",
+          "line": 42,
+          "severity": "medium",
+          "title": "unchecked   NONE"
+        }
+      ],
+      "name": "same-file-same-title-modulo-case-and-spacing-is-answered"
+    },
+    {
+      "expect": {
+        "actionable": [
+          "off by one"
+        ],
+        "duplicates": 1,
+        "low": []
+      },
+      "findings": [
+        {
+          "file": "a.py",
+          "line": 7,
+          "severity": "medium",
+          "title": "off by one"
+        },
+        {
+          "file": "a.py",
+          "line": 7,
+          "severity": "medium",
+          "title": "loop bound wrong"
+        }
+      ],
+      "name": "same-file-same-line-different-title-is-answered"
+    },
+    {
+      "expect": {
+        "actionable": [
+          "missing timeout",
+          "missing timeout"
+        ],
+        "duplicates": 0,
+        "low": []
+      },
+      "findings": [
+        {
+          "file": "a.py",
+          "line": 1,
+          "severity": "medium",
+          "title": "missing timeout"
+        },
+        {
+          "file": "b.py",
+          "line": 1,
+          "severity": "medium",
+          "title": "missing timeout"
+        }
+      ],
+      "name": "same-title-in-different-files-are-distinct"
+    },
+    {
+      "expect": {
+        "actionable": [
+          "first",
+          "second"
+        ],
+        "duplicates": 0,
+        "low": []
+      },
+      "findings": [
+        {
+          "file": "a.py",
+          "line": 0,
+          "severity": "medium",
+          "title": "first"
+        },
+        {
+          "file": "a.py",
+          "line": 0,
+          "severity": "medium",
+          "title": "second"
+        }
+      ],
+      "name": "line-zero-never-dedupes-on-line"
+    },
+    {
+      "expect": {
+        "actionable": [
+          "race"
+        ],
+        "duplicates": 1,
+        "low": []
+      },
+      "findings": [
+        {
+          "file": "a.py",
+          "line": 5,
+          "severity": "high",
+          "title": "race"
+        },
+        {
+          "file": "a.py",
+          "line": 5,
+          "severity": "low",
+          "title": "minor race note"
+        }
+      ],
+      "name": "low-duplicate-of-a-higher-finding-is-answered-not-informational"
+    },
+    {
+      "expect": {
+        "actionable": [],
+        "duplicates": 1,
+        "low": [
+          "style"
+        ]
+      },
+      "findings": [
+        {
+          "file": "a.py",
+          "line": 4,
+          "severity": "low",
+          "title": "style"
+        },
+        {
+          "file": "a.py",
+          "line": 9,
+          "severity": "low",
+          "title": "style"
+        }
+      ],
+      "name": "duplicate-low-findings-collapse-to-one-informational"
+    },
+    {
+      "expect": {
+        "actionable": [
+          "Leak"
+        ],
+        "duplicates": 2,
+        "low": []
+      },
+      "findings": [
+        {
+          "file": "a.py",
+          "line": 3,
+          "severity": "medium",
+          "title": "leak"
+        },
+        {
+          "file": "a.py",
+          "line": 8,
+          "severity": "critical",
+          "title": "Leak"
+        },
+        {
+          "file": "a.py",
+          "line": 12,
+          "severity": "high",
+          "title": "leak "
+        }
+      ],
+      "name": "three-way-duplicate-keeps-the-most-severe"
+    },
+    {
+      "expect": {
+        "actionable": [
+          "real",
+          "fyi"
+        ],
+        "duplicates": 0,
+        "low": []
+      },
+      "findings": [
+        {
+          "file": "a.py",
+          "line": 1,
+          "severity": "info",
+          "title": "fyi"
+        },
+        {
+          "file": "a.py",
+          "line": 2,
+          "severity": "medium",
+          "title": "real"
+        }
+      ],
+      "name": "unknown-severity-sorts-last-but-stays-actionable"
+    },
+    {
+      "expect": {
+        "actionable": [
+          "no location"
+        ],
+        "duplicates": 0,
+        "low": [
+          "no location either"
+        ]
+      },
+      "findings": [
+        {
+          "severity": "high",
+          "title": "no location"
+        },
+        {
+          "severity": "low",
+          "title": "no location either"
+        }
+      ],
+      "name": "missing-file-and-line-fields-do-not-crash"
+    }
+  ]
+}

@@ -580,6 +580,10 @@ claude-app/model-ladder-router/        the Claude app skill
 - On Hindsight Cloud, Vectorize chooses the model for Hindsight's own
   extraction. The per-operation model pinning applies to self-hosted servers.
 
+## Evidence
+
+Deterministic, checked-in evidence: a CycloneDX SBOM and SARIF scan in `evidence/`, golden corpora under `plugins/feature-ladder/tests/fixtures/`, a [harness compatibility matrix](docs/harness-compat.md) and [CI troubleshooting](docs/ci-troubleshooting.md). See [docs/evidence.md](docs/evidence.md); regenerate with `python plugins/feature-ladder/scripts/evidence/generate_evidence.py` after changing a script or the version.
+
 ## License
 
 [MIT](LICENSE) © 2026 Jake McTigue

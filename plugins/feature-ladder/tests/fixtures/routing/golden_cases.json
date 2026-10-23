@@ -1,0 +1,793 @@
+{
+  "_doc": "Golden router cases. Each case records the CURRENT output of complexity-router/scripts/route.py (route.route) and intake.budget_for for the given task fields. If a deliberate router change breaks these, regenerate the expected values and review the diff; do not edit them to hide a regression.",
+  "cases": [
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "mechanic",
+        "breakdown": {},
+        "design_first": false,
+        "effort": "low",
+        "hard_flags": [],
+        "model": "haiku",
+        "provider": "glm",
+        "rung": "T0 GLM Flash / Haiku Low - mechanical patch",
+        "score": 0,
+        "size": "S"
+      },
+      "input": {},
+      "name": "empty-input-defaults-to-code-score-0"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "mechanic",
+        "breakdown": {},
+        "design_first": false,
+        "effort": "low",
+        "hard_flags": [],
+        "model": "haiku",
+        "provider": "glm",
+        "rung": "T0 Haiku Low - docs draft",
+        "score": 0,
+        "size": "S"
+      },
+      "input": {
+        "files": 1,
+        "kind": "docs",
+        "loc": 10
+      },
+      "name": "docs-kind-routes-by-kind"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "mechanic",
+        "breakdown": {
+          "files": 1,
+          "loc": 1
+        },
+        "design_first": false,
+        "effort": "low",
+        "hard_flags": [],
+        "model": "haiku",
+        "provider": "glm",
+        "rung": "T0 Haiku Low - fixtures",
+        "score": 2,
+        "size": "S"
+      },
+      "input": {
+        "files": 2,
+        "kind": "fixture",
+        "loc": 40
+      },
+      "name": "fixture-kind-routes-by-kind"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "mechanic",
+        "breakdown": {},
+        "design_first": false,
+        "effort": "low",
+        "hard_flags": [],
+        "model": "haiku",
+        "provider": "glm",
+        "rung": "T0 Haiku Low - execute defined checks",
+        "score": 0,
+        "size": "S"
+      },
+      "input": {
+        "kind": "check"
+      },
+      "name": "check-kind-routes-by-kind"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "evidence-collector",
+        "breakdown": {
+          "ambiguity": 1
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "haiku",
+        "provider": "claude",
+        "rung": "T1 Haiku Medium - collect sources / prepare evidence",
+        "score": 1,
+        "size": "S"
+      },
+      "input": {
+        "ambiguity": 1,
+        "kind": "research"
+      },
+      "name": "research-kind-evidence-collector"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "domain-expert",
+        "breakdown": {
+          "novelty": 3
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "opus",
+        "provider": "claude",
+        "rung": "T4 Opus Medium - domain analysis (use domain-expert-high only if novelty=3)",
+        "score": 3,
+        "size": "S"
+      },
+      "input": {
+        "kind": "analysis",
+        "novelty": 2
+      },
+      "name": "analysis-kind-domain-expert"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "domain-expert-high",
+        "breakdown": {
+          "novelty": 5
+        },
+        "design_first": false,
+        "effort": "high",
+        "hard_flags": [],
+        "model": "opus",
+        "provider": "claude",
+        "rung": "T5 Opus High - domain analysis, novel area",
+        "score": 5,
+        "size": "S"
+      },
+      "input": {
+        "kind": "analysis",
+        "novelty": 3
+      },
+      "name": "analysis-novelty-3-domain-expert-high"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "mechanic",
+        "breakdown": {},
+        "design_first": false,
+        "effort": "low",
+        "hard_flags": [],
+        "model": "haiku",
+        "provider": "glm",
+        "rung": "T0 GLM Flash / Haiku Low - mechanical patch",
+        "score": 0,
+        "size": "S"
+      },
+      "input": {
+        "files": 1,
+        "kind": "code",
+        "loc": 20
+      },
+      "name": "code-band-0-3-trivial"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "implementer",
+        "breakdown": {
+          "files": 1,
+          "loc": 1,
+          "no_tests": 1,
+          "public_api": 1
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "sonnet",
+        "provider": "glm",
+        "rung": "T2 GLM Flash / Sonnet Medium - small bounded coding",
+        "score": 4,
+        "size": "S"
+      },
+      "input": {
+        "files": 3,
+        "kind": "code",
+        "loc": 100,
+        "no_tests": true,
+        "public_api": true
+      },
+      "name": "code-band-4-6-small-glm-eligible"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "implementer",
+        "breakdown": {
+          "files": 1,
+          "loc": 1,
+          "modules": 1,
+          "no_tests": 1,
+          "security": 2
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "sonnet",
+        "provider": "glm",
+        "rung": "T2 GLM Flash / Sonnet Medium - small bounded coding",
+        "score": 6,
+        "size": "S"
+      },
+      "input": {
+        "files": 3,
+        "kind": "code",
+        "loc": 100,
+        "modules": 2,
+        "no_tests": true,
+        "security": true
+      },
+      "name": "code-band-4-6-upper-boundary-score-6"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "implementer",
+        "breakdown": {
+          "files": 1,
+          "loc": 1,
+          "modules": 1,
+          "new_dependency": 1,
+          "no_tests": 1,
+          "security": 2
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "sonnet",
+        "provider": "claude",
+        "rung": "T2 Sonnet Medium - bounded coding",
+        "score": 7,
+        "size": "S"
+      },
+      "input": {
+        "files": 3,
+        "kind": "code",
+        "loc": 100,
+        "modules": 2,
+        "new_dependency": true,
+        "no_tests": true,
+        "security": true
+      },
+      "name": "code-band-7-14-lower-boundary-leaves-glm"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "implementer",
+        "breakdown": {
+          "files": 2,
+          "loc": 2,
+          "modules": 1,
+          "persistence": 2,
+          "public_api": 1
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "sonnet",
+        "provider": "claude",
+        "rung": "T2 Sonnet Medium - bounded coding",
+        "score": 8,
+        "size": "S"
+      },
+      "input": {
+        "files": 5,
+        "kind": "code",
+        "loc": 200,
+        "modules": 2,
+        "persistence": true,
+        "public_api": true
+      },
+      "name": "code-band-7-14-ordinary-app-work"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 20,
+        "design": false,
+        "size": "M",
+        "workers": 2
+      },
+      "expect": {
+        "agent": "implementer",
+        "breakdown": {
+          "concurrency": 2,
+          "files": 3,
+          "loc": 3,
+          "modules": 2,
+          "novelty": 3,
+          "security": 2
+        },
+        "design_first": false,
+        "effort": "high",
+        "hard_flags": [],
+        "model": "sonnet",
+        "provider": "claude",
+        "rung": "T3 Sonnet High - bounded coding, harder",
+        "score": 15,
+        "size": "M"
+      },
+      "input": {
+        "concurrency": true,
+        "files": 8,
+        "loc": 400,
+        "modules": 3,
+        "novelty": 2,
+        "security": true
+      },
+      "name": "code-band-15-19-sonnet-high"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 24,
+        "design": true,
+        "size": "L",
+        "workers": 4
+      },
+      "expect": {
+        "agent": "senior-implementer",
+        "breakdown": {
+          "concurrency": 2,
+          "cross_system": 2,
+          "files": 3,
+          "irreversible": 2,
+          "loc": 3,
+          "modules": 2,
+          "novelty": 3,
+          "persistence": 2,
+          "public_api": 1,
+          "security": 2
+        },
+        "design_first": true,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "opus",
+        "provider": "claude",
+        "rung": "T4 Opus Medium - difficult implementation",
+        "score": 22,
+        "size": "L"
+      },
+      "input": {
+        "concurrency": true,
+        "cross_system": true,
+        "files": 8,
+        "irreversible": true,
+        "loc": 400,
+        "modules": 3,
+        "novelty": 2,
+        "persistence": true,
+        "public_api": true,
+        "security": true
+      },
+      "name": "code-band-20-23-opus-medium-needs-design-step"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 24,
+        "design": false,
+        "size": "L",
+        "workers": 4
+      },
+      "expect": {
+        "agent": "senior-implementer",
+        "breakdown": {
+          "concurrency": 2,
+          "cross_system": 2,
+          "files": 3,
+          "irreversible": 2,
+          "loc": 3,
+          "modules": 2,
+          "novelty": 3,
+          "persistence": 2,
+          "public_api": 1,
+          "security": 2
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "opus",
+        "provider": "claude",
+        "rung": "T4 Opus Medium - difficult implementation",
+        "score": 22,
+        "size": "L"
+      },
+      "input": {
+        "concurrency": true,
+        "cross_system": true,
+        "design_agreed": true,
+        "files": 8,
+        "irreversible": true,
+        "loc": 400,
+        "modules": 3,
+        "novelty": 2,
+        "persistence": true,
+        "public_api": true,
+        "security": true
+      },
+      "name": "code-band-20-23-opus-medium-design-agreed"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 24,
+        "design": true,
+        "size": "L",
+        "workers": 4
+      },
+      "expect": {
+        "agent": "senior-implementer",
+        "breakdown": {
+          "blast_radius": 2,
+          "concurrency": 2,
+          "cross_system": 2,
+          "files": 3,
+          "irreversible": 2,
+          "loc": 3,
+          "modules": 2,
+          "novelty": 3,
+          "persistence": 2,
+          "public_api": 1,
+          "security": 2
+        },
+        "design_first": true,
+        "effort": "high",
+        "hard_flags": [],
+        "model": "opus",
+        "provider": "claude",
+        "rung": "T5 Opus High - difficult implementation",
+        "score": 24,
+        "size": "L"
+      },
+      "input": {
+        "blast_radius": 2,
+        "concurrency": true,
+        "cross_system": true,
+        "files": 8,
+        "irreversible": true,
+        "loc": 400,
+        "modules": 3,
+        "novelty": 2,
+        "persistence": true,
+        "public_api": true,
+        "security": true
+      },
+      "name": "code-band-24-plus-opus-high-needs-design-step"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 24,
+        "design": false,
+        "size": "L",
+        "workers": 4
+      },
+      "expect": {
+        "agent": "senior-implementer",
+        "breakdown": {
+          "blast_radius": 2,
+          "concurrency": 2,
+          "cross_system": 2,
+          "files": 3,
+          "irreversible": 2,
+          "loc": 3,
+          "modules": 2,
+          "novelty": 3,
+          "persistence": 2,
+          "public_api": 1,
+          "security": 2
+        },
+        "design_first": false,
+        "effort": "high",
+        "hard_flags": [],
+        "model": "opus",
+        "provider": "claude",
+        "rung": "T5 Opus High - difficult implementation",
+        "score": 24,
+        "size": "L"
+      },
+      "input": {
+        "blast_radius": 2,
+        "concurrency": true,
+        "cross_system": true,
+        "design_agreed": true,
+        "files": 8,
+        "irreversible": true,
+        "loc": 400,
+        "modules": 3,
+        "novelty": 2,
+        "persistence": true,
+        "public_api": true,
+        "security": true
+      },
+      "name": "code-band-24-plus-opus-high-design-agreed"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": true,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "mechanic",
+        "breakdown": {
+          "ambiguity": 3
+        },
+        "design_first": true,
+        "effort": "low",
+        "hard_flags": [
+          "approach not specified (ambiguity >= 2)"
+        ],
+        "model": "haiku",
+        "provider": "glm",
+        "rung": "T0 GLM Flash / Haiku Low - mechanical patch",
+        "score": 3,
+        "size": "S"
+      },
+      "input": {
+        "ambiguity": 2,
+        "files": 1,
+        "kind": "code",
+        "loc": 20
+      },
+      "name": "hard-flag-ambiguity-2-keeps-size-S"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": true,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "implementer",
+        "breakdown": {
+          "blast_radius": 4,
+          "files": 1,
+          "loc": 1
+        },
+        "design_first": true,
+        "effort": "medium",
+        "hard_flags": [
+          "whole-app blast radius"
+        ],
+        "model": "sonnet",
+        "provider": "glm",
+        "rung": "T2 GLM Flash / Sonnet Medium - small bounded coding",
+        "score": 6,
+        "size": "S"
+      },
+      "input": {
+        "blast_radius": 3,
+        "files": 2,
+        "kind": "code",
+        "loc": 50
+      },
+      "name": "hard-flag-blast-radius-3"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "implementer",
+        "breakdown": {
+          "ambiguity": 5,
+          "files": 1,
+          "loc": 1
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [
+          "approach not specified (ambiguity >= 2)"
+        ],
+        "model": "sonnet",
+        "provider": "claude",
+        "rung": "T2 Sonnet Medium - bounded coding",
+        "score": 7,
+        "size": "S"
+      },
+      "input": {
+        "ambiguity": 3,
+        "design_agreed": true,
+        "files": 2,
+        "kind": "code",
+        "loc": 50
+      },
+      "name": "hard-flag-with-design-agreed-no-design-step"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "mechanic",
+        "breakdown": {
+          "irreversible": 2
+        },
+        "design_first": false,
+        "effort": "low",
+        "hard_flags": [],
+        "model": "haiku",
+        "provider": "glm",
+        "rung": "T0 GLM Flash / Haiku Low - mechanical patch",
+        "score": 2,
+        "size": "S"
+      },
+      "input": {
+        "files": 1,
+        "irreversible": true,
+        "kind": "code",
+        "loc": 20
+      },
+      "name": "irreversible-is-a-risk-weight-not-a-stop"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "implementer",
+        "breakdown": {
+          "files": 2,
+          "no_tests": 1,
+          "security": 2
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "sonnet",
+        "provider": "glm",
+        "rung": "T2 GLM Flash / Sonnet Medium - small bounded coding",
+        "score": 5,
+        "size": "S"
+      },
+      "input": {
+        "concurrency": "no",
+        "files": "4",
+        "kind": "code",
+        "loc": null,
+        "no_tests": "true",
+        "security": "yes"
+      },
+      "name": "string-and-null-inputs-are-tolerated"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 20,
+        "design": false,
+        "size": "M",
+        "workers": 2
+      },
+      "expect": {
+        "agent": "implementer",
+        "breakdown": {
+          "files": 3,
+          "loc": 3,
+          "modules": 2,
+          "new_dependency": 1,
+          "no_tests": 1,
+          "public_api": 1
+        },
+        "design_first": false,
+        "effort": "medium",
+        "hard_flags": [],
+        "model": "sonnet",
+        "provider": "claude",
+        "rung": "T2 Sonnet Medium - bounded coding",
+        "score": 11,
+        "size": "M"
+      },
+      "input": {
+        "files": 8,
+        "kind": "code",
+        "loc": 400,
+        "modules": 3,
+        "new_dependency": true,
+        "no_tests": true,
+        "public_api": true
+      },
+      "name": "size-M-score-11"
+    },
+    {
+      "budget": {
+        "coordinator_turns": 12,
+        "design": false,
+        "size": "S",
+        "workers": 1
+      },
+      "expect": {
+        "agent": "mechanic",
+        "breakdown": {},
+        "design_first": false,
+        "effort": "low",
+        "hard_flags": [],
+        "model": "haiku",
+        "provider": "glm",
+        "rung": "T0 Haiku Low - docs draft",
+        "score": 0,
+        "size": "S"
+      },
+      "input": {
+        "files": 1,
+        "kind": "DOCS"
+      },
+      "name": "kind-is-case-insensitive"
+    }
+  ]
+}
