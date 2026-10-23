@@ -132,43 +132,89 @@ def load_providers(cwd):
     return cfg
 
 
-def remote_sentiments(memories, cfg):
-    """Ask an OpenAI-compatible endpoint (Jev through OpenRouter by default) for one
-    number per memory. Raises on any problem; the caller falls back to the lexicon."""
+JEV_PROMPT = ("Each item is a memory about a software codebase, sent as {\"i\": index, \"kind\": tag, "
+              "\"text\": fact}. Score each one on the same scale as a sentiment lexicon: -1 is a clear "
+              "failure or pitfall (a deploy that timed out, a test that fails), 0 is a neutral fact, +1 is a "
+              "clear success or something that works (a convention that holds, a passing test). Use values "
+              'in between for mixed facts. Reply with JSON {"scores": [{"i": 0, "score": 0.4}, ...]}, one '
+              "entry per item, echoing each item's index, and nothing else.")
+
+
+def _http_transport(payload, cfg):
+    """Default transport: the OpenRouter (OpenAI-compatible) call. Returns the response body text."""
     base = str(cfg.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
-    model = cfg.get("model") or "typesafe/jev-router"
     key_env = cfg.get("key_env") or "OPENROUTER_API_KEY"
     key = os.environ.get(key_env, "")
     if not key:
         raise RuntimeError(f"no {key_env} in the environment")
-    body = {"model": model, "temperature": 0, "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": "Each item is a memory about a software codebase. Score each one "
-                                              "from -1 (a warning, failure, pitfall or loss) to 1 (a reliable, "
-                                              "working convention or a passing test). Reply with JSON "
-                                              '{"scores": [numbers in the same order]} and nothing else.'},
-                {"role": "user", "content": json.dumps([m["text"] for m in memories])}]}
-    req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode("utf-8"),
+    req = urllib.request.Request(base + "/chat/completions", data=json.dumps(payload).encode("utf-8"),
                                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
                                  method="POST")
     with urllib.request.urlopen(req, timeout=60) as r:
-        data = json.loads(r.read().decode("utf-8", "replace"))
-    content = data["choices"][0]["message"]["content"]
-    scores = json.loads(content)["scores"]
-    if len(scores) != len(memories):
-        raise RuntimeError("the scorer returned a different number of scores")
-    return [clamp(float(s), -1.0, 1.0) for s in scores]
+        return r.read().decode("utf-8", "replace")
 
 
-def sentiments(memories, scorer, cfg):
-    """(scores, scorer actually used, note)"""
+def _parse_scores(body, n):
+    """Response body (text or dict) -> list of n floats-or-None. None = no usable score for that fact.
+    Never raises: anything unparseable gives all None."""
+    out = [None] * n
+    try:
+        data = json.loads(body) if isinstance(body, (str, bytes)) else body
+        if isinstance(data, dict) and "choices" in data:
+            data = data["choices"][0]["message"]["content"]
+            data = json.loads(data) if isinstance(data, str) else data
+        entries = data["scores"]
+        if not isinstance(entries, list):
+            return out
+    except (ValueError, KeyError, IndexError, TypeError):
+        return out
+    seen, dup = set(), set()
+    for e in entries:
+        i = e.get("i") if isinstance(e, dict) else None
+        if isinstance(i, bool) or not isinstance(i, int) or not 0 <= i < n:
+            continue
+        if i in seen:
+            dup.add(i)
+        seen.add(i)
+        sc = e.get("score")
+        if isinstance(sc, bool) or not isinstance(sc, (int, float)) or not math.isfinite(sc):
+            continue
+        out[i] = clamp(float(sc), -1.0, 1.0)
+    for i in dup:
+        out[i] = None
+    return out
+
+
+def remote_sentiments(memories, cfg, transport=None):
+    """Ask an OpenAI-compatible endpoint (Jev through OpenRouter by default) for one number per
+    memory. Returns a list with a float in [-1, 1] per memory, or None where the model gave no usable
+    score for it. `transport(payload)` returns the response body (text or dict); the default is the
+    OpenRouter call. Transport errors raise; the caller falls back to the lexicon."""
+    model = cfg.get("model") or "typesafe/jev-router"
+    payload = {"model": model, "temperature": 0, "response_format": {"type": "json_object"},
+               "messages": [{"role": "system", "content": JEV_PROMPT},
+                            {"role": "user", "content": json.dumps(
+                                [{"i": i, "kind": m.get("kind") or "fact", "text": m["text"]}
+                                 for i, m in enumerate(memories)])}]}
+    body = transport(payload) if transport else _http_transport(payload, cfg)
+    return _parse_scores(body, len(memories))
+
+
+def sentiments(memories, scorer, cfg, transport=None):
+    """(scores, scorer actually used, note). Facts the model did not score fall back to polarity()."""
     scorer = (scorer or cfg.get("scorer") or "lexicon").lower()
+    lex = [polarity(m["text"]) for m in memories]
     if scorer in ("jev", "openai") and memories:
         try:
-            return remote_sentiments(memories, cfg), scorer, None
+            got = remote_sentiments(memories, cfg, transport)
         except Exception as e:  # noqa: BLE001 - advice must never fail because a model did
-            return [polarity(m["text"]) for m in memories], "lexicon", f"{scorer} scorer unavailable ({e}); lexicon used"
-    return [polarity(m["text"]) for m in memories], "lexicon", None
+            return lex, "lexicon", f"{scorer} scorer unavailable ({e}); lexicon used"
+        miss = sum(1 for g in got if g is None)
+        if miss == len(got):
+            return lex, "lexicon", f"{scorer} scorer unavailable (no usable scores in the response); lexicon used"
+        note = f"{scorer} scorer gave no usable score for {miss} of {len(got)} facts; lexicon used for those" if miss else None
+        return [l if g is None else g for g, l in zip(got, lex)], scorer, note
+    return lex, "lexicon", None
 
 
 # ------------------------------------------------------------------ memory --
