@@ -6,7 +6,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "c819ff73eadb8768e5186bc61a073947145c14fdd5d2b486d6973c20ab5c61db"
+          "content": "06916b7662c06380d2d19f2731b0912f2459d24f4bb5b0458f40191784c2e3d7"
         }
       ],
       "name": "plugins/feature-ladder/hooks/scripts/guard_irreversible.py",
@@ -61,7 +61,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "7627a8a35b4db2e85f5cfa9b7356286e5ed020080e89bf604778b8f657ddcafc"
+          "content": "b61b935ce246355fcbaa898d78c82c6bf5e43d66ea340f9b4dede6145879adcd"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/intake.py",
@@ -112,11 +112,22 @@
       "type": "file"
     },
     {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/confidence.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "58c6c17e38bb5b6d527faa0dc4cb5247d7e25b6dbd00fc3aa84f8e162f6dbf0d"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/confidence.py",
+      "type": "file"
+    },
+    {
       "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/external_worker.py",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a51b3074e3d788f733a3c881f75c9869b8e40c845006eb1b1ed233a7896f4632"
+          "content": "bfae8848321ed477ef8db5c5e560d619c9f1b5b92a45890578145c5a4ba1a011"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/external_worker.py",
@@ -127,7 +138,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6a5ef8a221e33b194a4f2034fc2fb3dfa5cbd5f051db4fe53e22b4cedcc558d0"
+          "content": "9249fb484caa48101a6d6403adbb2e36be5805b8123656d56cba9b64e5d70561"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/irreversible.py",
@@ -138,7 +149,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "7823d1e33fbeed6529cc4fdde9dbbdf99bfab668a208978db67e4025d6fe9536"
+          "content": "43687279a532989389e504e4a6e57893499d9f61e21d408238c0ac85206a00c0"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/pr_checkpoint.py",
@@ -149,7 +160,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "4db2adc06ad5c3f72059c230e03fcbf5c22390708555ef18e9f1139fa2d0750c"
+          "content": "e8e93cc0a3d2833c2ac0d62e1b726b5a24b1b7ec6384e5e53c0c18a8c640a29f"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/session_budget.py",
@@ -160,7 +171,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6795bbbd48dd582bbeb3cb5dae98642eb8899d084965ad30119ca3e06c3f054d"
+          "content": "b65f219795459e96f5307da7bb6770ea0f2babbc04898e6a356b14bdb0894b1c"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/verify.py",
@@ -207,7 +218,7 @@
       ],
       "name": "feature-ladder",
       "type": "application",
-      "version": "1.10.0"
+      "version": "1.11.0"
     },
     "tools": {
       "components": [
