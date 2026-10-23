@@ -172,8 +172,38 @@ def sentiments(memories, scorer, cfg):
 
 
 # ------------------------------------------------------------------ memory --
+def _decoded(text):
+    """A string that holds a JSON object/array (an MCP text envelope) -> the parsed value, else None."""
+    t = text.strip()
+    if t[:1] in ("{", "["):
+        try:
+            return json.loads(t)
+        except ValueError:
+            return None
+    return None
+
+
 def _items_from(obj, out):
+    if isinstance(obj, str):
+        inner = _decoded(obj)
+        if inner is not None:
+            _items_from(inner, out)
+        return
     if isinstance(obj, dict):
+        # MCP envelopes: {"result": "<json>"} and {"content": [{"type": "text", "text": "<json>"}]}
+        if isinstance(obj.get("result"), str) and _decoded(obj["result"]) is not None:
+            _items_from(obj["result"], out)
+            return
+        content = obj.get("content")
+        if isinstance(content, list) and any(isinstance(c, dict) and c.get("type") == "text" for c in content):
+            for c in content:
+                if isinstance(c, dict) and isinstance(c.get("text"), str):
+                    inner = _decoded(c["text"])
+                    if inner is not None:
+                        _items_from(inner, out)
+                    elif c["text"].strip():
+                        out.append({"text": c["text"], "tags": [], "metadata": {}})
+            return
         text = next((obj[k] for k in ("text", "content", "fact", "memory") if isinstance(obj.get(k), str)), None)
         if text:
             out.append({"text": text, "tags": [str(t) for t in obj.get("tags") or []],

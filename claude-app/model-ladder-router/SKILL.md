@@ -167,7 +167,9 @@ labels the stack `review: pending` and merges it in order (`--no-merge` to
 leave it open; a merge GitHub refuses is reported, never forced).
 
 **Integrate** only when two or more different coding agents wrote code for
-the feature: write `git diff <base>...HEAD` to a file and start ONE Fable
+the feature: run `git add -N .` then write `git diff <run.base> > <file>` (the ORIGINAL
+feature base from run.json, no `...HEAD`, so uncommitted and untracked work and
+earlier checkpoints are included) and start ONE Fable
 subagent with the integrator brief below, every Evidence Packet and the
 diff path; it has no coding tools. `needs-card` means route its card and run
 it; `coherent` means continue to acceptance.

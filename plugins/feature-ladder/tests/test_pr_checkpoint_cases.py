@@ -129,5 +129,28 @@ class Flow(unittest.TestCase):
                 self.assertFalse(state["active"])
 
 
+class GithubRetarget(unittest.TestCase):
+    def test_later_prs_are_retargeted_to_the_original_base_and_queued_ones_do_not_stop(self):
+        calls = []
+
+        def fake(args, cwd, check=True):
+            calls.append(list(args))
+            if args[:3] == ["gh", "pr", "merge"] and "--auto" not in args and args[3].endswith("/1"):
+                return 1, "checks pending"
+            return 0, ""
+
+        run = {"pr_enabled": True, "base": "main", "checkpoints": [
+            {"branch": "f/a", "base": "main", "pr": "https://x/pull/1"},
+            {"branch": "f/b", "base": "f/a", "pr": "https://x/pull/2"}]}
+        with mock.patch.object(pc, "sh", fake):
+            res = pc.merge_stack(Path("."), run)
+        self.assertEqual(len(res), 2)
+        self.assertTrue(res[0]["result"].startswith("queued"))
+        self.assertEqual(res[1]["result"], "merged")
+        self.assertIn(["gh", "pr", "edit", "https://x/pull/2", "--base", "main"], calls)
+        self.assertNotIn("edit", [c[2] for c in calls if c[:2] == ["gh", "pr"] and "/1" in c[3]])
+        self.assertTrue(any("pending" in w for w in run["warnings"]))
+
+
 if __name__ == "__main__":
     unittest.main()

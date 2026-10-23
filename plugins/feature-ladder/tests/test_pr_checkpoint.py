@@ -75,6 +75,22 @@ class Finish(unittest.TestCase):
             self.assertIn("review: pending", saved)
             self.assertIn("firebase deploy --project prod", saved)
 
+    def test_two_checkpoints_land_every_entry_on_the_original_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(tmp)
+            state, body = self.start(root)  # writes b.py
+            self.assertEqual(run(root, "checkpoint", "--title", "one", "--body-file", str(body))[0], 0)
+            (root / "c.py").write_text("z = 3\n", encoding="utf-8")
+            self.assertEqual(run(root, "checkpoint", "--title", "two", "--body-file", str(body))[0], 0)
+            (root / "d.py").write_text("w = 4\n", encoding="utf-8")
+            code, out, err = run(root, "finish", "--title", "all", "--body-file", str(body))
+            self.assertEqual(code, 0, err)
+            res = json.loads(out)
+            self.assertEqual(len(res["merged"]), 3)
+            files = git(root, "ls-tree", "--name-only", "main").split()
+            for f in ("a.py", "b.py", "c.py", "d.py"):  # the final entry's work reached main
+                self.assertIn(f, files)
+
     def test_no_merge_leaves_the_base_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = make_repo(tmp)
