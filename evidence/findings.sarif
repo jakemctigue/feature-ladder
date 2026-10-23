@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "originalUriBaseIds": {
+        "%SRCROOT%": {
+          "uri": "file:///"
+        }
+      },
+      "results": [
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "plugins/feature-ladder/skills/orchestration-ladder/scripts/verify.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 109
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "subprocess call with shell=True"
+          },
+          "ruleId": "FL001"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/jakemctigue/feature-ladder",
+          "name": "feature-ladder-evidence",
+          "rules": [
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "FL001",
+              "name": "shell-true",
+              "shortDescription": {
+                "text": "subprocess call with shell=True"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "FL002",
+              "name": "eval-exec",
+              "shortDescription": {
+                "text": "eval() or exec() call"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "FL003",
+              "name": "os-system",
+              "shortDescription": {
+                "text": "os.system() call"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "id": "FL004",
+              "name": "hardcoded-secret",
+              "shortDescription": {
+                "text": "string literal that looks like a hardcoded secret"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

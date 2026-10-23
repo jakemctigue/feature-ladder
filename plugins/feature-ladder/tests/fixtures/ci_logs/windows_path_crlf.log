@@ -1,0 +1,19 @@
+2026-03-02T10:31:09.5510000Z ##[group]Run python -m unittest discover -v -s plugins/feature-ladder/tests
+2026-03-02T10:31:09.5511000Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-03-02T10:31:09.5512000Z ##[endgroup]
+2026-03-02T10:31:10.9010000Z test_evidence_is_current (test_evidence.Evidence.test_evidence_is_current) ... FAIL
+2026-03-02T10:31:10.9020000Z test_reads_card (test_verify.Verify.test_reads_card) ... ERROR
+2026-03-02T10:31:10.9100000Z ======================================================================
+2026-03-02T10:31:10.9101000Z ERROR: test_reads_card (test_verify.Verify.test_reads_card)
+2026-03-02T10:31:10.9102000Z ----------------------------------------------------------------------
+2026-03-02T10:31:10.9103000Z Traceback (most recent call last):
+2026-03-02T10:31:10.9104000Z   File "D:\a\feature-ladder\feature-ladder\plugins\feature-ladder\tests\test_verify.py", line 20, in test_reads_card
+2026-03-02T10:31:10.9105000Z     text = open(path).read()
+2026-03-02T10:31:10.9106000Z   File "C:\hostedtoolcache\windows\Python\3.13.2\x64\Lib\encodings\cp1252.py", line 23, in decode
+2026-03-02T10:31:10.9107000Z UnicodeDecodeError: 'charmap' codec can't decode byte 0x8f in position 412: character maps to <undefined>
+2026-03-02T10:31:10.9200000Z ======================================================================
+2026-03-02T10:31:10.9201000Z FAIL: test_evidence_is_current (test_evidence.Evidence.test_evidence_is_current)
+2026-03-02T10:31:10.9202000Z AssertionError: 'line one\r\nline two\r\n' != 'line one\nline two\n'
+2026-03-02T10:31:10.9300000Z Ran 41 tests in 2.011s
+2026-03-02T10:31:10.9301000Z FAILED (failures=1, errors=1)
+2026-03-02T10:31:10.9500000Z ##[error]Process completed with exit code 1.

@@ -1,0 +1,3 @@
+# Evidence and fixtures are compared or hashed byte-for-byte; keep them LF on every OS.
+evidence/* text eol=lf
+plugins/feature-ladder/tests/fixtures/** text eol=lf
