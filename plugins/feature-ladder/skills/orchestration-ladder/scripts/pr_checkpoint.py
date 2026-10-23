@@ -173,9 +173,13 @@ def open_pr(root, run, base, head, title, body_file, draft):
 
 def merge_entry(root, run, entry):
     """Merge one PR of the stack (GitHub) or one branch (local). Records the result on the entry."""
-    head, base = entry["branch"], entry["base"]
+    # Every entry lands on the ORIGINAL base: a later entry's recorded base is the previous
+    # feature branch, and merging into that would leave the original base without it.
+    head, base = entry["branch"], run.get("base") or entry["base"]
     if run.get("pr_enabled") and entry.get("pr"):
         url = entry["pr"]
+        if entry["base"] != base:  # retarget the stacked PR to the original base before merging
+            sh(["gh", "pr", "edit", url, "--base", base], root, check=False)
         sh(["gh", "pr", "ready", url], root, check=False)  # drafts cannot merge
         code, out = sh(["gh", "pr", "merge", url, "--merge"], root, check=False)
         if code == 0:
@@ -184,6 +188,7 @@ def merge_entry(root, run, entry):
         code2, out2 = sh(["gh", "pr", "merge", url, "--merge", "--auto"], root, check=False)
         if code2 == 0:
             entry["merged"] = "queued (auto-merge when checks pass)"
+            run.setdefault("warnings", []).append(f"{url}: {entry['merged']} - pending, later PRs retargeted to {base}")
             return True
         entry["merged"] = f"not merged: {(out or out2).strip()[-240:]}"
         run.setdefault("warnings", []).append(f"{url}: {entry['merged']}")

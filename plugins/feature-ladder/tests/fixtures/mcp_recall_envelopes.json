@@ -1,0 +1,13 @@
+{
+  "result_string": {
+    "result": "{\"results\": [{\"text\": \"deploy failed twice\", \"tags\": [\"pitfall\"]}, {\"text\": \"npm test is the gate\", \"metadata\": {\"kind\": \"test-strategy\"}}, {\"text\": \"[convention] use rtk\", \"tags\": []}]}"
+  },
+  "content_text": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"results\": [{\"text\": \"deploy failed twice\", \"tags\": [\"pitfall\"]}, {\"text\": \"npm test is the gate\", \"metadata\": {\"kind\": \"test-strategy\"}}, {\"text\": \"[convention] use rtk\", \"tags\": []}]}"
+      }
+    ]
+  }
+}

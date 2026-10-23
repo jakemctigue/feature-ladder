@@ -103,7 +103,10 @@ the design.
    this feature** (a GLM mechanic plus a Sonnet implementer, two cards on
    different providers, a Jev card plus an Opus card). One worker's work
    needs no integrator. Write the combined diff,
-   `git diff <stack_base>...HEAD > .feature-ladder/runs/<slug>/integration.diff`,
+   `git add -N . && git diff <run.base> > .feature-ladder/runs/<slug>/integration.diff`
+   (`git add -N .` makes untracked files show up; `<run.base>` is the ORIGINAL
+   feature base from run.json, not the current stack base; no `...HEAD`, so
+   uncommitted work and earlier checkpoints are included),
    then dispatch ONE
    `Agent(subagent_type="feature-ladder:integrator", model="fable", effort="medium", prompt="<every Evidence Packet, the diff path, the intake path, each card's Scope, the repo's build, type, lint and test commands>")`.
    It has no coding tools and returns `INTEGRATION: coherent | needs-card`.
