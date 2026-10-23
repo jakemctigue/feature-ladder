@@ -16,7 +16,10 @@ plan limit alone. Opus rungs and the Fable coordinator stay on Anthropic.
 
   external_worker.py run --card FILE --id T1 [--rung implementer|implementer-high|mechanic]
                          [--model ID] [--cwd DIR] [--timeout S] [--max-turns N]
-      Runs the card. Prints the worker's Evidence Packet followed by one
+      Runs the card. A card without a Memory: line gets one from the feature's
+      saved recall.json (the file confidence.py scores), and every card gets a
+      Bounds: line (turns, time, session budget) and the output contract inline.
+      Prints the worker's Evidence Packet followed by one
       `external worker:` line (model, turns, cost). Writes
       .feature-ladder/evidence/<id>-external.json and a ledger row.
       Exit 0 packet returned, 3 unavailable, 1 error/timeout,
@@ -265,6 +268,87 @@ def contract_text():
         return "Follow the Task Card exactly and end with an Evidence Packet whose last line starts with 'Retained:'."
 
 
+OUTPUT_CONTRACT = """Output contract (reply with this and nothing else):
+TASK <id> - <status: done | blocked | partial>
+Changed: <file list with line ranges>
+Checks run: <command -> exit code -> last 5 lines>
+Claims: <each factual claim with how it was verified; "unverified" is allowed>
+Risks: <anything you are unsure about>
+Memory candidates: <"[kind] fact" lines, or "none">
+Retained: deferred - <n> candidates   |   Retained: none - <reason>"""
+MEMORY_SNIPPETS = 5
+
+
+def _card_line(card, name):
+    m = re.search(rf"^{name}:[ \t]*(.*)$", card, re.M)
+    return None if m is None else m.group(1).strip()
+
+
+def recall_file(root):
+    """The feature's saved recall: runs/<slug>/recall.json (plugin) or recall.json (app)."""
+    fl = Path(root) / ".feature-ladder"
+    run = {}
+    try:
+        run = json.loads((fl / "run.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    for f in ([fl / "runs" / run["slug"] / "recall.json"] if run.get("slug") else []) + [fl / "recall.json"]:
+        if f.is_file():
+            return f
+    return None
+
+
+def memory_line(root, scope):
+    """(snippets, relevant) from the saved recall: memories that touch the card's
+    scope first, at most MEMORY_SNIPPETS, verbatim as '[kind] fact'."""
+    f = recall_file(root)
+    if not f:
+        return [], 0
+    try:
+        import confidence
+        mems = confidence.parse_memories(f.read_text(encoding="utf-8-sig"))
+        anch = confidence.anchors("", [p.strip() for p in re.split(r"[,\s]+", scope or "") if p.strip()])
+    except Exception:  # noqa: BLE001 - a bad recall file is "no memory", never a failed card
+        return [], 0
+
+    def touches(m):
+        low = m["text"].lower()
+        toks = set(confidence.WORD.findall(low))
+        return any(a in toks or ("/" in a and a in low) for a in anch)
+
+    rel = [m for m in mems if touches(m)]
+    picked = (rel + [m for m in mems if m not in rel])[:MEMORY_SNIPPETS]
+    return [f"[{m['kind']}] {m['text'][:160]}" for m in picked], len(rel)
+
+
+def prepare_card(card, root, task_id, max_turns, timeout, budget=None):
+    """The queue card the external worker is handed: the coordinator's card with
+    a Memory: line from the saved recall when it has none, a Bounds: line and the
+    output contract inline (cheap models weigh the card over the system prompt)."""
+    card = card.rstrip()
+    added = []
+    mem = _card_line(card, "Memory")
+    if mem is None or not mem or mem.lower() in ("none", "n/a", "-"):
+        snippets, relevant = memory_line(root, _card_line(card, "Scope"))
+        if snippets and (mem is None or not mem or relevant):
+            text = "Memory: " + " | ".join(snippets)
+            card = re.sub(r"^Memory:.*$", lambda _: text, card, count=1, flags=re.M) if mem is not None else card + "\n" + text
+            added.append("memory")
+        elif mem is None:
+            card += "\nMemory: none"
+            added.append("memory")
+    if _card_line(card, "Bounds") is None:
+        b = f"Bounds: at most {max_turns} turns and {timeout}s; edit only Scope; no subagents, no web"
+        if budget and budget.get("left") is not None:
+            b += f"; session subagent budget {budget['left']} of {budget.get('max')} left"
+        card += "\n" + b
+        added.append("bounds")
+    if "Retained:" not in card:
+        card += "\n\n" + OUTPUT_CONTRACT.replace("<id>", str(task_id), 1)
+        added.append("contract")
+    return card + "\n", added
+
+
 def record_ledger(root, task_id, rung, model, result):
     try:
         import ledger  # noqa: E402
@@ -367,8 +451,14 @@ def run(args):
         return 4
     timeout = int(args.get("--timeout") or cfg["openrouter"]["timeout"])
     max_turns = int(args.get("--max-turns") or cfg["openrouter"]["max_turns"])
-    card = Path(card_path).read_text(encoding="utf-8-sig")
-    cmd = [exe, "-p", "--model", "sonnet", "--output-format", "json", "--max-turns", str(max_turns),
+    root = repo_root(cwd)
+    try:
+        budget = session_budget.status(session_budget.find_root(cwd))
+    except Exception:  # noqa: BLE001
+        budget = None
+    card, added = prepare_card(Path(card_path).read_text(encoding="utf-8-sig"), root, task_id,
+                               max_turns, timeout, budget)
+    cmd =[exe, "-p", "--model", "sonnet", "--output-format", "json", "--max-turns", str(max_turns),
            "--permission-mode", "acceptEdits", "--allowedTools", TOOLS, "--disallowedTools", DISALLOWED,
            "--append-system-prompt", contract_text()]
     usage_before = usage_usd(cfg, key)
@@ -390,14 +480,13 @@ def run(args):
     usage_after = usage_usd(cfg, key)
     charged = (round(usage_after - usage_before, 4) if usage_before is not None and usage_after is not None else None)
     result["openrouter_cost_usd"] = charged  # what OpenRouter billed; total_cost_usd is Claude Code's Anthropic-price guess
-    root = repo_root(cwd)
     ev = root / ".feature-ladder" / "evidence"
     ev.mkdir(parents=True, exist_ok=True)
     record = {"task": task_id, "rung": rung, "model": model, "key_source": source, "seconds": secs,
               "exit": r.returncode, "is_error": result.get("is_error"), "num_turns": result.get("num_turns"),
               "usage": result.get("usage"), "openrouter_cost_usd": charged,
               "claude_code_estimate_usd": result.get("total_cost_usd"),
-              "session_id": result.get("session_id"), "stderr_tail": (r.stderr or "")[-1500:], "packet": packet}
+              "session_id": result.get("session_id"), "stderr_tail": (r.stderr or "")[-1500:], "card_added": added, "card": card, "packet": packet}
     (ev / f"{task_id}-external.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     record_ledger(root, task_id, rung, model, result)
     print(packet)
