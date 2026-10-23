@@ -26,7 +26,7 @@ coordinator's judgment.
 | T4-T5 | `senior-implementer` | opus / medium or high | Difficult implementation under an agreed design |
 | D | `domain-expert(-high)` | opus / medium or high | One design step, only on a hard flag |
 | C | `coordinator` | opus / medium | Confidence, card, dispatch, verify.py, accept, merge: 12-24 turns |
-| FI | `integrator` | fable / medium | Once per feature, only after two or more different coding agents wrote code; no coding tools, superpowers skills only |
+| FI | `integrator` | fable / medium | Once per feature, only after two or more different coding agents wrote code; coding tools (Read, Edit, Write, Bash, Glob, Grep) to reconcile seams, plus superpowers skills |
 | F-Low/High/Extra/Ultra | `second-opinion`, `deep-verifier`, `architect-escalation`, `ultra-investigator` | fable | Only with `--second-opinion`, `--escalate`, `--ultra` |
 | X | `codex-reviewer` | haiku / low driving OpenAI Codex | Only at `/feature-ladder:wrap --review` |
 
@@ -42,7 +42,7 @@ coordinator's judgment.
                  (intake.py card: route + skills)
   2. worker      GLM or Sonnet medium does the change and its tests
   3. integrator  Fable, ONLY if >= 2 different coding agents wrote code:
-                 finds the seams, returns one integration card or "coherent"
+                 finds the seams, integrates them itself, returns an Evidence Packet
   4. coordinator verify.py re-runs the checks (no model), queues memory
                  lines, pr_checkpoint.py finish: PR, label review: pending,
                  merge the stack
@@ -165,13 +165,16 @@ Retained: deferred - <n> candidates
 
 ### Integration verdict (integrator -> coordinator, two or more coding agents only)
 ```
-INTEGRATION: coherent | needs-card
-Seams: <file:line on both sides, what disagrees, the keeper - or none>
-Checks: <the build/type/lint/test commands that prove the parts are one program>
-<for needs-card: exactly one Task Card the coordinator routes unchanged>
+INTEGRATION: coherent | integrated
+Seams: <file:line on both sides, what disagreed, the keeper - or none>
+Changed: <files the integrator edited to reconcile seams, with line ranges - or "none">
+Checks: <the build/type/lint/test commands it ran, with real output>
 Memory candidates: ...
 Retained: deferred - <n> candidates
 ```
+The integrator resolves seams itself with its coding tools and returns an
+Evidence Packet; verify.py checks it like any worker, and a verify failure
+uses the normal re-dispatch/escalation path.
 
 ### Design Doc (domain expert -> coordinator, hard flag only)
 `DESIGN.md`: Problem, Constraints, Options (>= 2), Chosen approach,

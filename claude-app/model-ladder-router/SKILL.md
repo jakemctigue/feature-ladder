@@ -25,8 +25,9 @@ Claude Code plugin and uses the same scripts and rules.
 
 The router never picks Fable. A Fable subagent (second opinion, deep
 verification) runs only when the user asks for one by name, with one
-exception: the **integrator** (Fable, no coding tools) runs once, on its own,
-when two or more different coding agents wrote code for the same feature.
+exception: the **integrator** (Fable, coding tools to reconcile seams) runs
+once, on its own, when two or more different coding agents wrote code for the
+same feature.
 
 **Nothing waits for the user.** Deploys, data steps and the merge happen when
 the feature needs them and are logged `review: pending` for the user to look
@@ -173,8 +174,9 @@ the feature: run `git add -N .` then write `git diff <run.base> > <file>` (the O
 feature base from run.json, no `...HEAD`, so uncommitted and untracked work and
 earlier checkpoints are included) and start ONE Fable
 subagent with the integrator brief below, every Evidence Packet and the
-diff path; it has no coding tools. `needs-card` means route its card and run
-it; `coherent` means continue to acceptance.
+diff path; it integrates the seams itself with its coding tools and returns
+an Evidence Packet, which verify.py checks like any worker's; a verify
+failure uses the normal re-dispatch/escalation path.
 
 **Secrets.** The intake's `secrets.names` lists the Google Secret Manager
 secrets the feature reads (names only). A command that needs one is run as
@@ -265,15 +267,16 @@ subagent re-checks the work.
   constraints, at least two options with trade-offs, chosen approach,
   interfaces, test strategy, rollback, open questions. For each implied task,
   propose the router fields.
-- **integrator** (Fable, only after two or more coding agents): Do not edit
-  or run anything. Read every packet and the combined diff; find the seams
-  between the agents' parts (one source of truth, contracts that must agree,
-  boundaries, tests that contradict each other, the repo's conventions; for
-  React + Vite also one owner per piece of state, composable components,
-  `import.meta.env` in one place, the build/type/lint commands as the
-  checks). Return `INTEGRATION: coherent | needs-card`, the seams with
-  file:line on both sides, the checks, and for `needs-card` exactly one Task
-  Card with the fix for every seam and nothing else.
+- **integrator** (Fable, only after two or more coding agents): Edit only to
+  reconcile seams between the agents' parts, and run the build/type/lint/test
+  checks; no new feature work. Read every packet and the combined diff; find
+  the seams between the agents' parts (one source of truth, contracts that
+  must agree, boundaries, tests that contradict each other, the repo's
+  conventions; for React + Vite also one owner per piece of state, composable
+  components, `import.meta.env` in one place, the build/type/lint commands as
+  the checks). Return `INTEGRATION: coherent | integrated`, the seams with
+  file:line on both sides, the files you edited to fix seams, and an Evidence
+  Packet with the real passing check output.
 
 ## 5. End of session (only when the user asks)
 

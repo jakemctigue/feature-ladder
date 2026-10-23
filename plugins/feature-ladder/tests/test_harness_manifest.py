@@ -183,5 +183,16 @@ class CompatMatrix(unittest.TestCase):
                 self.assertEqual(cell, "untested", f"{surface}: {cell}")
 
 
+class IntegratorTools(unittest.TestCase):
+    def test_integrator_keeps_coding_tools_denies_web(self):
+        fm = frontmatter(PLUGIN / "agents" / "integrator.md")
+        self.assertIsNotNone(fm)
+        denied = fm.get("disallowedTools[]", [])
+        for tool in ("Edit", "Write", "Bash", "Read", "Glob", "Grep"):
+            self.assertNotIn(tool, denied, f"integrator must keep {tool}")
+        for tool in ("WebSearch", "WebFetch"):
+            self.assertIn(tool, denied, f"integrator must still deny {tool}")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -70,9 +70,9 @@ Both use the same scripts and rules, pinned to the same release tag.
   **resharded** into smaller cards. Advice about size, never a block.
 - **Fable only to integrate.** The router never picks Fable and the
   coordinator runs on Opus. Fable comes in once, as the `integrator`, only
-  when two or more different coding agents wrote code for one feature, with
-  no coding tools. Second opinions and deep verification need an explicit
-  switch.
+  when two or more different coding agents wrote code for one feature; it
+  resolves the seams itself with its coding tools and returns an Evidence
+  Packet. Second opinions and deep verification need an explicit switch.
 - **Reviews and memory once per session, not per feature.** Codex review,
   adversarial tests and a Fable second opinion run only when you schedule
   them with `/feature-ladder:wrap`, once, over everything the session built.
@@ -211,9 +211,10 @@ ultra-investigator. Reviews are not feature switches: they belong to `wrap`.
 4. **Integrate, only for multi-agent work.** If two or more different coding
    agents wrote code for the feature, the Fable `integrator` reads the packets
    and the combined diff (`git add -N . && git diff <base>`, so uncommitted
-   and untracked work and every earlier checkpoint are in it), names the
-   seams, and returns one integration card or `coherent`. One worker's work
-   skips this step.
+   and untracked work and every earlier checkpoint are in it), resolves the
+   seams itself with its coding tools, and returns an Evidence Packet -
+   `coherent` (diffs already fit) or `integrated` (it fixed seams). One
+   worker's work skips this step.
 5. **Verify with no model.** `verify.py` re-runs the checks and flags files
    outside the card's scope. A failure is re-dispatched once, then one band
    up once, then reported `partial`.
@@ -241,7 +242,7 @@ recommended option and parked in a draft PR that explains how to switch.
 | T4–T5 | `senior-implementer` | Opus 5.5 / medium–high | Difficult implementation under an agreed design |
 | D | `domain-expert`, `domain-expert-high` | Opus 5.5 / medium–high | One design step, only on a hard flag |
 | **C** | **`coordinator`** | **Opus 5.5 / medium** | **Confidence, card, dispatch, verify.py, accept, merge: 12-24 turns** |
-| **FI** | **`integrator`** | **Fable 5.1 / medium** | **Once per feature, only after two or more different coding agents wrote code; no coding tools** |
+| **FI** | **`integrator`** | **Fable 5.1 / medium** | **Once per feature, only after two or more different coding agents wrote code; coding tools to reconcile seams, runs the checks, returns an Evidence Packet** |
 | F-Low | `second-opinion` | Fable 5.1 / low | Only with `--second-opinion` |
 | F-High | `deep-verifier` | Fable 5.1 / high | Only with `--escalate` |
 | F-Extra | `architect-escalation` | Fable 5.1 / xhigh | Only with `--escalate` |
