@@ -28,6 +28,12 @@ checkout's bank. Agents never pass `bank_id`, `list_banks` or `create_bank`.
 - The query names the feature area and its files. The coordinator pastes
   only the snippets that bear on the card into `Memory:`; workers do not
   re-query.
+- The coordinator saves its recall verbatim to
+  `.feature-ladder/runs/<slug>/recall.json` and hands it to
+  `orchestration-ladder/scripts/confidence.py --memories`, which scores each
+  memory's sentiment and relevance into the confidence surface that decides
+  card size (see the orchestration-ladder skill). `confidence.py --live`
+  can recall on its own, through the same gate and counted the same way.
 
 ## Writes: once per session, through the gate
 

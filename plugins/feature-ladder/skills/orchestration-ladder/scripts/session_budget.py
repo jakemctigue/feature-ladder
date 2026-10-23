@@ -16,11 +16,14 @@ As a PreToolUse hook on Agent/Task it denies a spawn when:
   - the session budget is spent;
   - a run is active and the spawn is something a feature run never does:
       codex-reviewer, memory-scribe (they belong to /feature-ladder:wrap),
-      any Fable rung or `model: fable` other than the coordinator, unless the
+      any Fable rung or `model: fable` except the integrator, unless the
       run's switches allow it (--second-opinion, --escalate, --ultra);
+      the integrator before two coding agents have returned packets for the
+      feature, or a second integrator in the same run;
       a domain expert when the intake planned no design step, or a second one;
       a second mechanic in the same run;
-      more workers than the run's budget (its workers, +1 retry, +1 design).
+      more workers than the run's budget (its workers, +1 retry, +1 design;
+      the integrator is not a worker and does not count against it).
 
     session_budget.py status [--cwd DIR]          JSON: size, max, used, left (or "unset")
     session_budget.py set --size S|M|L [--cwd DIR]
@@ -52,6 +55,8 @@ FABLE_RUNGS = {"second-opinion": "second_opinion", "deep-verifier": "escalate",
                "architect-escalation": "escalate", "ultra-investigator": "ultra"}
 WRAP_ONLY = {"codex-reviewer", "memory-scribe"}  # memory is written by memory_gate.py flush, no agent
 DESIGN_RUNGS = {"domain-expert", "domain-expert-high"}
+INTEGRATOR = "integrator"  # the one Fable rung a run reaches on its own: after >= 2 coding agents
+INTEGRATOR_MIN_WORKERS = 2
 
 
 def now():
@@ -149,12 +154,21 @@ def check(root, agent, model=None, via="subagent"):
         if agent in WRAP_ONLY:
             return False, (f"feature-ladder: {agent} does not run inside a feature run; reviews and memory "
                            "happen once at the end of the session with /feature-ladder:wrap. Carry on without it.")
-        fable_switch = FABLE_RUNGS.get(agent)
-        if fable_switch or str(model or "").lower().startswith("fable") or "fable" in str(model or "").lower():
-            ok = fable_switch and (fable_switch in switches or (fable_switch == "escalate" and "ultra" in switches))
-            if not ok:
-                return False, (f"feature-ladder: no Fable calls beyond the coordinator unless the user asked "
-                               f"({agent or model}). Decide it yourself or leave it under 'Left for you'.")
+        workers = [e for e in mine if e["agent"] not in DESIGN_RUNGS and e["agent"] != INTEGRATOR]
+        if agent == INTEGRATOR:
+            if len(workers) < INTEGRATOR_MIN_WORKERS:
+                return False, (f"feature-ladder: the integrator (Fable) runs only after {INTEGRATOR_MIN_WORKERS} or "
+                               "more coding agents returned packets for this feature; one worker's work is "
+                               "accepted by verify.py alone.")
+            if any(e["agent"] == INTEGRATOR for e in mine):
+                return False, "feature-ladder: one integration pass per feature; route its card and verify."
+        else:
+            fable_switch = FABLE_RUNGS.get(agent)
+            if fable_switch or str(model or "").lower().startswith("fable") or "fable" in str(model or "").lower():
+                ok = fable_switch and (fable_switch in switches or (fable_switch == "escalate" and "ultra" in switches))
+                if not ok:
+                    return False, (f"feature-ladder: the only Fable rung a run reaches on its own is the integrator "
+                                   f"({agent or model} is not). Decide it yourself or use a switch the user gave.")
         if agent in DESIGN_RUNGS:
             if not budget.get("design"):
                 return False, ("feature-ladder: the intake planned no design step for this feature (no hard "
@@ -164,7 +178,7 @@ def check(root, agent, model=None, via="subagent"):
         if agent == "mechanic" and any(e["agent"] == "mechanic" for e in mine):
             return False, "feature-ladder: one mechanic per feature at most; verify.py runs the checks."
         cap = int(budget.get("workers", 1) or 1) + 1 + (1 if budget.get("design") else 0)
-        if len(mine) >= cap:
+        if agent != INTEGRATOR and len([e for e in mine if e["agent"] != INTEGRATOR]) >= cap:
             return False, (f"feature-ladder: this feature's budget is {cap} subagents (workers + one retry"
                            f"{' + design' if budget.get('design') else ''}) and they are used. Finish with "
                            "what you have and report anything unfinished as partial.")

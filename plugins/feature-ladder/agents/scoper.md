@@ -54,8 +54,9 @@ later. You estimate; the user confirms what is uncertain. You change no code.
    - `irreversible`: true only if some step has effects **outside the repo**
      (migrating or deleting real data, deploying, publishing, calling an
      outside service). Code on a branch is never irreversible. Such steps run
-     under the policy the user picks at intake, so say in the evidence what
-     they are (e.g. "backfill of the monsters collection on bossforge-prod").
+     during the feature and are logged `review: pending` for the user, so say
+     in the evidence what they are (e.g. "backfill of the monsters collection
+     on bossforge-prod").
      Code that writes to Firestore or a database is NOT irreversible, and
      neither is it `cross_system` when the repo already talks to that
      database; only running a data step against real data is.

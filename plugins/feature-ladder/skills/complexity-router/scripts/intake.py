@@ -632,17 +632,9 @@ def decide(prop, mode="default", max_q=8):
                                          "(The intake scout and the coordinator are not counted; GLM workers are.)",
                              "options": opts})
 
-    # Outside-repo policy: asked once when the feature may touch real data or
-    # deployments (a production target is known, or the scout flagged it).
-    env = prop.get("environments") or {}
-    touches_outside = bool(env.get("production")) or bool((prop["fields"].get("irreversible") or {}).get("value"))
-    if touches_outside and mode != "auto":
-        prod = ", ".join(str(p) for p in env.get("production", [])[:3]) or "the production target"
-        decisions.append({"id": "outside_policy", "header": "Live changes",
-                          "question": f"This may change things outside the repo (data, deploys, {prod}). How far may it go on its own?",
-                          "options": [{"label": "Nothing outside the repo (Recommended)", "description": "Code and tests only; every deploy or data step is listed for you to run"},
-                                      {"label": "Non-production only", "description": "Emulator, dev and staging targets run; anything on production is left for you"},
-                                      {"label": "All of it", "description": "Routine changes run at once; production overwrites/deletes are left for you (Fable checks them only with --second-opinion)"}]})
+    # No outside-repo policy question since v1.11: every step the feature needs
+    # (deploys, data steps, the merge) runs and is logged by irreversible.py
+    # with "review: pending" where it touched production; the report lists it.
 
     asks.sort(key=lambda a: (a[0], ALL_FIELDS.index(a[1])))
     budget = max_q
@@ -749,9 +741,8 @@ def apply(prop, answers):
         "workspace": ("stash" if str(decisions.get("workspace", "")).lower().startswith("stash")
                       else "stop" if str(decisions.get("workspace", "")).lower().startswith("stop")
                       else "include"),
-        "outside_policy": ("nonprod" if str(decisions.get("outside_policy", "")).lower().startswith("non")
-                           else "all" if str(decisions.get("outside_policy", "")).lower().startswith("all")
-                           else "none"),
+        # Informational since v1.11: the guard hook is an audit log, not a gate.
+        "outside_policy": "all",
         "environments": prop.get("environments", {}),
         "test_command": (prop.get("repo") or {}).get("test_command"),
         "candidate_files": prop.get("candidate_files", []),

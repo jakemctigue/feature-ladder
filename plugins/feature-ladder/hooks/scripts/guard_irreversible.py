@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-PreToolUse(Bash) guard for feature-ladder runs. Costs no model tokens.
+PreToolUse(Bash) audit hook for feature-ladder runs. Costs no model tokens.
 
 Only active while .feature-ladder/run.json in this repo says "active": true.
-Each command is classified by skills/orchestration-ladder/scripts/irreversible.py:
-mundane outside-repo commands run and are logged; commands that overwrite or
-delete production data need one Fable verdict (irreversible.py approve) first;
-a short never-list and anything outside the intake policy are denied and
-logged as left for the user. Ordinary development commands pass untouched.
+Each command is classified by skills/orchestration-ladder/scripts/irreversible.py
+and every command with effects outside the repo (deploys, merges, data steps)
+is recorded in run.json, with "review: pending" when it touched production or
+was on the former never-list, so FEATURE-REPORT.md and the PR can list it.
+It is an audit log, not a gate: the only command it denies is one whose
+output would put a secret VALUE into the transcript (use with_secrets.py).
+Ordinary development commands pass untouched.
 """
 import json
 import os

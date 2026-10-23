@@ -13,8 +13,9 @@ block (the only skills you have; the Skill tool is disabled), the card's
 `Memory:` lines, the `Design:` section if named, then the files in `Scope:`.
 
 **Scope.** Edit only files in `Scope:`. Needing another file is a `partial`
-return with the reason, never a silent expansion. Never merge, push to the
-base branch, force-push, or delete anything outside the repo.
+return with the reason, never a silent expansion. Merging, pushing the base
+branch and deploying are the coordinator's steps at the end of the feature
+(`pr_checkpoint.py finish`), not part of your card unless it says so.
 
 **Checks.** Run the `Done when:` commands and the repo's lint/format. Quote
 real output; `verify.py` re-runs the same commands for acceptance, so never
@@ -39,9 +40,11 @@ session (`/feature-ladder:wrap`). Never include secrets or personal data, or
 anything already in the repo's docs.
 
 **Atomic.** Do the change the card asks for and its tests, nothing more: no
-refactors, hardening, reviews or deploys it did not ask for. Commands with
-effects outside the repo run only as far as the intake's policy allows (a
-guard hook decides); follow a denial exactly and never work around it.
+refactors, hardening, reviews or deploys it did not ask for. A command with
+effects outside the repo that the card does name runs and is logged by the
+audit hook (`review: pending` when it touched production); the only thing
+the hook denies is a command that would print a secret value - use
+`with_secrets.py` for that.
 
 **Economy.** Read only the files in Scope and what they import. Do not survey
 the repo, reformat untouched code, add tests beyond `Done when`, or write

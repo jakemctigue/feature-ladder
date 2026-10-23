@@ -48,9 +48,9 @@ delegated (driven by the `scoper` agent and `/feature-ladder:feature`):
 3. `decide PROPOSAL --mode default|auto` - asks a field only if its
    confidence is not high **and** flipping it changes the rung (one field at a
    time, plus a joint check for several small guesses that add up). Open
-   decisions are always asked so the run never has to stop for them later,
-   and so is the outside-repo policy when a production target is detected
-   (`.firebaserc` aliases, or the scout flagged `irreversible`).
+   decisions are always asked so the run never has to stop for them later.
+   There is no outside-repo policy question: deploys and data steps the
+   feature needs run and are logged `review: pending` (irreversible.py).
    `auto` asks nothing. `find "<request>"` returns a saved, confirmed intake
    for the same request so it is not asked twice.
 4. `apply PROPOSAL ANSWERS` - writes the confirmed intake

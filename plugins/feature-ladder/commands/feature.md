@@ -1,6 +1,6 @@
 ---
-description: Add ONE feature with the orchestration ladder, atomically - just the code change and its tests. A Sonnet scout settles every routing variable; you answer only what is uncertain (and, once per session, how many subagents the session may spawn); then one worker (GLM 5.3 Flash or Sonnet medium for most work) builds it on its own branch and a PR opens. No reviews, no scribes, no Fable calls beyond the coordinator - those are /feature-ladder:wrap at the end of the session. Usage - /feature-ladder:feature <description> [--auto] [--second-opinion] [--escalate] [--ultra]
-argument-hint: <feature description> [--auto] [--second-opinion] [--escalate] [--ultra]
+description: Add ONE feature with the orchestration ladder, atomically - just the code change and its tests. A Sonnet scout settles every routing variable; you answer only what is uncertain (and, once per session, how many subagents the session may spawn); then one worker (GLM 5.3 Flash or Sonnet medium for most work) builds it on its own branch, the stack is merged and labelled review: pending, and what ran outside the repo is listed for you. Fable only integrates when two or more coding agents wrote code. No reviews, no scribes - those are /feature-ladder:wrap at the end of the session. Usage - /feature-ladder:feature <description> [--auto] [--no-merge] [--second-opinion] [--escalate] [--ultra]
+argument-hint: <feature description> [--auto] [--no-merge] [--second-opinion] [--escalate] [--ultra]
 ---
 
 Start a feature-ladder run for: $ARGUMENTS
@@ -16,18 +16,23 @@ Separate the request text from these switches:
 | Switch | Effect |
 |---|---|
 | `--auto` | Ask nothing. Use the scout's values and the recommended option for every decision (the session budget defaults to Small). |
-| `--second-opinion` | Allows the Fable `second-opinion` rung: one verdict before a production overwrite (otherwise those are left for you). |
+| `--no-merge` | Leave the PR stack open instead of merging it. By default `finish` merges the stack into your branch and labels it `review: pending`. |
+| `--second-opinion` | Allows the Fable `second-opinion` rung for one sharp question the coordinator cannot settle. |
 | `--escalate` | Allows `deep-verifier` (Fable high) and `architect-escalation` (Fable xhigh) for a bug the workers cannot isolate. |
 | `--ultra` | Also allows the ultra-investigator (Fable max). Implies `--escalate`. |
 
-Without these, nothing but the coordinator ever runs on Fable. `--codex` and
-`--adversarial` no longer run per feature: if given, say in one line that
-reviews run once at the end of the session with
+Without these, the only Fable rung a run reaches is the `integrator`, and
+only when two or more different coding agents wrote code for the feature.
+`--codex` and `--adversarial` no longer run per feature: if given, say in one
+line that reviews run once at the end of the session with
 `/feature-ladder:wrap --review [--adversarial]`, and continue without them.
 
 Everything else is detected: the branch to start from is the current one; PRs
 open when there is a remote and the `gh` CLI, otherwise the same branches are
 made locally; a saved intake for this exact request is reused (step 1).
+Nothing in the run waits for you: deploys, data steps and the merge happen
+when the feature needs them and are logged `review: pending` for you to look
+at afterwards.
 
 ## 1. Intake (nothing is delegated before this finishes)
 
@@ -54,7 +59,8 @@ From the scout's `decide` output:
    `decisions` (the `session_agents` one first if present: it is asked once
    per coding session and sets how many subagents the whole session may
    spawn - Small 1-2, Medium 3-4, Large up to 8; then `workspace`), then
-   `questions`.
+   `questions`. There is no "live changes" question: outside-repo steps run
+   and are logged.
    Use each item's `header`, `question` and option `label`/`description` as
    given. Keep the recommended option first.
 3. Map each answer back to the option's `value` (for `decisions`, record the
@@ -73,10 +79,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/intake.py" apply
 It writes the confirmed intake to `.feature-ladder/intake/<slug>.json` and the
 session's subagent budget. Tell the user in one line: the size and what it
 means (`budget.shape`), the rung and where it runs (GLM or Claude), the
-subagents left in the session, the outside-repo policy, and "Running now; no
-more questions." For example: "Size S: one GLM 5.3 Flash worker, no design,
-no review. 3 of 4 session subagents left. Code only. Running now." If
-`budget.workers` is 0 the session budget is spent: say so and stop.
+subagents left in the session, whether the stack merges or stays open, and
+"Running now; no more questions." For example: "Size S: one GLM 5.3 Flash
+worker, no design, no review. 3 of 4 session subagents left. Merges when
+green, labelled review: pending. Running now." If `budget.workers` is 0 the
+session budget is spent: say so and stop.
 
 ## 4. Branch
 
@@ -94,7 +101,7 @@ lists the Secret Manager secrets the feature reads (names only).
 ```
 Agent(
   subagent_type="feature-ladder:coordinator",
-  model="fable",
+  model="opus",
   effort="medium",
   name="feature-coordinator",
   prompt="Feature request from the user: <request text>
@@ -102,17 +109,19 @@ Agent(
 Confirmed intake (binding): <path to .feature-ladder/intake/<slug>.json>
 Budget: size <S|M|L> - <budget.shape>
 Run branch: <branch from step 4, or 'none - not a git repo'>  Base: <base>  PRs: <enabled | disabled: reason>
+Merge: <finish merges the stack and labels it review: pending | the user asked for --no-merge: finish with --no-merge>
 Project: infer the project name from the repo (package name, pyproject/package.json name, or directory name) and use it as the `project:<name>` tag for all Hindsight calls.
-Switches ENABLED by the user: <second-opinion, escalate, ultra | none - no Fable rung but you, no reviews>.
+Switches ENABLED by the user: <second-opinion, escalate, ultra | none - no Fable rung but the integrator, no reviews>.
 Secrets (Google Secret Manager, project <project>): <names, or 'none'>. Values never enter the transcript: workers run commands that need one through with_secrets.py.
-Run to completion. Do not stop to ask the user anything: decide non-critical choices yourself, park critical design decisions in checkpoint PRs, and run outside-repo steps under the intake's outside_policy exactly as your Run-to-completion rules say.
-Implement only this feature and its tests. Stay within the budget: it is the whole protocol. Recall once. Build each Task Card with intake.py card. Verify with verify.py. Queue memory with session_budget.py remember. Finish with pr_checkpoint.py finish. Report back with FEATURE-REPORT.md path, files changed, the exact passing check commands, the PR stack in merge order, assumptions made, outside-repo actions left for the user, anything unverified."
+Run to completion. Do not stop to ask the user anything: decide non-critical choices yourself, park critical design decisions in checkpoint PRs, and run the outside-repo steps the feature needs (the audit hook logs them with review: pending; there is no policy and no approve step).
+Implement only this feature and its tests. Stay within the budget: it is the whole protocol. Recall once and save it. Run confidence.py card before each card and reshard once when it says so; confidence.py action before a risky or never-tier command. Build each Task Card with intake.py card. Dispatch the integrator (Fable) once if two or more different coding agents wrote code. Verify with verify.py. Queue memory with session_budget.py remember. Finish with pr_checkpoint.py finish. Report back with FEATURE-REPORT.md path, files changed, the exact passing check commands, the PR stack with each merge result, what is pending review, assumptions made, anything unverified."
 )
 ```
 
 When the coordinator returns, relay its report as-is, then one line pointing at
-FEATURE-REPORT.md and, if there are checkpoint PRs, one line saying which PR
-needs the user first. Last, run
+FEATURE-REPORT.md and one line listing what is labelled `review: pending`
+(merged PRs, deploys, data steps) for the user to look at afterwards; if a
+merge was refused by GitHub, say which PR and why. Last, run
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ledger.py" report
 ```

@@ -11,25 +11,9 @@ done
 echo "feature-ladder: no working python interpreter found on PATH" >&2
 case "$*" in
   *guard_irreversible.py*)
-    # The guard must fail closed while a ladder run is active: deny rather than
-    # run unguarded. Outside a run, do nothing.
-    # The hook payload's "cwd" is where the command would run; fall back to $PWD.
-    payload=""; while IFS= read -r line || [ -n "$line" ]; do payload="$payload$line"; done
-    d=""
-    if [[ "$payload" =~ \"cwd\":\ *\"([^\"]*)\" ]]; then d="${BASH_REMATCH[1]}"; fi
-    d="${d:-$PWD}"
-    d="${d//\\\\/\\}"   # JSON-escaped backslashes (Windows paths)
-    while [ -n "$d" ] && [ "$d" != "/" ]; do
-      if [ -f "$d/.feature-ladder/run.json" ]; then
-        content=""; while IFS= read -r line || [ -n "$line" ]; do content="$content$line"; done < "$d/.feature-ladder/run.json"
-        if [[ "$content" =~ \"active\":\ *true ]]; then
-          printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"feature-ladder: python is not on PATH, so the outside-repo guard cannot run during this ladder run. Install Python or fix PATH, then retry."}}'
-        fi
-        break
-      fi
-      [ -e "$d/.git" ] && break
-      d="${d%/*}"
-    done
+    # The audit hook is a log, not a gate: without Python the command still
+    # runs, it just is not recorded. Say so once so the report can mention it.
+    echo "feature-ladder: the outside-repo audit log skipped this command (no python on PATH)" >&2
     ;;
 esac
 exit 0

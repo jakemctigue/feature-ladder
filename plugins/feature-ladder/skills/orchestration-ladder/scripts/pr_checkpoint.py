@@ -2,16 +2,18 @@
 """
 feature-ladder branches and PRs: run a feature to completion without
 stopping. Critical design decisions are parked in draft PRs while work
-continues. Commands with effects outside the repo are handled by
-irreversible.py and the guard hook, not by branches.
+continues; the finished stack is merged and labelled "review: pending" so
+the work goes up and the user reviews it afterwards. Commands with effects
+outside the repo are logged by irreversible.py and the audit hook, not
+gated by branches.
 
   start      --slug S [--workspace include|stash] [--intake FILE]
              Create branch feature-ladder/<S> from the current branch.
              Uncommitted changes are committed first as a separate commit
              marked as the user's (include, default) or stashed (stash).
-             Writes .feature-ladder/run.json (with the intake's outside-repo
-             policy, environments, budget and switches), which switches on
-             the guard hook and the spawn rules (session_budget.py).
+             Writes .feature-ladder/run.json (environments, budget and
+             switches), which switches on the audit hook and the spawn
+             rules (session_budget.py).
 
   checkpoint --title T --body-file F
              For a critical decision: commit everything, push, open a DRAFT PR
@@ -19,19 +21,24 @@ irreversible.py and the guard hook, not by branches.
              create the next branch (feature-ladder/<S>-pt<N>) and switch to
              it, so work continues immediately.
 
-  finish     --title T --body-file F [--draft]
+  finish     --title T --body-file F [--draft] [--no-merge]
              Commit the rest, push, open the final PR (base = previous branch,
-             or the original base if there were no checkpoints), mark the run
-             finished and print the PR stack in merge order.
+             or the original base if there were no checkpoints), label every
+             PR in the stack "review: pending", merge the stack in order
+             (checkpoints first; drafts are marked ready), mark the run
+             finished and print the stack with each merge result. --no-merge
+             leaves the PRs open; --draft implies it. A merge GitHub refuses
+             (branch protection, conflicts) is reported, never forced.
 
   status     Print run.json.
 
-  abort      Mark the run inactive (turns the guard off) without opening PRs.
+  abort      Mark the run inactive (turns the hook off) without opening PRs.
              Branches and commits are kept. Use after a run that died midway.
 
-Without a git remote or the gh CLI, everything still happens on
-local branches and each PR body is saved to .feature-ladder/checkpoints/ for
-the user instead. Exit 0 ok, 1 error, 2 not a git repository.
+Without a git remote or the gh CLI, everything still happens on local
+branches: each PR body is saved to .feature-ladder/checkpoints/ and finish
+merges the stack into the base branch locally (--no-ff). Exit 0 ok, 1 error,
+2 not a git repository.
 """
 import json
 import os
@@ -42,6 +49,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 RUN_FILE = Path(".feature-ladder") / "run.json"
+REVIEW_LABEL = "review: pending"
+REVIEW_LABEL_COLOR = "FBCA04"
 
 
 def sh(args, cwd, check=True):
@@ -125,6 +134,17 @@ def pr_ready(root):
     return True, ""
 
 
+def label_pr(root, run, url):
+    """Put the review: pending label on a PR (creating the label once). Never fatal."""
+    if not run.get("pr_enabled") or not url:
+        return
+    sh(["gh", "label", "create", REVIEW_LABEL, "--color", REVIEW_LABEL_COLOR, "--force",
+        "--description", "Merged or deployed by feature-ladder; review afterwards"], root, check=False)
+    code, out = sh(["gh", "pr", "edit", url, "--add-label", REVIEW_LABEL], root, check=False)
+    if code != 0:
+        run.setdefault("warnings", []).append(f"label not added to {url}: {out[-200:]}")
+
+
 def open_pr(root, run, base, head, title, body_file, draft):
     """Push head and open a PR. Returns URL, or None and saves the body locally."""
     if run.get("pr_enabled"):
@@ -138,7 +158,9 @@ def open_pr(root, run, base, head, title, body_file, draft):
                 args.append("--draft")
             _, out = sh(args, root)
             m = re.search(r"https://\S+/pull/\d+", out)
-            return m.group(0) if m else out.splitlines()[-1]
+            url = m.group(0) if m else out.splitlines()[-1]
+            label_pr(root, run, url)
+            return url
         except RuntimeError as e:
             run.setdefault("warnings", []).append(f"PR not opened for {head}: {e}")
     d = root / ".feature-ladder" / "checkpoints"
@@ -149,11 +171,68 @@ def open_pr(root, run, base, head, title, body_file, draft):
     return None
 
 
+def merge_entry(root, run, entry):
+    """Merge one PR of the stack (GitHub) or one branch (local). Records the result on the entry."""
+    head, base = entry["branch"], entry["base"]
+    if run.get("pr_enabled") and entry.get("pr"):
+        url = entry["pr"]
+        sh(["gh", "pr", "ready", url], root, check=False)  # drafts cannot merge
+        code, out = sh(["gh", "pr", "merge", url, "--merge"], root, check=False)
+        if code == 0:
+            entry["merged"] = "merged"
+            return True
+        code2, out2 = sh(["gh", "pr", "merge", url, "--merge", "--auto"], root, check=False)
+        if code2 == 0:
+            entry["merged"] = "queued (auto-merge when checks pass)"
+            return True
+        entry["merged"] = f"not merged: {(out or out2).strip()[-240:]}"
+        run.setdefault("warnings", []).append(f"{url}: {entry['merged']}")
+        return False
+    # Local-only: fast-forward or --no-ff merge into the base branch, then come back.
+    _, current = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], root, check=False)
+    try:
+        sh(["git", "checkout", "-q", base], root)
+        sh(["git"] + ident(root) + ["merge", "-q", "--no-ff", "-m", f"feature-ladder: merge {head} ({REVIEW_LABEL})", head], root)
+        entry["merged"] = "merged locally"
+        return True
+    except RuntimeError as e:
+        sh(["git", "merge", "--abort"], root, check=False)
+        entry["merged"] = f"not merged: {str(e)[-240:]}"
+        run.setdefault("warnings", []).append(f"{head}: {entry['merged']}")
+        return False
+    finally:
+        if current:
+            sh(["git", "checkout", "-q", current], root, check=False)
+
+
+def merge_stack(root, run):
+    """Merge every PR/branch of the stack in order; stop at the first one GitHub refuses."""
+    results = []
+    for entry in run.get("checkpoints", []):
+        if entry.get("merged"):
+            continue
+        ok = merge_entry(root, run, entry)
+        results.append({"branch": entry["branch"], "result": entry["merged"]})
+        if not ok:
+            break
+    return results
+
+
+def pending_note(run):
+    rows = [r for r in run.get("outside_actions", []) if r.get("review") == "pending"]
+    if not rows:
+        return ""
+    lines = ["", f"**{REVIEW_LABEL}** - these ran during the feature; review them afterwards:"]
+    for r in rows:
+        lines.append(f"- [ ] {r.get('label')} ({r.get('environment') or 'repo'}): `{r['cmd'][:160]}`")
+    return "\n".join(lines) + "\n"
+
+
 def stack_note(run):
-    lines = ["", "---", "**feature-ladder PR stack** (merge in this order):"]
+    lines = ["", "---", "**feature-ladder PR stack** (merged in this order):"]
     for i, c in enumerate(run.get("checkpoints", []), 1):
         lines.append(f"{i}. `{c['branch']}` ({c['kind']}): {c['title']}" + (f" {c['pr']}" if c.get("pr") else ""))
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n" + pending_note(run)
 
 
 def with_stack(body_file, run, root):
@@ -202,7 +281,7 @@ def cmd_start(root, a):
             environments = _scan("", str(root)).get("environments", {})
         except Exception:  # noqa: BLE001 - best effort
             environments = {}
-    run = {"outside_policy": intake.get("outside_policy", "none"),
+    run = {"outside_policy": "all",  # informational since v1.11: the hook logs, it does not gate
            "budget": intake.get("budget") or {"size": "S", "workers": 1, "design": False},
            "switches": intake.get("switches") or [],
            "environments": environments,
@@ -249,14 +328,19 @@ def cmd_finish(root, a):
     ahead = sh(["git", "rev-list", "--count", f"{base}..{head}"], root, check=False)[1]
     final = {"n": len(run["checkpoints"]) + 1, "kind": "final", "title": title,
              "branch": head, "base": base, "at": now()}
+    draft = "--draft" in a
     if ahead not in ("", "0"):
         run["checkpoints"].append(final)
         final["pr"] = open_pr(root, run, base, head, f"[feature-ladder] {title}",
-                              with_stack(body, run, root), draft="--draft" in a)
+                              with_stack(body, run, root), draft=draft)
+    merged = []
+    if "--no-merge" not in a and not draft:
+        merged = merge_stack(root, run)
     run["active"], run["finished"] = False, now()
     save(root, run)
     return {"stack": run["checkpoints"], "base": run["base"], "pr_enabled": run["pr_enabled"],
             "pr_disabled_reason": run.get("pr_disabled_reason"),
+            "merged": merged, "review": REVIEW_LABEL if merged else None,
             "stash": run.get("stash"), "warnings": run.get("warnings", [])}
 
 

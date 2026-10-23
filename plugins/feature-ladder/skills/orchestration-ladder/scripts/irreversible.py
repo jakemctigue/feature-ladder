@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
 """
-feature-ladder: deterministic gate for commands with effects outside the repo.
+feature-ladder: deterministic classifier for commands with effects outside
+the repo. It is an audit log, not a gate.
 
 Classification costs no model tokens. The guard hook calls it on every Bash
-command during a ladder run:
+command during a ladder run and records what ran:
 
-  mundane    runs immediately and is logged (emulator / non-production
-             targets, deploys, index builds, exports, previews, dry runs, and
-             anything else that doesn't destroy existing production data)
-  risky      production data overwritten or deleted, or production resources
-             deleted. Left for the user, unless the run has the
-             --second-opinion switch; then it needs one short Fable verdict:
-               irreversible.py approve --cmd "<exact command>" --verdict-file F
-             F must contain "VERDICT: APPROVE" (from second-opinion, fable/low).
-             Then the exact command runs and is logged.
-  never      a short list that is never run autonomously (deleting a
-             project, database or repo, weakening database protection,
-             force-pushing or deleting the base branch, pushing to the base
-             branch, merging PRs, deleting backups). Logged as left for the user.
+  mundane    non-production targets, deploys, index builds, exports,
+             previews, dry runs: runs at once, logged
+  risky      production data overwritten or deleted, or production
+             resources deleted: runs at once, logged with review: pending
+  never      the former never-list (merging PRs, pushing or force-pushing
+             the base branch, deleting a project, database, repo or backups,
+             weakening database protection, rm -rf of / or $HOME). No
+             longer a gate: runs at once, logged with review: pending so
+             the report and the PR name it first.
+  secret     the ONE denial left: a command whose output would put a secret
+             VALUE into the transcript (gcloud secrets versions access,
+             cat .env, printenv, echo $X_KEY). Workers run such commands
+             through with_secrets.py instead.
 
-The run's policy (set once at intake) can narrow this: "nonprod" turns every
-production action into "left for the user"; "none" does that for everything
-outside the repo.
+"review: pending" is a status in FEATURE-REPORT.md and a label on the PR,
+never a stop: the action has already gone up and the user reviews it
+afterwards. Nothing waits for a verdict, there is no approve step, and the
+intake asks for no outside-repo policy. Whether a step is a good idea is
+answered by the confidence surface (confidence.py) from the project's own
+memory, and that is advice about size and previews, not a block.
 
 Only the executable part of a command is classified: quoted strings, heredocs
 and comments are stripped first, so `git commit -m "drop table"` or
@@ -32,8 +36,8 @@ with_secrets.py. Calls to our own scripts are skipped one segment at a time,
 so `route.py ...; <command>` still classifies the command.
 
   classify "<command>"            print the decision as JSON (no side effects)
-  approve --cmd C --verdict-file F
   report                          markdown table of outside-repo actions
+  pending                         the review: pending rows as a markdown list
 """
 import json
 import re
@@ -41,7 +45,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pr_checkpoint import load, now, root_dir, save  # noqa: E402
+from pr_checkpoint import load, now, root_dir  # noqa: E402
 
 I = re.IGNORECASE
 BR = r"(?:\s|:|\+)"  # what precedes a branch name in a refspec
@@ -170,7 +174,8 @@ def _environment(cmd, env):
 SHELL_C = re.compile(r"\b(?:ba|z|da|k)?sh\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*c[a-zA-Z]*\s+(?:'([^']*)'|\"((?:\\.|[^\"\\])*)\")")
 EVAL = re.compile(r"\beval\s+(?:'([^']*)'|\"((?:\\.|[^\"\\])*)\")")
 SUBST = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
-RANK = {"deny": 3, "needs_verdict": 2, "allow": 1}
+RANK = {"deny": 2, "allow": 1}
+TIER_RANK = {"secret": 4, "never": 3, "risky": 2, "mundane": 1, "none": 0}
 
 
 def _segments(cmd):
@@ -232,10 +237,12 @@ def _inner_commands(raw):
 
 
 def _worse(a, b):
+    """The more consequential of two classifications: a denial first, then
+    the higher tier, so a merge wrapped in `bash -c` is still logged as one."""
     ra, rb = RANK[a["decision"]], RANK[b["decision"]]
     if ra != rb:
         return a if ra > rb else b
-    return b if a["tier"] == "none" and b["tier"] != "none" else a
+    return a if TIER_RANK.get(a.get("tier"), 0) >= TIER_RANK.get(b.get("tier"), 0) else b
 
 
 def classify(cmd, run, _depth=0):
@@ -259,7 +266,6 @@ def classify(cmd, run, _depth=0):
 
 def _classify_text(text, run):
     env = run.get("environments") or {}
-    policy = run.get("outside_policy") or "all"
     for pat, label in SECRET_EXPOSURE:
         if re.search(pat, text, I | re.M):
             return {"tier": "secret", "label": label, "decision": "deny",
@@ -272,8 +278,9 @@ def _classify_text(text, run):
     never.append((r"\bgit\s+push\b(?![^;&|]*" + BR + r"feature-ladder/)[^;&|]*" + BR + r"(main|master)(\s|$)", "push to main/master"))
     for pat, label in never:
         if re.search(pat, text, I):
-            return {"tier": "never", "label": label, "decision": "deny",
-                    "reason": f"'{label}' is never run autonomously; left for the user"}
+            # Not a gate: it runs, and the report lists it first with review: pending.
+            return {"tier": "never", "label": label, "decision": "allow", "review": "pending",
+                    "reason": f"'{label}' runs and is logged for review"}
     hit = next(((label, destroys) for pat, label, destroys in OUTSIDE if re.search(pat, text, I)), None)
     if not hit:
         return {"tier": "none", "decision": "allow"}
@@ -281,57 +288,42 @@ def _classify_text(text, run):
     where = _environment(text, env)
     safe = any(re.search(p, text, I) for p in SAFE_HINTS)
     risky = where == "prod" and destroys and not safe
-    out = {"label": label, "environment": where, "tier": "risky" if risky else "mundane"}
-    if policy == "none" or (policy == "nonprod" and where == "prod" and not safe):
-        out.update(decision="deny", reason=f"intake policy '{policy}' leaves this for the user")
-    elif risky:
-        out.update(decision="needs_verdict",
-                   reason="overwrites or deletes production data: get one Fable verdict, then approve")
-    else:
-        out.update(decision="allow")
-    return out
+    return {"label": label, "environment": where, "tier": "risky" if risky else "mundane",
+            "decision": "allow", "review": "pending" if risky else "n/a"}
 
 
 def norm(cmd):
     return " ".join(cmd.split())
 
 
+def review_status(c):
+    return c.get("review") or ("pending" if c.get("tier") in ("risky", "never") else "n/a")
+
+
 def record(run, cmd, c, status):
     run.setdefault("outside_actions", []).append(
         {"at": now(), "cmd": norm(cmd)[:300], "label": c.get("label"), "environment": c.get("environment"),
-         "tier": c.get("tier"), "status": status})
+         "tier": c.get("tier"), "status": status, "review": review_status(c)})
+
+
+def pending_lines(run):
+    """The review: pending rows as markdown bullets (for the report and the PR body)."""
+    rows = [r for r in run.get("outside_actions", []) if r.get("review") == "pending"]
+    return [f"- [ ] {r.get('label')} ({r.get('environment') or 'repo'}): `{r['cmd'][:160]}`" for r in rows]
 
 
 def gate(cmd, run):
-    """Used by the guard hook. Returns (allowed, reason, run_changed)."""
+    """Used by the guard hook. Returns (allowed, reason, run_changed). Only a
+    command that would expose a secret value is denied; everything else runs
+    and, when it has effects outside the repo, is logged."""
     c = classify(cmd, run)
     if c["decision"] == "allow":
         if c["tier"] == "none":
             return True, "", False
-        record(run, cmd, c, "ran (mundane)")
+        record(run, cmd, c, "ran" + (" (review: pending)" if review_status(c) == "pending" else ""))
         return True, "", True
-    if c["decision"] == "needs_verdict":
-        if "second_opinion" not in (run.get("switches") or []):
-            # No Fable call unless the user asked for one (--second-opinion).
-            record(run, cmd, c, "left for user: production overwrite/delete (no --second-opinion)")
-            return False, (f"feature-ladder: '{c['label']}' on production overwrites or deletes data. It is left "
-                           "for the user: put the exact command under 'Left for you' in FEATURE-REPORT.md and "
-                           "carry on. Do not ask for a second opinion."), True
-        for a in run.get("approved", []):
-            if a["cmd"] == norm(cmd) and not a.get("used"):
-                a["used"] = now()
-                record(run, cmd, c, "ran (Fable approved)")
-                return True, "", True
-        return False, (f"feature-ladder: '{c['label']}' on production overwrites or deletes data. Ask "
-                       "second-opinion (fable/low) one question: is this exact command correct and safe to run "
-                       "now? It must answer with a line 'VERDICT: APPROVE' or 'VERDICT: REJECT'. Save the "
-                       "answer to a file, run irreversible.py approve --cmd \"<exact command>\" --verdict-file "
-                       "<file>, then run the exact same command. Do not write undo scripts."), False
-    if c["tier"] == "secret":
-        record(run, cmd, c, "blocked: would expose a secret")
-        return False, "feature-ladder: " + c["reason"] + ".", True
-    record(run, cmd, c, "left for user: " + c["reason"])
-    return False, "feature-ladder: " + c["reason"] + ". Note it in FEATURE-REPORT.md and carry on.", True
+    record(run, cmd, c, "blocked: would expose a secret")
+    return False, "feature-ladder: " + c["reason"] + ".", True
 
 
 def main(argv):
@@ -346,30 +338,19 @@ def main(argv):
     if argv[0] == "classify":
         print(json.dumps(classify(" ".join(argv[1:]), run), indent=2))
         return 0
-    if argv[0] == "approve":
-        a = dict(zip(argv[1::2], argv[2::2]))
-        cmd, vf = a.get("--cmd"), a.get("--verdict-file")
-        if not (cmd and vf and Path(vf).is_file() and root):
-            print("approve needs --cmd, --verdict-file and an active run", file=sys.stderr)
-            return 1
-        text = Path(vf).read_text(encoding="utf-8-sig", errors="replace")
-        if not re.search(r"^\s*VERDICT:\s*APPROVE\b", text, re.M | I):
-            record(run, cmd, classify(cmd, run), "rejected by Fable")
-            save(root, run)
-            print(json.dumps({"approved": False, "reason": "verdict is not APPROVE; skip it and note it in the report"}))
-            return 0
-        run.setdefault("approved", []).append({"cmd": norm(cmd), "at": now()})
-        save(root, run)
-        print(json.dumps({"approved": True, "cmd": norm(cmd)}))
-        return 0
     if argv[0] == "report":
         rows = run.get("outside_actions", [])
         if not rows:
             print("No commands with effects outside the repo were run.")
             return 0
-        print("| When | Action | Where | Status | Command |\n|---|---|---|---|---|")
+        print("| When | Action | Where | Status | Review | Command |\n|---|---|---|---|---|---|")
         for r in rows:
-            print(f"| {r['at'][11:16]} | {r.get('label')} | {r.get('environment')} | {r['status']} | `{r['cmd'][:120]}` |")
+            print(f"| {r['at'][11:16]} | {r.get('label')} | {r.get('environment')} | {r['status']} | "
+                  f"{r.get('review', 'n/a')} | `{r['cmd'][:120]}` |")
+        return 0
+    if argv[0] == "pending":
+        lines = pending_lines(run)
+        print("\n".join(lines) if lines else "Nothing is pending review.")
         return 0
     print(__doc__)
     return 1

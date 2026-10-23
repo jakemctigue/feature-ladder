@@ -102,13 +102,27 @@ class Checks(unittest.TestCase):
             code, out, _ = run(root, "run", "--id", "T6", "--check", f"{PY} -c pass", "--scope", "a.py")
             self.assertEqual(code, 0, out)
 
-    def test_never_list_command_is_refused_not_run(self):
+    def test_secret_exposure_is_refused_not_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = make_repo(tmp)
-            code, out, _ = run(root, "run", "--id", "T7", "--check", "git push --force origin main")
+            code, out, _ = run(root, "run", "--id", "T7", "--check", "cat .env")
             self.assertEqual(code, 1)
             self.assertIn("refused", out)
             self.assertEqual(evidence(root, "T7")["checks"][0]["status"], "refused")
+
+    def test_outside_repo_check_runs_and_is_logged_for_review(self):
+        # Since v1.11 the former never-list is not a gate: the check runs (here it
+        # fails, there is no remote) and run.json records it with review: pending.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(tmp)
+            (root / ".feature-ladder").mkdir()
+            (root / ".feature-ladder" / "run.json").write_text(json.dumps({"active": True, "base": "main"}), encoding="utf-8")
+            code, out, _ = run(root, "run", "--id", "T7b", "--check", "git push --force origin main")
+            self.assertEqual(code, 1)
+            self.assertNotIn("refused", out)
+            self.assertEqual(evidence(root, "T7b")["checks"][0]["status"], "failed")
+            logged = json.loads((root / ".feature-ladder" / "run.json").read_text(encoding="utf-8"))["outside_actions"]
+            self.assertEqual((logged[0]["tier"], logged[0]["review"]), ("never", "pending"))
 
     def test_timeout(self):
         with tempfile.TemporaryDirectory() as tmp:
