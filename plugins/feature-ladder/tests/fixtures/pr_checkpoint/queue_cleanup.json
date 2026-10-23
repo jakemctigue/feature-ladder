@@ -1,0 +1,152 @@
+{
+  "_doc": "Queue-cleanup decision corpus: PR queue states a coordinator may find in the GitHub queue after a feature-ladder run (stale checkpoint PRs, PRs with unresolved review threads, closed PRs worth reopening, abandoned stacks worth salvaging). Each case carries the observed state fields and the expected cleanup decision from the fixed enum close | keep-open | reopen | salvage | needs-human. Cases whose state has a real analog in pr_checkpoint.py (merge_entry / merge_stack) carry an 'analog' block: the analog describes a mock gh/git scenario over the existing FakeGit pattern and the results the real code must produce (merge result text, retarget call, queue-then-stop behaviour). Cases without an analog get only the schema check - the decision is coordinator policy, not code in pr_checkpoint.py. Files in tests/fixtures/** are pinned to LF; readers normalise CRLF.",
+  "decision_enum": ["close", "keep-open", "reopen", "salvage", "needs-human"],
+  "cases": [
+    {
+      "id": "stale-draft-no-activity",
+      "category": "stale",
+      "state": {
+        "pr": 11, "state": "open", "head": "feature-ladder/x-pt1", "base": "feature-ladder/x",
+        "labels": ["review: pending"], "age_days": 30, "unresolved_threads": 0,
+        "checkpoint": true, "stack_entries": 2
+      },
+      "decision": "close",
+      "analog": {
+        "mode": "gh-refused",
+        "entry": {"branch": "feature-ladder/x-pt1", "base": "feature-ladder/x", "pr": "https://github.com/o/r/pull/11"},
+        "run_base": "main",
+        "expect": {"merged_prefix": "not merged:", "warnings": 1, "stack_stops": true, "retarget_call": true}
+      }
+    },
+    {
+      "id": "stale-superseded-checkpoint",
+      "category": "stale",
+      "state": {
+        "pr": 12, "state": "merged", "head": "feature-ladder/y-pt1", "base": "feature-ladder/y",
+        "labels": ["review: pending"], "age_days": 45, "unresolved_threads": 0,
+        "checkpoint": true, "stack_entries": 3
+      },
+      "decision": "close",
+      "analog": {
+        "mode": "skip-merged",
+        "entries": [
+          {"branch": "feature-ladder/y-pt1", "base": "feature-ladder/y", "pr": "https://github.com/o/r/pull/12", "merged": "merged"},
+          {"branch": "feature-ladder/y", "base": "feature-ladder/y-pt1", "pr": "https://github.com/o/r/pull/13"}
+        ],
+        "run_base": "main",
+        "expect": {"attempted_branches": ["feature-ladder/y"], "merge_calls": 1}
+      }
+    },
+    {
+      "id": "review-thread-blocks-merge",
+      "category": "review-thread",
+      "state": {
+        "pr": 14, "state": "open", "head": "feature-ladder/z", "base": "main",
+        "labels": ["review: pending"], "age_days": 6, "unresolved_threads": 3,
+        "checkpoint": false, "stack_entries": 1
+      },
+      "decision": "needs-human",
+      "analog": {
+        "mode": "gh-refused",
+        "entry": {"branch": "feature-ladder/z", "base": "main", "pr": "https://github.com/o/r/pull/14"},
+        "run_base": "main",
+        "expect": {"merged_prefix": "not merged:", "warnings": 1, "stack_stops": true, "retarget_call": false}
+      }
+    },
+    {
+      "id": "review-thread-auto-queued",
+      "category": "review-thread",
+      "state": {
+        "pr": 15, "state": "open", "head": "feature-ladder/a-pt1", "base": "feature-ladder/a",
+        "labels": ["review: pending"], "age_days": 2, "unresolved_threads": 1,
+        "checkpoint": true, "stack_entries": 2
+      },
+      "decision": "keep-open",
+      "analog": {
+        "mode": "gh-queued",
+        "entries": [
+          {"branch": "feature-ladder/a-pt1", "base": "feature-ladder/a", "pr": "https://github.com/o/r/pull/15"},
+          {"branch": "feature-ladder/a", "base": "feature-ladder/a-pt1", "pr": "https://github.com/o/r/pull/16"}
+        ],
+        "run_base": "main",
+        "expect": {
+          "results": ["queued (auto-merge when checks pass)", "merged"],
+          "retarget_urls": ["https://github.com/o/r/pull/16"],
+          "warnings_substring": "queued (auto-merge when checks pass)"
+        }
+      }
+    },
+    {
+      "id": "closed-checkpoint-worth-reopening",
+      "category": "reopen",
+      "state": {
+        "pr": 17, "state": "closed", "head": "feature-ladder/b-pt1", "base": "feature-ladder/b",
+        "labels": ["review: pending"], "age_days": 9, "unresolved_threads": 0,
+        "checkpoint": true, "stack_entries": 2
+      },
+      "decision": "reopen",
+      "analog": {
+        "mode": "gh-refused",
+        "entry": {"branch": "feature-ladder/b-pt1", "base": "feature-ladder/b", "pr": "https://github.com/o/r/pull/17"},
+        "run_base": "main",
+        "expect": {"merged_prefix": "not merged:", "warnings": 1, "stack_stops": true, "retarget_call": true}
+      }
+    },
+    {
+      "id": "closed-final-pr-rebases-onto-original-base",
+      "category": "reopen",
+      "state": {
+        "pr": 18, "state": "closed", "head": "feature-ladder/c", "base": "feature-ladder/c-pt1",
+        "labels": [], "age_days": 4, "unresolved_threads": 0,
+        "checkpoint": false, "stack_entries": 2
+      },
+      "decision": "reopen",
+      "analog": {
+        "mode": "gh-merges-retarget",
+        "entry": {"branch": "feature-ladder/c", "base": "feature-ladder/c-pt1", "pr": "https://github.com/o/r/pull/18"},
+        "run_base": "main",
+        "expect": {"merged": "merged", "retarget_call": true, "retarget_args": ["gh", "pr", "edit", "https://github.com/o/r/pull/18", "--base", "main"]}
+      }
+    },
+    {
+      "id": "abandoned-stack-salvage-local",
+      "category": "salvage",
+      "state": {
+        "pr": 19, "state": "open", "head": "feature-ladder/d", "base": "main",
+        "labels": [], "age_days": 21, "unresolved_threads": 0,
+        "checkpoint": false, "stack_entries": 1
+      },
+      "decision": "salvage",
+      "analog": {
+        "mode": "local-merge",
+        "entry": {"branch": "feature-ladder/d", "base": "main"},
+        "run_base": "main",
+        "expect": {"merged": "merged locally", "no_pr_calls": true}
+      }
+    },
+    {
+      "id": "abandoned-stack-salvage-partial",
+      "category": "salvage",
+      "state": {
+        "pr": 20, "state": "open", "head": "feature-ladder/e", "base": "feature-ladder/e-pt1",
+        "labels": [], "age_days": 28, "unresolved_threads": 0,
+        "checkpoint": false, "stack_entries": 2
+      },
+      "decision": "salvage",
+      "analog": {
+        "mode": "local-merge-partial",
+        "entries": [
+          {"branch": "feature-ladder/e-pt1", "base": "main"},
+          {"branch": "feature-ladder/e", "base": "feature-ladder/e-pt1"}
+        ],
+        "run_base": "main",
+        "expect": {
+          "results": ["merged locally", "not merged:"],
+          "results_prefix": true,
+          "stack_stops": true,
+          "warnings": 1
+        }
+      }
+    }
+  ]
+}
