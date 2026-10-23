@@ -42,11 +42,11 @@ schedules them (section 5).
 
 ## 1. Fetch the scripts (once per conversation)
 
-If `.feature-ladder/v1.14.0/` does not exist in the working directory, run:
+If `.feature-ladder/v1.15.0/` does not exist in the working directory, run:
 
 ```bash
-FL=.feature-ladder/v1.14.0
-B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.14.0/plugins/feature-ladder/skills
+FL=.feature-ladder/v1.15.0
+B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.15.0/plugins/feature-ladder/skills
 for f in complexity-router/scripts/route.py complexity-router/scripts/intake.py orchestration-ladder/scripts/pr_checkpoint.py orchestration-ladder/scripts/irreversible.py orchestration-ladder/scripts/with_secrets.py orchestration-ladder/scripts/verify.py orchestration-ladder/scripts/confidence.py orchestration-ladder/scripts/external_worker.py orchestration-ladder/scripts/session_budget.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py hindsight-memory/scripts/memory_gate.py; do
   mkdir -p "$FL/$(dirname "$f")" && curl -fsSL "$B/$f" -o "$FL/$f" || break
 done
@@ -54,11 +54,11 @@ python3 "$FL/complexity-router/scripts/route.py" --table >/dev/null && echo FETC
 ```
 
 Then, once per conversation (a conversation is one coding session), run
-`python3 .feature-ladder/v1.14.0/orchestration-ladder/scripts/session_budget.py new`
+`python3 .feature-ladder/v1.15.0/orchestration-ladder/scripts/session_budget.py new`
 so the session's subagent budget is asked again.
 
 If that does not print `FETCH_OK`, try
-`git clone --depth 1 --branch v1.14.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
+`git clone --depth 1 --branch v1.15.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
 and use `.feature-ladder/repo/plugins/feature-ladder/skills` as the base path.
 If both fail, tell the user the scripts could not be downloaded and stop; do not
 route by judgment. Never edit the downloaded files.
@@ -69,14 +69,14 @@ Before delegating anything, settle the facts for the whole job and ask the user
 only what is uncertain and matters. After that, do not stop to ask again.
 
 1. If the work is in a folder or repo here, run
-   `python3 .feature-ladder/v1.14.0/complexity-router/scripts/intake.py scan "<request>" --cwd <folder> > .feature-ladder/proposal.json`.
+   `python3 .feature-ladder/v1.15.0/complexity-router/scripts/intake.py scan "<request>" --cwd <folder> > .feature-ladder/proposal.json`.
    Otherwise start from `{"request": "...", "slug": "...", "fields": {}, "open_decisions": []}`.
 2. Read the actual files or material. For every field write
    `{"value": ..., "confidence": "high|medium|low", "evidence": [...]}` into
    `fields`, and list up to 4 `open_decisions` (choices a worker would
    otherwise guess; each with `id`, `header`, `question`, 2-4 `options`,
    recommended first).
-3. `python3 .feature-ladder/v1.14.0/complexity-router/scripts/intake.py decide .feature-ladder/proposal.json`
+3. `python3 .feature-ladder/v1.15.0/complexity-router/scripts/intake.py decide .feature-ladder/proposal.json`
    lists the questions: on the first feature of the conversation, how many
    subagents the whole session may spawn (`session_agents`: Small 1-2,
    Medium 3-4, Large up to 8), then fields that are uncertain **and** change
@@ -94,7 +94,7 @@ no design, no review. 3 of 4 session subagents left. Running now."
 
 **The session budget is a hard stop.** This app has no hooks, so before
 starting ANY subagent run
-`python3 .feature-ladder/v1.14.0/orchestration-ladder/scripts/session_budget.py charge --agent <role> --model <model>`.
+`python3 .feature-ladder/v1.15.0/orchestration-ladder/scripts/session_budget.py charge --agent <role> --model <model>`.
 Exit 4 means the budget is spent (or the spawn is one a feature never makes):
 do not start it; finish with what you have and say what is left. You, the
 conversation, are the coordinator and are not counted.
@@ -118,7 +118,7 @@ budget is where the cost is controlled. For S the whole job is: one
 Build each card and pick its skills in one call:
 
 ```bash
-python3 .feature-ladder/v1.14.0/complexity-router/scripts/intake.py card '{"id":"T1", <router fields from the intake>, "paths":["<files in scope>"], "text":"<goal + description>"}'
+python3 .feature-ladder/v1.15.0/complexity-router/scripts/intake.py card '{"id":"T1", <router fields from the intake>, "paths":["<files in scope>"], "text":"<goal + description>"}'
 ```
 
 It prints the route (`agent`, `model`, `effort`, `size`) and a short
@@ -133,14 +133,14 @@ design step and nothing else; they never change the size. Opus
 rungs require `design_agreed: true`.
 
 Verify with no model: after the worker returns, run
-`python3 .feature-ladder/v1.14.0/orchestration-ladder/scripts/verify.py run --id T1 --check "<cmd>" --scope <files> --changed <files the worker listed>`.
+`python3 .feature-ladder/v1.15.0/orchestration-ladder/scripts/verify.py run --id T1 --check "<cmd>" --scope <files> --changed <files the worker listed>`.
 Exit 0 accepts; exit 1 re-dispatches once with the failure (a second failure
 goes one band up once, then report `partial`); exit 2 means the worker
 touched files outside scope, so bounce the packet to it.
 
 **Confidence before each card.** Save the feature's recall verbatim to
 `.feature-ladder/recall.json` and run
-`python3 .feature-ladder/v1.14.0/orchestration-ladder/scripts/confidence.py card --action "<card title>" --paths <scope files> --size <S|M|L> --memories .feature-ladder/recall.json`.
+`python3 .feature-ladder/v1.15.0/orchestration-ladder/scripts/confidence.py card --action "<card title>" --paths <scope files> --size <S|M|L> --memories .feature-ladder/recall.json`.
 It scores every memory's sentiment and relevance into one number: exit 0
 `proceed`; exit 5 `reshard` - split the card into the shards it names by
 independent file sets and run it once more per shard (once per feature,
@@ -151,7 +151,7 @@ advice about size, never a stop.
 deploys, publishing, messages or payments sent to outside services). It adds
 risk points and never stops the run: run what the feature needs, when it
 needs it. Classify each such command first,
-`python3 .feature-ladder/v1.14.0/orchestration-ladder/scripts/irreversible.py classify "<command>"`,
+`python3 .feature-ladder/v1.15.0/orchestration-ladder/scripts/irreversible.py classify "<command>"`,
 and record its tier in the report: `mundane` runs and is listed; `risky`
 (overwrites or deletes production data) and `never` (the former never-list:
 merging, force-pushing, deleting a project, database or backups) run and are
@@ -180,7 +180,7 @@ failure uses the normal re-dispatch/escalation path.
 
 **Secrets.** The intake's `secrets.names` lists the Google Secret Manager
 secrets the feature reads (names only). A command that needs one is run as
-`python3 .feature-ladder/v1.14.0/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`,
+`python3 .feature-ladder/v1.15.0/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`,
 which fetches the value with the user's gcloud sign-in and masks it in the
 output. Never print, echo, log, commit or quote a secret value.
 
@@ -202,7 +202,7 @@ subagent instead. Exit 4: the session budget is spent. Otherwise
 `intake.py card` already did this. To see the choice by itself:
 
 ```bash
-python3 .feature-ladder/v1.14.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
+python3 .feature-ladder/v1.15.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
 ```
 
 It chooses at most three skills (within a per-role size budget) by rules, writes their
@@ -239,7 +239,7 @@ has `.feature-ladder/skill-rules.json`, those rules are merged in automatically.
   Sonnet medium to Sonnet high); after that report the feature `partial`.
 
 Acceptance: the "done when" checks are re-run without a model:
-`python3 .feature-ladder/v1.14.0/orchestration-ladder/scripts/verify.py run --id <task> --check "<cmd>" ... --scope <paths> ... --changed <files the worker claims>`
+`python3 .feature-ladder/v1.15.0/orchestration-ladder/scripts/verify.py run --id <task> --check "<cmd>" ... --scope <paths> ... --changed <files the worker claims>`
 runs them exactly as written, saves the evidence under
 `.feature-ladder/evidence/`, and flags files changed outside scope or a wrong
 claim (exit 0 green, 1 a check failed, 2 scope or claim mismatch). No
@@ -287,7 +287,7 @@ When the user says the session is done, or asks for a review:
   confirmed bug becomes its own feature request. A Fable second opinion only
   if the user asks for one.
 - **Memory**, once: see below.
-- `python3 .feature-ladder/v1.14.0/orchestration-ladder/scripts/session_budget.py close`.
+- `python3 .feature-ladder/v1.15.0/orchestration-ladder/scripts/session_budget.py close`.
 
 ## Memory (Hindsight), when connected
 
@@ -299,14 +299,14 @@ has Hindsight tools from a connector pointed at the multi-bank endpoint
 (`.../mcp/`, so `list_banks` and `create_bank` exist):
 
 1. In the project's directory run
-   `python3 .feature-ladder/v1.14.0/hindsight-memory/scripts/resolve_bank.py --candidates`.
+   `python3 .feature-ladder/v1.15.0/hindsight-memory/scripts/resolve_bank.py --candidates`.
    It prints the project name, the git owner/repo, and the candidate bank ids
    in priority order. If it reports `"is_git": false`, use the connector's
    default bank and skip to step 5.
 2. Call `list_banks` with `query` set to the project name (and again with the
    repo name if it differs). Save the combined results to
    `.feature-ladder/banks.json` as `{"banks": [...]}`.
-3. Run `python3 .feature-ladder/v1.14.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
+3. Run `python3 .feature-ladder/v1.15.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
    It returns `bank_id` and `action` (`pinned`, `existing` or `create`).
 4. If `action` is `create`, call `create_bank` with that `bank_id`, a `name`
    of `owner/repo` (or the project name), and a `mission` describing the
@@ -320,11 +320,11 @@ bear on the card. Never `reflect`, knowledge pages or bank edits.
 
 Writes: none during a feature. After each feature, queue the worker's
 memory candidates that a future task could act on:
-`python3 .feature-ladder/v1.14.0/orchestration-ladder/scripts/session_budget.py remember --line "[kind] fact" ...`
+`python3 .feature-ladder/v1.15.0/orchestration-ladder/scripts/session_budget.py remember --line "[kind] fact" ...`
 (kind: decision, convention, pitfall, interface, test-strategy; name the
 path, identifier or command). The gate refuses summaries, narration, vague
 or duplicate lines; drop those, do not rewrite them. At the end of the
-session run `python3 .feature-ladder/v1.14.0/hindsight-memory/scripts/memory_gate.py flush --emit`
+session run `python3 .feature-ladder/v1.15.0/hindsight-memory/scripts/memory_gate.py flush --emit`
 and make one `retain` per `would_write` line exactly as printed (`context:
 feature-ladder`, tags `project:<name>`, `feature:session`, the kind). No
 scribe subagent, no summaries.

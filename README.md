@@ -143,7 +143,7 @@ the start of a conversation it downloads `route.py`, `intake.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
 `skill-rules.json`, `resolve_bank.py` and `memory_gate.py` from this repo,
-pinned to a release tag (currently `v1.14.0`), so the app and Claude Code
+pinned to a release tag (currently `v1.15.0`), so the app and Claude Code
 always run identical logic. The app session needs code execution and network
 access to GitHub.
 
@@ -636,6 +636,7 @@ Everything that can be checked without a model is checked in and pinned:
 | PR queue-cleanup corpus (8 cases: stale checkpoint PRs, unresolved review threads, reopen, salvage; decisions `close`, `keep-open`, `reopen`, `salvage`, `needs-human`) | `tests/fixtures/pr_checkpoint/queue_cleanup.json`, `tests/test_pr_checkpoint_queue_cleanup.py` | The merge, retarget, queued and refused paths drifting from the reference decisions |
 | Codex triage corpus (12 cases) | `tests/fixtures/codex_triage/` | Findings dropped or kept wrongly |
 | MCP recall envelopes | `tests/fixtures/mcp_recall_envelopes.json` | The recall parser regressing to one note |
+| Recorded Jev scorer responses (8 bodies: valid, partial, bad index, wrong shape, out of range, malformed) | `tests/fixtures/jev/`, `tests/test_confidence.py` | The `--scorer jev` contract or its per-fact lexicon fallback regressing; no test calls the network |
 | CycloneDX 1.5 SBOM and SARIF 2.1.0 scan | `evidence/` | Any script or version drift: CI runs `generate_evidence.py --check` |
 | Synthetic CI failure logs and a classifier | `tests/fixtures/ci_logs/`, `scripts/evidence/ci_log_classifier.py`, [docs/ci-troubleshooting.md](docs/ci-troubleshooting.md) | A workflow failure nobody can read |
 | Harness compatibility matrix and manifest test | [docs/harness-compat.md](docs/harness-compat.md), `tests/test_harness_manifest.py` | A broken `plugin.json`, `.mcp.json` or hook path |
@@ -737,7 +738,8 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.14.0** | PR queue-cleanup reference corpus: 8 stale-PR, review-thread, reopen and salvage cases with a fixed decision vocabulary, 6 of them asserted against `pr_checkpoint.py`'s merge path |
+| **v1.15.0** | `--researcher` switch and `/feature-ladder:research`: a brief of what a feature wants from the codebase, qualitative per-agent cost labels (never a number) and what to expect; the Fable integrator has coding tools and returns an Evidence Packet; the Jev confidence scorer gets an indexed contract, lexicon-scale anchors, per-fact fallback and an injectable transport with recorded fixtures |
+| v1.14.0 | PR queue-cleanup reference corpus: 8 stale-PR, review-thread, reopen and salvage cases with a fixed decision vocabulary, 6 of them asserted against `pr_checkpoint.py`'s merge path |
 | v1.13.0 | `finish` merges every stack entry into the original base and retargets stacked PRs; the integrator's diff includes uncommitted, untracked and earlier-checkpoint work; `confidence.py` decodes MCP recall envelopes so each memory keeps its tag; README rewritten around requirements and evidence |
 | v1.12.0 | OpenRouter cards carry `Memory:`, `Bounds:` and the output contract; deterministic evidence corpora, SBOM/SARIF with a CI check, CI failure logs, harness matrix; OpenRouter documented as a requirement |
 | v1.11.0 | Ungated runs, the confidence surface, Fable only as integrator |
