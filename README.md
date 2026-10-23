@@ -29,8 +29,9 @@ Both use the same scripts and rules.
   run goes to completion without stopping.
 - **Pushes the work down.** Sonnet medium is the default implementation rung,
   and mechanical and small coding cards run on **GLM 5.3 Flash** through
-  OpenRouter (billed to OpenRouter credits, not your Claude plan) whenever a
-  key is present.
+  OpenRouter (billed to OpenRouter credits, not your Claude plan). An
+  OpenRouter key is part of the setup: without one every card falls back to
+  your Claude plan and the ladder loses most of its savings.
 - **Never waits for you.** Deploys, index builds, data steps and the merge
   happen when the feature needs them. An audit hook logs each one, labels it
   `review: pending` when it touched production or was on the former
@@ -259,6 +260,27 @@ Manager or `OPENROUTER_API_KEY`, the model pinned through
 hook; billed to OpenRouter credits at GLM prices (about $0.15/M in, $0.50/M
 out). It is on by default whenever the Claude CLI and a key are present;
 without them the card runs on the routed Claude rung and says why.
+
+**Why OpenRouter is required.** The ladder's cost model assumes the bottom
+two rungs are cheap: every mechanic card and every small implementer card
+is meant to cost cents, not Claude plan tokens. Only OpenRouter gives a
+Claude Code child process a GLM (or `jev-router`) endpoint with the
+Anthropic-compatible API that `claude -p` speaks, so it is the one external
+account the plugin needs. Treat `OPENROUTER_API_KEY` as a requirement rather
+than an option: set it in the environment or in Google Secret Manager before
+the first run, keep a few dollars of credit on it, and confirm with
+`/feature-ladder:workers check --probe`. The fallback to Claude exists so a
+run never fails for lack of a key, not so you can skip it.
+
+**What the runner hands the cheap model.** `external_worker.py run`
+prepares the card before the child gets it, because a small model follows
+what is on the card and little else. It fills a `Memory:` line from the
+feature's saved recall (the same facts `confidence.py` scored, scope-first,
+at most five), adds a `Bounds:` line (max turns, timeout, edit only the
+`Scope:`, how much session budget is left) and puts the Evidence Packet
+template on the card itself instead of only in the system prompt. A
+coordinator's own `Memory:` line is kept as written. The prepared card and
+what was added are stored in `.feature-ladder/evidence/<id>-external.json`.
 
 | Setting | Cheap cards run on |
 |---|---|
@@ -532,7 +554,11 @@ then `/plugin install feature-ladder@feature-ladder`. To check the install,
 show `plugin:feature-ladder:hindsight`.
 
 Requirements: Python 3 on PATH (`python3` or `python`). On Windows, Git Bash
-for the hooks (Claude Code already requires it).
+for the hooks (Claude Code already requires it). An
+[OpenRouter](https://openrouter.ai) account with `OPENROUTER_API_KEY` in the
+environment or in Google Secret Manager: the GLM tier that makes the ladder
+cheap runs through it (see [The GLM tier](#the-glm-tier-glm-53-flash-through-openrouter)).
+Without the key the plugin still runs, but every card bills to your Claude plan.
 
 ### Claude app
 
@@ -541,7 +567,7 @@ the start of a conversation it downloads `route.py`, `intake.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
 `skill-rules.json`, `resolve_bank.py` and `memory_gate.py` from this repo, pinned to a release
-tag (currently `v1.11.0`), so the app and
+tag (currently `v1.12.0`), so the app and
 Claude Code always run identical logic. The app session needs code execution
 and network access to GitHub.
 
