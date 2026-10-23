@@ -3,3 +3,6 @@ __pycache__/
 hindsight/hindsight.env
 .DS_Store
 FEATURE-REPORT.md
+
+# local vexp code index (regenerated per machine)
+.vexp/
