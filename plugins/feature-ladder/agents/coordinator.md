@@ -109,10 +109,13 @@ the design.
    uncommitted work and earlier checkpoints are included),
    then dispatch ONE
    `Agent(subagent_type="feature-ladder:integrator", model="fable", effort="medium", prompt="<every Evidence Packet, the diff path, the intake path, each card's Scope, the repo's build, type, lint and test commands>")`.
-   It has no coding tools and returns `INTEGRATION: coherent | needs-card`.
-   `needs-card`: route its card with `intake.py card` and dispatch it (this
-   is the feature's retry slot), then verify. `coherent`: continue. The spawn
-   hook allows the integrator once, after two coding agents.
+   It resolves seams and conflicts itself with its coding tools (Read, Edit,
+   Write, Bash, Glob, Grep), runs the build/type/lint/test commands it was
+   given, and returns an Evidence Packet whose first line is
+   `INTEGRATION: coherent` (no edits needed) or `INTEGRATION: integrated`
+   (it fixed seams). Verify.py checks it like any worker (step 5); a verify
+   failure uses the normal re-dispatch/escalation path. The spawn hook
+   allows the integrator once, after two coding agents.
 5. **Verify with no model:**
    ```
    python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> --check "<cmd>" ... --scope <card scope> ... --changed <files from the packet's Changed: line> ...
