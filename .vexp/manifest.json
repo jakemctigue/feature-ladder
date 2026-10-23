@@ -1,5 +1,8 @@
 {
   "file_hashes": {
+    ".claude/CLAUDE.md": "0a1b0e35fc722d7780a301240e0d9d0e03ade99a7a455dc2a820b83c515ff32b",
+    ".claude/hooks/vexp-hint.sh": "9986e809f8f8759dcc0c97f30732df9fbba926732951958cc839abcd6d107fe5",
+    ".claude/hooks/vexp-restore.sh": "2efbb1a4ffa1fc08510050701ed0066e38940e7d5f3c0f4143e7db1ce7cc2f10",
     ".feature-ladder/scratch/gen_rank.py": "32e501347a38e17026c7fd37fa10a641d51d64dbf888758cf23c56b0b7fec71e",
     ".feature-ladder/scratch/gen_routing.py": "0b006eecf049650d7d89f66cd3c03df41e3afb935aa48936923a506a9b5b2c21",
     ".feature-ladder/scratch/gen_triage.py": "abe0c22d2c8ff363502aad6bbd907a6106a3d0ceeea5a9adefa79803ae125d4a",
@@ -48,7 +51,7 @@
     "plugins/feature-ladder/skills/hindsight-memory/scripts/memory_gate.py": "e8b7f07542135d41830f4f20169ce4b145d2e5e481320110adcddc71661a7ba5",
     "plugins/feature-ladder/skills/hindsight-memory/scripts/resolve_bank.py": "d2b9abe3de637e1c7e89904132a4ca8603d4bb44ff34dc4a48d5df249a278183",
     "plugins/feature-ladder/skills/orchestration-ladder/SKILL.md": "64224a307f7c3e626a5323a24c00ebd56307d00c087112ebe30a8f61223a9c96",
-    "plugins/feature-ladder/skills/orchestration-ladder/scripts/confidence.py": "5ba29a669c1c5615ca5e45ab622f7a1e4decb52820f32aaccae748b420abc34d",
+    "plugins/feature-ladder/skills/orchestration-ladder/scripts/confidence.py": "6803f7a4ed2e8f2ee5dd8cc39207aa3db2878576a79bdf5cd347dee7b464ef07",
     "plugins/feature-ladder/skills/orchestration-ladder/scripts/external_worker.py": "aed7fa3a35e4ed077fe039093218454eb433b025a5e8c2777eb8ec64134806a5",
     "plugins/feature-ladder/skills/orchestration-ladder/scripts/irreversible.py": "2de00ed2d9c6e8867f7b177d8a3288c92dfa5bf73824616dcd0fb5701f8e6a8d",
     "plugins/feature-ladder/skills/orchestration-ladder/scripts/pr_checkpoint.py": "55a07813c5c0b7a70cb0817a8e0dbca1e19b375fc317f4948629b21632818ee1",
@@ -61,7 +64,7 @@
     "plugins/feature-ladder/tests/test_ci_logs.py": "18e4971bb183384b8afa8a6c5d0a1c26610ad5e3d1619cdb7d8b32f75c31456c",
     "plugins/feature-ladder/tests/test_codex_triage.py": "2181bbe944b140e5a504373fa69ad8d56375b31a15df711732932ae7518d142f",
     "plugins/feature-ladder/tests/test_codex_triage_golden.py": "4bbb216c4879476da7d2cc62d987b278ae209b141b78cfd620f2dcfc1356238f",
-    "plugins/feature-ladder/tests/test_confidence.py": "a9082df6b08c421bef399c8ff974c7b10732c54d659bfdadb830ac52d4550608",
+    "plugins/feature-ladder/tests/test_confidence.py": "8853f11fbfc7740e8ad4c1041352393502222b8e9dc8b23bdc30f9dee997bb5d",
     "plugins/feature-ladder/tests/test_confidence_mcp.py": "ff16e320afd6b2c889521d9ffb959e910e7ffb66459be7035b7f727087da36d7",
     "plugins/feature-ladder/tests/test_evidence.py": "a10fb4883c1135e9f3c581635cdf90a17fc0b25bac322a5966c183d8fdd122a7",
     "plugins/feature-ladder/tests/test_external_worker_card.py": "5f0e043197553a2a748ff87c377ec4618584de30d280b25f2866f80802baae5f",
@@ -80,28 +83,28 @@
     "plugins/feature-ladder/tests/test_small_feature_plan.py": "79928e757ade5a26f937e70898f9e42200016eafed7e9b6628ce421a840b13cd",
     "plugins/feature-ladder/tests/test_verify.py": "f45afa77713c0900406bba26dedd974f86ec9a6b47f1af0878b2e680c1460038"
   },
-  "indexed_at_commit": "fdfdca290d8f26c314fe76f2a158476ae35e9caa",
-  "indexed_at_timestamp": "2026-10-23T11:22:07.113174+00:00",
+  "indexed_at_commit": "ee88ce4cf30037dbf2f6af5b9fd5e1041edfc441",
+  "indexed_at_timestamp": "2026-10-23T12:00:27.632342+00:00",
   "languages": {
     "markdown": {
       "calls": 0,
-      "nodes": 155
+      "nodes": 159
     },
     "powershell": {
       "calls": 0,
       "nodes": 2
     },
     "python": {
-      "calls": 709,
-      "nodes": 533
+      "calls": 726,
+      "nodes": 547
     }
   },
   "parser_version": "3.3.2",
   "schema_version": 3,
   "stats": {
-    "total_edges": 1037,
-    "total_files": 79,
-    "total_nodes": 690
+    "total_edges": 1067,
+    "total_files": 82,
+    "total_nodes": 708
   },
   "vexp_version": "3.3.7"
 }
