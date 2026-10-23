@@ -1,6 +1,6 @@
 ---
-description: Add ONE feature with the orchestration ladder, atomically - just the code change and its tests. A Sonnet scout settles every routing variable; you answer only what is uncertain (and, once per session, how many subagents the session may spawn); then one worker (GLM 5.3 Flash or Sonnet medium for most work) builds it on its own branch, the stack is merged and labelled review: pending, and what ran outside the repo is listed for you. Fable only integrates when two or more coding agents wrote code. No reviews, no scribes - those are /feature-ladder:wrap at the end of the session. Usage - /feature-ladder:feature <description> [--auto] [--no-merge] [--second-opinion] [--escalate] [--ultra]
-argument-hint: <feature description> [--auto] [--no-merge] [--second-opinion] [--escalate] [--ultra]
+description: Add ONE feature with the orchestration ladder, atomically - just the code change and its tests. A Sonnet scout settles every routing variable; you answer only what is uncertain (and, once per session, how many subagents the session may spawn); then one worker (GLM 5.3 Flash or Sonnet medium for most work) builds it on its own branch, the stack is merged and labelled review: pending, and what ran outside the repo is listed for you. Fable only integrates when two or more coding agents wrote code. No reviews, no scribes - those are /feature-ladder:wrap at the end of the session. Usage - /feature-ladder:feature <description> [--auto] [--no-merge] [--researcher] [--second-opinion] [--escalate] [--ultra]
+argument-hint: <feature description> [--auto] [--no-merge] [--researcher] [--second-opinion] [--escalate] [--ultra]
 ---
 
 Start a feature-ladder run for: $ARGUMENTS
@@ -17,6 +17,7 @@ Separate the request text from these switches:
 |---|---|
 | `--auto` | Ask nothing. Use the scout's values and the recommended option for every decision (the session budget defaults to Small). |
 | `--no-merge` | Leave the PR stack open instead of merging it. By default `finish` merges the stack into your branch and labels it `review: pending`. |
+| `--researcher` | Show a short research brief first (what the feature wants from the codebase, a qualitative cost label per agent, what to expect), then continue the run from the same confirmed intake without re-asking. Uses no Opus and no Fable; see step 3b. |
 | `--second-opinion` | Allows the Fable `second-opinion` rung for one sharp question the coordinator cannot settle. |
 | `--escalate` | Allows `deep-verifier` (Fable high) and `architect-escalation` (Fable xhigh) for a bug the workers cannot isolate. |
 | `--ultra` | Also allows the ultra-investigator (Fable max). Implies `--escalate`. |
@@ -84,6 +85,24 @@ subagents left in the session, whether the stack merges or stays open, and
 worker, no design, no review. 3 of 4 session subagents left. Merges when
 green, labelled review: pending. Running now." If `budget.workers` is 0 the
 session budget is spent: say so and stop.
+
+## 3b. Researcher (only with `--researcher`)
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/brief.py" find "<request text>"
+```
+If it prints a path, a brief for this exact request is saved: run
+`brief.py show "<request text>"` and show it. Otherwise, only if the request
+names an external library or API the repo does not already use, dispatch ONE
+`feature-ladder:evidence-collector` (Haiku medium; at most 8 bullets, saved to
+`.feature-ladder/intake/<slug>-evidence.md`), then build the brief from the
+confirmed intake:
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/brief.py" build --proposal .feature-ladder/intake/<slug>-proposal.json --intake .feature-ladder/intake/<slug>.json --switches researcher[,<other switches>] [--external "<name>" --evidence <file>]
+```
+It writes `.feature-ladder/intake/<slug>-brief.md` and prints it; show it. Then
+continue to step 4 in the same turn: the intake is already confirmed, so do not
+ask anything again.
 
 ## 4. Branch
 

@@ -57,6 +57,17 @@
       "type": "file"
     },
     {
+      "bom-ref": "file:plugins/feature-ladder/skills/complexity-router/scripts/brief.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "091484efeeda37e30b1111ec0e3c42abc84b53a03d1a1a4a0c0ddaa589c414c8"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/complexity-router/scripts/brief.py",
+      "type": "file"
+    },
+    {
       "bom-ref": "file:plugins/feature-ladder/skills/complexity-router/scripts/intake.py",
       "hashes": [
         {
