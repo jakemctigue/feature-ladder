@@ -208,8 +208,9 @@ flush` (no model). Details: hindsight-memory skill.
 `run.json` (budget, switches, environments) which arms the hooks;
 `checkpoint` opens a draft PR for a critical decision and continues stacked
 on it; `finish` opens the final PR, labels the stack `review: pending`,
-merges it in order (checkpoints first) and prints each result; `--no-merge`
-leaves it open; `abort` disarms a run that died midway. A merge GitHub
+merges every entry, in order, into the original base recorded at `start`
+(stacked PRs are retargeted first; a queued auto-merge does not block the
+later entries) and prints each result; `--no-merge` leaves it open; `abort` disarms a run that died midway. A merge GitHub
 refuses is reported, never forced. Without a remote or `gh`, the same
 happens on local branches and the stack is merged into the base branch
 locally.

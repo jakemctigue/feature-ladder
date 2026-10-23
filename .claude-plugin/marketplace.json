@@ -6,7 +6,7 @@
     {
       "name": "feature-ladder",
       "source": "./plugins/feature-ladder",
-      "description": "Atomic feature runs that never wait: one GLM or Sonnet-medium worker per feature sized by a Hindsight confidence surface, merged and labelled review: pending, outside-repo steps logged not gated, Fable only to integrate multi-agent work, a session subagent budget enforced by hooks, reviews and memory once per session, deterministic routing and skill selection."
+      "description": "Atomic feature runs that never wait: one GLM or Sonnet-medium worker per feature sized by a Hindsight confidence surface, merged into the original base and labelled review: pending, outside-repo steps logged not gated, Fable only to integrate multi-agent work, a session subagent budget enforced by hooks, reviews and memory once per session, deterministic routing and skill selection."
     }
   ]
 }
