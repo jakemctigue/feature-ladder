@@ -155,8 +155,8 @@ class Cli(unittest.TestCase):
         prop.write_text("{}", encoding="utf-8")
         f = self.run_cli("find", "  ADD".lower() + " retry to the upload   client")
         self.assertEqual(f.returncode, 0, f.stderr)
-        self.assertEqual(f.stdout.splitlines()[0], str(saved))
-        self.assertEqual(f.stdout.splitlines()[1], str(prop))
+        self.assertEqual(Path(f.stdout.splitlines()[0]).resolve(), saved.resolve())
+        self.assertEqual(Path(f.stdout.splitlines()[1]).resolve(), prop.resolve())
         s = self.run_cli("show", REQUEST)
         self.assertEqual(s.stdout, r.stdout)
 
