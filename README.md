@@ -13,8 +13,172 @@ Both use the same scripts and rules, pinned to the same release tag.
 
 ---
 
+## At a glance
+
+> **Every task goes to the cheapest model that can do it correctly.** One
+> feature request, questions asked once, then a run to a merged PR. Scripts
+> pick the model, the effort and the skills; the bulk of the work lands on
+> Sonnet medium and GLM 5.3 Flash.
+
+| 14 | 0.60 | 24 | 2 · 4 · 8 | 1 | 0 |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| agents (13 rungs + scoper) | confidence to proceed | coordinator turns, hard cap | session subagent budget S · M · L | recall, card and worker per small feature | model tokens in routing, skills, verify and merge |
+
+### One feature run
+
+```mermaid
+flowchart LR
+    A["0 · Intake<br/>Sonnet scout, ask once"] --> B["1 · Recall<br/>one Hindsight recall, 1,000 tokens"]
+    B --> C["2 · Card<br/>confidence.py sizes it,<br/>intake.py routes it"]
+    C -- "&lt; 0.60" --> R["Reshard into<br/>smaller cards"]
+    R --> D
+    C -- "≥ 0.60" --> D["3 · Worker<br/>GLM 5.3 Flash or Sonnet medium"]
+    D -- "2+ coding agents" --> E["4 · Fable integrator<br/>reconciles the seams"]
+    D -- "one worker" --> F
+    E --> F["5 · verify.py<br/>re-runs checks, no model"]
+    F --> G["6 · Finish<br/>report, merge stack,<br/>review: pending"]
+    G -. "end of session" .-> W["/feature-ladder:wrap<br/>memory flush, ledger,<br/>reviews if asked"]
+```
+
+### The ladder
+
+🟩 GLM 5.3 Flash (OpenRouter) · 🟢 Haiku · 🟦 Sonnet 5.5 · 🟪 Opus 5.5 · 🟧 Fable 5.1 · ⬜ Codex
+
+| Rung | Agent | Model · effort | Job |
+|---|---|---|---|
+| C | `coordinator` | 🟪 Opus · medium | Confidence, card, dispatch, verify, accept, merge (12–24 turns) |
+| T4–T5 | `senior-implementer` | 🟪 Opus · medium–high | Difficult implementation under an agreed design |
+| D | `domain-expert` | 🟪 Opus · medium–high | One design step, only on a hard flag |
+| T3 | `implementer` | 🟦 Sonnet · high | Bounded coding, harder |
+| **T2** | **`implementer`** (default) | **🟦 Sonnet · medium** | **Bounded coding and its tests, score 7–14** |
+| **T2** | **`implementer`, GLM tier** | **🟩 GLM 5.3 Flash** | **Small coding, score 4–6, billed to OpenRouter** |
+| T1 | `evidence-collector` | 🟢 Haiku · medium | Current sources and claims |
+| **T0** | **`mechanic`** | **🟩 GLM Flash, else Haiku** | **Mechanical patches, docs, fixtures; at most one per feature** |
+| I | `scoper` | 🟦 Sonnet · medium | Intake scout, not counted against the budget |
+
+Bold rungs are where most of the work is meant to land. **Fable stays off the
+ladder:** the router never returns it. The 🟧 `integrator` runs only when two
+or more different coding agents wrote code for one feature; `second-opinion`,
+`deep-verifier`, `architect-escalation` and `ultra-investigator` need
+`--second-opinion`, `--escalate` or `--ultra`. ⬜ `codex-reviewer` runs once
+per session at `wrap --review`.
+
+### Routing bands, to scale
+
+`route.py` turns complexity points into a rung (one character per point):
+
+```text
+points  0   4  7       15   20  24+
+        ▁▁▁▁▂▂▂▄▄▄▄▄▄▄▄▅▅▅▅▅▇▇▇▇██████→
+        T0  GLM Sonnet  Sonnet Opus Opus
+            T2  medium  high   med  high
+```
+
+A short request is not an ambiguous one; a hard flag adds one design step and
+never changes the size; 23 golden cases pin every route.
+
+### Budgets
+
+| Session (asked once) | Subagents |
+|---|---|
+| Small | `■■□□□□□□` 1–2 |
+| Medium | `■■■■□□□□` 3–4 |
+| Large | `■■■■■■■■` up to 8 |
+
+| Feature | Score | Workers | Coordinator turns |
+|---|---|---|---|
+| S | 0–9 | 1 | ~12 |
+| M | 10–19 | 1–2 | ~20 |
+| L | 20+ | ≤ 4 | 24 cap |
+
+A spawn hook denies any subagent past the session budget.
+
+### Confidence surface
+
+```text
+0.05                   L .55  M .65   S .75                 0.98
+ floor                    ▼     ▼       ▼                    cap
+ ├────────── reshard ────────────┼─────────── proceed ─────────┤
+                     never .50  0.60   mundane .72
+                     risky .55  threshold
+```
+
+The saved recall is scored for sentiment (lexicon, or Jev through OpenRouter),
+weighted by how closely each fact touches the card's files, and read as a mood:
+`unknown`, `wary`, `steady` or `confident`. Size prior + ¼ sentiment − pitfalls
+± checks. Below 0.60 the card is split into smaller cards, once per feature.
+Advice, never a block.
+
+### What a GLM worker is handed
+
+`external_worker.py run` prepares the card for the child `claude -p` pointed at
+OpenRouter (example card; `+` lines are added by the runner):
+
+```diff
+  Task:   add rate limit to /search
+  Rung:   T2 implementer · glm · medium
+  Scope:  src/api/search.ts, tests/search.test.ts
+  Skills: .feature-ladder/cards/t1-skills.md
++ Memory: [pitfall] redis client times out in CI
++         [convention] limits live in config/limits.ts
++ Bounds: max turns 30 · timeout 900s · edit only Scope · session budget 2 of 4 left
++ Packet: Evidence Packet template (checks run, output verbatim, memory candidates)
+```
+
+### Outside the repo: an audit log, not a gate
+
+| Tier | Examples | Outcome |
+|---|---|---|
+| mundane | emulator, staging, `firebase deploy`, index builds, dry runs | ✅ runs, logged |
+| risky | production deletes, imports, destructive SQL, backfills | 🟡 runs, `review: pending` |
+| never | former never-list: push base branch, delete project or backups | 🟡 runs, `review: pending`, named first |
+| secret | anything that would print a secret value | ⛔ refused; use `with_secrets.py` |
+
+### Merge on finish
+
+```mermaid
+flowchart BT
+    P2["feature-ladder/rate-limit-pt2<br/>review: pending"] -- "retargeted, then merged" --> P1["feature-ladder/rate-limit<br/>review: pending"]
+    P1 -- "merged" --> M["main (gets both)"]
+```
+
+Every entry of the stack lands on the original base; `--no-merge` holds it. A
+refused entry stops the merge and is reported. Nothing is forced.
+
+### Memory and the end of the session
+
+| Hindsight memory: read twice, written once | `/feature-ladder:wrap` |
+|---|---|
+| One bank per repository, chosen by a hook | Always: memory flush, close the budget, print the ledger |
+| Recall only, 1,000 tokens, ≤ 3 per feature; `reflect` denied | `--review`: Codex, read-only, low findings dropped by script |
+| No writes during a run; workers list `[kind] fact` candidates | `--adversarial`: Codex attack tests in their own folder |
+| Gate: one fact, 25–280 chars, a real path or identifier | `--second-opinion`: one Fable answer to one open point |
+| Flushed verbatim at `wrap` by a script, no scribe | Report, don't loop: each bug becomes its own feature |
+
+### The scripts that decide
+
+| Script | Decides |
+|---|---|
+| `intake.py` | Repo scan, which questions to ask, card routing |
+| `route.py` | Complexity points → rung, model, effort |
+| `select_skills.py` | At most 3 skills per worker, within a per-role budget |
+| `confidence.py` | Recall sentiment surface → proceed or reshard |
+| `session_budget.py` | S / M / L subagent budget, charged per spawn |
+| `external_worker.py` | GLM or Jev cards through OpenRouter |
+| `verify.py` | Re-runs Done-when checks, flags out-of-scope files |
+| `pr_checkpoint.py` | Branches, checkpoint PRs, labelled merge |
+| `irreversible.py` | Outside-repo audit tiers |
+| `ledger.py` | Tokens per rung and model |
+| `memory_gate.py` | Scoped recall, gated queue, flush at wrap |
+| `brief.py` | Research brief: cost label per agent, no build |
+
+The details of each part follow below.
+
+---
+
 ## Contents
 
+- [At a glance](#at-a-glance)
 - [What it does](#what-it-does)
 - [Requirements](#requirements)
 - [Install](#install)
