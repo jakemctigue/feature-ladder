@@ -307,7 +307,7 @@ the start of a conversation it downloads `route.py`, `intake.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
 `skill-rules.json`, `resolve_bank.py` and `memory_gate.py` from this repo,
-pinned to a release tag (currently `v1.15.0`), so the app and Claude Code
+pinned to a release tag (currently `v1.15.1`), so the app and Claude Code
 always run identical logic. The app session needs code execution and network
 access to GitHub.
 
@@ -902,7 +902,8 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.15.0** | `--researcher` switch and `/feature-ladder:research`: a brief of what a feature wants from the codebase, qualitative per-agent cost labels (never a number) and what to expect; the Fable integrator has coding tools and returns an Evidence Packet; the Jev confidence scorer gets an indexed contract, lexicon-scale anchors, per-fact fallback and an injectable transport with recorded fixtures |
+| **v1.15.1** | Windows CI: the research-brief round-trip test compares resolved paths, so an 8.3 short temp path (`RUNNER~1`) no longer fails it; README gains an At a glance section |
+| v1.15.0 | `--researcher` switch and `/feature-ladder:research`: a brief of what a feature wants from the codebase, qualitative per-agent cost labels (never a number) and what to expect; the Fable integrator has coding tools and returns an Evidence Packet; the Jev confidence scorer gets an indexed contract, lexicon-scale anchors, per-fact fallback and an injectable transport with recorded fixtures |
 | v1.14.0 | PR queue-cleanup reference corpus: 8 stale-PR, review-thread, reopen and salvage cases with a fixed decision vocabulary, 6 of them asserted against `pr_checkpoint.py`'s merge path |
 | v1.13.0 | `finish` merges every stack entry into the original base and retargets stacked PRs; the integrator's diff includes uncommitted, untracked and earlier-checkpoint work; `confidence.py` decodes MCP recall envelopes so each memory keeps its tag; README rewritten around requirements and evidence |
 | v1.12.0 | OpenRouter cards carry `Memory:`, `Bounds:` and the output contract; deterministic evidence corpora, SBOM/SARIF with a CI check, CI failure logs, harness matrix; OpenRouter documented as a requirement |
