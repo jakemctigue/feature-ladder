@@ -69,7 +69,8 @@ class Frontmatter(unittest.TestCase):
                 self.assertLessEqual(len(name), 64)
                 self.assertEqual(name, path.parent.name)
                 description = pairs.get("description", "")
-                if description[:1] not in "|>":
+                self.assertTrue(description, "description is missing or empty")
+                if description[0] not in "|>":
                     self.assertTrue(1 <= len(unquote(description)) <= 1024, len(description))
 
 
