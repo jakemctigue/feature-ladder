@@ -1,6 +1,6 @@
 ---
 name: orchestration-ladder
-description: The feature-ladder operating protocol - atomic feature runs (one cheap worker, verify.py, a merged PR labelled review: pending), the session subagent budget, which rung does what, the GLM tier, the confidence surface that replaced the gates, the outside-repo audit log and the handoff contracts. Reviews, second opinions and memory happen once per session at /feature-ladder:wrap. Reference; no agent preloads it.
+description: "The feature-ladder operating protocol - atomic feature runs (one cheap worker, verify.py, a merged PR labelled review: pending), the session subagent budget, which rung does what, the GLM tier, the confidence surface that replaced the gates, the outside-repo audit log and the handoff contracts. Reviews, second opinions and memory happen once per session at /feature-ladder:wrap. Reference; no agent preloads it."
 ---
 
 # Orchestration ladder
