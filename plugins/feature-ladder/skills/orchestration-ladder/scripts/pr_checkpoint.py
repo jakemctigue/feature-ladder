@@ -289,6 +289,7 @@ def cmd_start(root, a):
     run = {"outside_policy": "all",  # informational since v1.11: the hook logs, it does not gate
            "budget": intake.get("budget") or {"size": "S", "workers": 1, "design": False},
            "switches": intake.get("switches") or [],
+           "orchestrator": intake.get("orchestrator") or {},
            "environments": environments,
            "slug": slug, "base": base, "branch": branch, "stack_base": base,
            "active": True, "started": now(), "pr_enabled": ok,

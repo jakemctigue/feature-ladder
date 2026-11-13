@@ -42,11 +42,11 @@ flowchart LR
 
 ### The ladder
 
-🟩 GLM 5.3 Flash (OpenRouter) · 🟢 Haiku · 🟦 Sonnet 5.5 · 🟪 Opus 5.5 · 🟧 Fable 5.1 · ⬜ Codex
+🟩 GLM 5.3 Flash (OpenRouter) · 🟢 Haiku · 🟦 Sonnet 5.5 · 🟪 Opus 5.5 · 🟧 Fable 5.2 · ⬜ Codex
 
 | Rung | Agent | Model · effort | Job |
 |---|---|---|---|
-| C | `coordinator` | 🟪 Opus · medium | Confidence, card, dispatch, verify, accept, merge (12–24 turns) |
+| C | `coordinator` | 🟪 Opus · xhigh or 🟧 Fable 5.2, your pick up front | Confidence, card, dispatch, verify, accept, merge (12–24 turns) |
 | T4–T5 | `senior-implementer` | 🟪 Opus · medium–high | Difficult implementation under an agreed design |
 | D | `domain-expert` | 🟪 Opus · medium–high | One design step, only on a hard flag |
 | T3 | `implementer` | 🟦 Sonnet · high | Bounded coding, harder |
@@ -79,7 +79,7 @@ never changes the size; 23 golden cases pin every route.
 
 ### Budgets
 
-| Session (asked once) | Subagents |
+| Session (asked once, with the orchestrator: Opus xhigh or Fable 5.2) | Subagents |
 |---|---|
 | Small | `■■□□□□□□` 1–2 |
 | Medium | `■■■■□□□□` 3–4 |
@@ -161,9 +161,9 @@ refused entry stops the merge and is reported. Nothing is forced.
 |---|---|
 | `intake.py` | Repo scan, which questions to ask, card routing |
 | `route.py` | Complexity points → rung, model, effort |
-| `select_skills.py` | At most 3 skills per worker, within a per-role budget |
+| `select_skills.py` | At most 3 skills per worker, within a per-role budget; `--scan` rescans what is installed |
 | `confidence.py` | Recall sentiment surface → proceed or reshard |
-| `session_budget.py` | S / M / L subagent budget, charged per spawn |
+| `session_budget.py` | S / M / L subagent budget, charged per spawn; the session's orchestrator |
 | `external_worker.py` | GLM or Jev cards through OpenRouter |
 | `verify.py` | Re-runs Done-when checks, flags out-of-scope files |
 | `pr_checkpoint.py` | Branches, checkpoint PRs, labelled merge |
@@ -232,11 +232,17 @@ The details of each part follow below.
   relevance-weighted surface of what the project remembers about these
   files. At or above 0.60 the card proceeds; below it the card is
   **resharded** into smaller cards. Advice about size, never a block.
-- **Fable only to integrate.** The router never picks Fable and the
-  coordinator runs on Opus. Fable comes in once, as the `integrator`, only
-  when two or more different coding agents wrote code for one feature; it
-  resolves the seams itself with its coding tools and returns an Evidence
-  Packet. Second opinions and deep verification need an explicit switch.
+- **You pick the orchestrator, up front.** The first question of a coding
+  session is which model runs the coordinator: Opus 5.5 at xhigh effort or
+  Fable 5.2. `--orchestrator fable|opus` answers it in advance; with `--auto`
+  and no answer it is Opus xhigh. A hook denies a Fable coordinator you did
+  not pick.
+- **Fable only when you pick it, or to integrate.** The router never picks
+  Fable. Apart from an orchestrator you chose, Fable comes in once, as the
+  `integrator`, only when two or more different coding agents wrote code for
+  one feature; it resolves the seams itself with its coding tools and returns
+  an Evidence Packet. Second opinions and deep verification need an explicit
+  switch.
 - **Reviews and memory once per session, not per feature.** Codex review,
   adversarial tests and a Fable second opinion run only when you schedule
   them with `/feature-ladder:wrap`, once, over everything the session built.
@@ -307,7 +313,7 @@ the start of a conversation it downloads `route.py`, `intake.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
 `skill-rules.json`, `resolve_bank.py` and `memory_gate.py` from this repo,
-pinned to a release tag (currently `v1.15.2`), so the app and Claude Code
+pinned to a release tag (currently `v1.16.0`), so the app and Claude Code
 always run identical logic. The app session needs code execution and network
 access to GitHub.
 
@@ -335,19 +341,20 @@ fill in the keys, then `./start.sh` and `python3 roundtrip_test.py`.
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto] [--no-merge] [--researcher] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
+| `/feature-ladder:feature <request> [--auto] [--no-merge] [--orchestrator fable\|opus] [--researcher] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
 | `/feature-ladder:scope <request>` | Intake alone; the next `feature` with the same text reuses it without asking |
 | `/feature-ladder:research <request>` | A short research brief, no build and no questions: what the feature wants from this codebase, a qualitative cost label per agent (never a number) and what to expect |
 | `/feature-ladder:wrap [--review] [--adversarial] [--second-opinion]` | End of session: optional reviews over the whole session's diff, then the memory flush |
 | `/feature-ladder:route <task or JSON>` | Dry-run the router: which rung, why |
-| `/feature-ladder:skills <task> [--list]` | Dry-run skill selection; `--list` shows installed skills and broken rules |
+| `/feature-ladder:skills <task> [--list] [--scan]` | Dry-run skill selection; `--list` shows installed skills and broken rules; `--scan` rescans every installed skill into a catalog and reports what the rules miss |
 | `/feature-ladder:recall <query>` | One gated Hindsight recall for this repo |
 | `/feature-ladder:codex-review [--adversarial]` | A Codex review of any branch or uncommitted work, on demand |
 | `/feature-ladder:workers [glm \| jev \| claude \| check [--probe]]` | Where the cheap cards run, and a setup check |
 
 Switches on `feature`: `--auto` asks nothing and takes the scout's values and
 the recommended options; `--no-merge` leaves the PR stack open;
-`--second-opinion` allows one Fable answer to one sharp question;
+`--orchestrator fable|opus` picks the coordinator's model for this run
+without asking; `--second-opinion` allows one Fable answer to one sharp question;
 `--escalate` allows the Fable debugging rungs; `--ultra` also allows the
 ultra-investigator. Reviews are not feature switches: they belong to `wrap`.
 
@@ -417,12 +424,12 @@ recommended option and parked in a draft PR that explains how to switch.
 | T3 | `implementer` | Sonnet 5.5 / high | Bounded coding, harder |
 | T4–T5 | `senior-implementer` | Opus 5.5 / medium–high | Difficult implementation under an agreed design |
 | D | `domain-expert`, `domain-expert-high` | Opus 5.5 / medium–high | One design step, only on a hard flag |
-| **C** | **`coordinator`** | **Opus 5.5 / medium** | **Confidence, card, dispatch, verify.py, accept, merge: 12-24 turns** |
-| **FI** | **`integrator`** | **Fable 5.1 / medium** | **Once per feature, only after two or more different coding agents wrote code; coding tools to reconcile seams, runs the checks, returns an Evidence Packet** |
-| F-Low | `second-opinion` | Fable 5.1 / low | Only with `--second-opinion` |
-| F-High | `deep-verifier` | Fable 5.1 / high | Only with `--escalate` |
-| F-Extra | `architect-escalation` | Fable 5.1 / xhigh | Only with `--escalate` |
-| F-Ultra | `ultra-investigator` | Fable 5.1 / max | Only with `--ultra` |
+| **C** | **`coordinator`** | **Opus 5.5 / xhigh or Fable 5.2, whichever you picked up front** | **Confidence, card, dispatch, verify.py, accept, merge: 12-24 turns** |
+| **FI** | **`integrator`** | **Fable 5.2 / medium** | **Once per feature, only after two or more different coding agents wrote code; coding tools to reconcile seams, runs the checks, returns an Evidence Packet** |
+| F-Low | `second-opinion` | Fable 5.2 / low | Only with `--second-opinion` |
+| F-High | `deep-verifier` | Fable 5.2 / high | Only with `--escalate` |
+| F-Extra | `architect-escalation` | Fable 5.2 / xhigh | Only with `--escalate` |
+| F-Ultra | `ultra-investigator` | Fable 5.2 / max | Only with `--ultra` |
 | X | `codex-reviewer` | Haiku / low driving **OpenAI Codex** | Only at `/feature-ladder:wrap --review`, once per session |
 
 ### Deterministic model routing
@@ -445,6 +452,10 @@ pins 23 routes and budgets; change the router and the golden tells you.
 
 Cost scales with agents × turns × context, because every turn of every agent
 re-reads its whole context. Two budgets cap it, both enforced by hooks:
+
+**Orchestrator** (asked once per coding session, first): Opus 5.5 at xhigh
+effort or Fable 5.2 runs the coordinator. `session_budget.py orchestrator`
+shows it; `--set fable|opus` changes it mid-session.
 
 **Session** (asked once per coding session): Small = 2 subagents, Medium = 4,
 Large = 8. The intake scout and the coordinator aren't counted; every
@@ -636,8 +647,12 @@ same gate. `confidence.py score "<text>"` shows the lexicon's view of a line.
   Uncommitted changes in your checkout get one question: include them as their
   own commit, stash them, or stop. There is no live-changes question: what
   the feature needs outside the repo runs and is logged for review.
+- Two session questions come first, once per coding session: which model
+  orchestrates (Opus 5.5 xhigh or Fable 5.2) and how many subagents the
+  session may spawn.
 
-`--auto` asks nothing and takes the scout's values and recommended options.
+`--auto` asks nothing and takes the scout's values and recommended options
+(the orchestrator is then Opus xhigh unless `--orchestrator fable` was given).
 `/feature-ladder:scope` runs intake alone and saves it; the next
 `/feature-ladder:feature` with the same request text reuses it without asking.
 
@@ -690,7 +705,21 @@ repeatable and auditable.
 4. `--inject --out .feature-ladder/cards/<task>-skills.md` writes those
    skills' text to a file only the worker reads, and prints the exact skill
    names and files it used. The decision never changes between runs for the
-   same input; `tests/fixtures/skill_ranking/cases.json` pins 15 rankings.
+   same input; `tests/fixtures/skill_ranking/cases.json` pins 18 rankings.
+   One SKILL.md is never injected twice under two names.
+
+### Rescan
+
+`select_skills.py --scan` (or `/feature-ladder:skills --scan`) walks every
+installed skill and writes `~/.claude/feature-ladder/skill-catalog.json`: one
+record per SKILL.md with its names (a plugin's skills answer to both the
+marketplace key and the manifest name, `data-agent-kit:` and `dak:`), source,
+size, content hash and description, including multi-line YAML descriptions.
+It reports the rules whose skill is not installed, the installed skills no
+rule reaches, and what was added, removed or edited since the last scan. The
+same installed skills always produce the same catalog and digest; `--check`
+writes nothing and exits 1 on a rule pointing at a missing skill or on drift.
+No model is involved.
 
 ### Rules
 
@@ -701,16 +730,23 @@ Rules are merged in this order; a later file replaces a rule with the same
 2. `~/.claude/feature-ladder/skill-rules.json`, your personal rules (survive plugin updates)
 3. `<repo>/.feature-ladder/skill-rules.json`, per-project rules
 
-The shipped defaults cover debugging, TDD, planning, code review, library
-docs (Context7), Figma, BigQuery/dbt/Dataform/Airflow/Spark, Python
-dependencies, notebooks, ML practice, data-loss prevention, the AWS family,
-Checkly, Railway, Cerebras, ComfyUI, front-end design, MCP servers and Office
-files. Rules that name skills you don't have are simply skipped;
-`--list` shows which ones those are.
+The shipped defaults were refreshed against a rescan in v1.16.0. They cover
+debugging, TDD, planning, code review, library docs (Context7),
+BigQuery/dbt/Dataform/Dataflow/Spark and pipeline orchestration, Python
+dependencies, notebooks, ML practice, data-loss prevention, security
+hardening (the router's `security` flag), API design (`public_api`),
+performance, observability, deprecation, refactoring, CI/CD, ADRs, browser
+testing, Chrome extensions, Valibot, pre-commit hooks, schema markup,
+analytics tracking, charts, OpenRouter, Checkly, Railway, Cerebras, front-end
+UI, MCP servers and Office files. The AWS, Figma and ComfyUI rules were
+removed: none of those skills is installed any more. Rules that name skills
+you don't have are simply skipped; `--list` and `--scan` show which ones
+those are.
 
 ```
 /feature-ladder:skills Fix the crash when the S3 upload times out     # dry run
 /feature-ladder:skills --list                                          # what it sees, broken rules
+/feature-ladder:skills --scan                                          # rescan into the catalog, coverage report
 python3 select_skills.py '{"role":"implementer","kind":"code","paths":["src/Form.tsx"],"text":"Fix crash on empty submit"}'
 ```
 
@@ -902,7 +938,8 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.15.2** | The `orchestration-ladder` skill and the `/feature-ladder:feature` command have valid frontmatter again: both descriptions held an unquoted `review: pending`, which is invalid YAML, so a strict parser rejected the whole block and the skill was dropped; both are quoted, and `test_skill_frontmatter.py` now checks every skill, agent and command for the same mistake |
+| **v1.16.0** | The orchestrator is your pick, asked up front once per session: Opus 5.5 xhigh or Fable 5.2 runs the coordinator (`--orchestrator fable\|opus` answers in advance; a hook denies a Fable coordinator you did not pick). `select_skills.py --scan` rescans every installed skill into a deterministic catalog with a coverage report; multi-line descriptions and plugin manifest names (`dak:`) are read correctly; the shipped rules were refreshed against the rescan (22 rules for skills that are gone removed, 3 retargeted, 20 added) |
+| v1.15.2 | The `orchestration-ladder` skill and the `/feature-ladder:feature` command have valid frontmatter again: both descriptions held an unquoted `review: pending`, which is invalid YAML, so a strict parser rejected the whole block and the skill was dropped; both are quoted, and `test_skill_frontmatter.py` now checks every skill, agent and command for the same mistake |
 | v1.15.1 | Windows CI: the research-brief round-trip test compares resolved paths, so an 8.3 short temp path (`RUNNER~1`) no longer fails it; README gains an At a glance section |
 | v1.15.0 | `--researcher` switch and `/feature-ladder:research`: a brief of what a feature wants from the codebase, qualitative per-agent cost labels (never a number) and what to expect; the Fable integrator has coding tools and returns an Evidence Packet; the Jev confidence scorer gets an indexed contract, lexicon-scale anchors, per-fact fallback and an injectable transport with recorded fixtures |
 | v1.14.0 | PR queue-cleanup reference corpus: 8 stale-PR, review-thread, reopen and salvage cases with a fixed decision vocabulary, 6 of them asserted against `pr_checkpoint.py`'s merge path |

@@ -129,8 +129,8 @@ class SmallFirestoreWrite(unittest.TestCase):
         prop = dict(self.scan, fields=scoper_fields(self.scan))
         dec = intake.decide(prop)
         ids = [d["id"] for d in dec["decisions"]]
-        self.assertEqual(ids[0], "session_agents")
-        labels = " ".join(o["label"] for o in dec["decisions"][0]["options"])
+        self.assertEqual(ids[:2], ["orchestrator", "session_agents"])
+        labels = " ".join(o["label"] for o in dec["decisions"][1]["options"])
         for want in ("1-2", "3-4", "up to 8"):
             self.assertIn(want, labels)
         # `intake.py apply` stores the answer; the next feature in the session is not asked again.
@@ -143,6 +143,58 @@ class SmallFirestoreWrite(unittest.TestCase):
         self.assertEqual(session_budget.status(self.root)["max"], 4)
         dec2 = intake.decide(dict(self.scan, fields=scoper_fields(self.scan)))
         self.assertNotIn("session_agents", [d["id"] for d in dec2["decisions"]])
+
+    def apply_cli(self, answers):
+        prop = dict(self.scan, fields=scoper_fields(self.scan))
+        pf, af = self.root / "p.json", self.root / "a.json"
+        pf.write_text(json.dumps(prop), encoding="utf-8")
+        af.write_text(json.dumps(answers), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(ROUTER / "intake.py"), "apply", str(pf), str(af)],
+                           cwd=str(self.root), capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def decision_ids(self, mode="default"):
+        return [d["id"] for d in intake.decide(dict(self.scan, fields=scoper_fields(self.scan)), mode)["decisions"]]
+
+    def test_orchestrator_is_asked_up_front_once_per_session(self):
+        dec = intake.decide(dict(self.scan, fields=scoper_fields(self.scan)))
+        first = dec["decisions"][0]
+        self.assertEqual(first["id"], "orchestrator")
+        self.assertEqual([o["label"] for o in first["options"]], ["Opus 5.5 xhigh", "Fable 5.2"])
+        final = self.apply_cli({"decisions": {"orchestrator": "Fable 5.2", "session_agents": "Small (1-2 subagents)"}})
+        o = final["orchestrator"]
+        self.assertEqual((o["key"], o["model"], o["model_id"], o["source"]), ("fable", "fable", "claude-fable-5-2", "asked"))
+        self.assertEqual(session_budget.orchestrator(self.root)["key"], "fable")
+        self.assertNotIn("orchestrator", self.decision_ids())      # not asked again in this session
+        session_budget.save(self.root, {"started": "x", "spawned": []})  # what `new` / SessionStart does
+        self.assertEqual(self.decision_ids()[0], "orchestrator")   # a new session asks again
+        self.assertEqual(session_budget.orchestrator(self.root)["key"], "opus")
+
+    def test_opus_xhigh_is_the_answer_when_nothing_is_picked(self):
+        self.assertNotIn("orchestrator", self.decision_ids("auto"))  # --auto asks nothing
+        final = self.apply_cli({"decisions": {"session_agents": "Small"}})
+        o = final["orchestrator"]
+        self.assertEqual((o["key"], o["model"], o["effort"], o["source"]), ("opus", "opus", "xhigh", "default"))
+        self.assertFalse(session_budget.orchestrator(self.root)["chosen"])  # nothing stored: still asked later
+        self.assertEqual(self.decision_ids()[0], "orchestrator")
+
+    def test_orchestrator_switch_is_for_one_run_and_bad_values_are_refused(self):
+        final = self.apply_cli({"orchestrator": "fable", "decisions": {"session_agents": "Small"}})
+        self.assertEqual((final["orchestrator"]["key"], final["orchestrator"]["source"]), ("fable", "switch"))
+        self.assertFalse(session_budget.orchestrator(self.root)["chosen"])
+        with self.assertRaises(ValueError):
+            intake.apply(dict(self.scan, fields=scoper_fields(self.scan)), {"orchestrator": "sonnet"})
+
+    def test_orchestrator_switch_reaches_the_hook_without_a_run_file(self):
+        # Not a git repo, or the hand-off before `start`: there is no run.json.
+        self.assertFalse(session_budget.check(self.root, "coordinator", "fable")[0])
+        self.apply_cli({"orchestrator": "fable", "decisions": {"session_agents": "Small"}})
+        self.assertFalse((self.root / ".feature-ladder" / "run.json").exists())
+        self.assertTrue(session_budget.check(self.root, "coordinator", "fable")[0])
+        self.assertFalse(session_budget.orchestrator(self.root)["chosen"])  # still one run only
+        self.apply_cli({"decisions": {"session_agents": "Small"}})          # the next run, no switch
+        self.assertFalse(session_budget.check(self.root, "coordinator", "fable")[0])
 
     def test_router_never_picks_fable(self):
         for score_fields in ({}, {"files": 8, "loc": 400, "modules": 3, "security": True, "concurrency": True,
@@ -221,6 +273,23 @@ class SpawnHook(unittest.TestCase):
         self.assertTrue(self.spawn("mechanic", "haiku")[0])
         self.assertFalse(self.spawn("mechanic", "haiku")[0])  # one mechanic per feature
         self.assertEqual(session_budget.status(self.root)["used"], 2)
+
+    def test_coordinator_runs_on_fable_only_when_the_user_picked_it(self):
+        self.start_run()
+        self.assertTrue(self.spawn("coordinator", "opus")[0])
+        ok, out = self.spawn("coordinator", "fable")
+        self.assertFalse(ok)
+        self.assertIn("orchestrator", out)
+        session_budget.set_orchestrator(self.root, "Fable 5.2")     # the up-front answer
+        self.assertTrue(self.spawn("coordinator", "fable")[0])
+        self.assertFalse(self.spawn("general-purpose", model="fable")[0])  # workers still never get Fable
+        session_budget.set_orchestrator(self.root, "opus")
+        self.assertFalse(self.spawn("coordinator", "fable")[0])
+        run = json.loads((self.root / ".feature-ladder" / "run.json").read_text(encoding="utf-8"))
+        run["orchestrator"] = {"key": "fable"}                      # --orchestrator fable on this run
+        (self.root / ".feature-ladder" / "run.json").write_text(json.dumps(run), encoding="utf-8")
+        self.assertTrue(self.spawn("coordinator", "fable")[0])
+        self.assertEqual(session_budget.status(self.root)["used"], 0)  # the coordinator is never counted
 
     def test_session_budget_is_a_hard_stop(self):
         self.start_run({"size": "M", "workers": 2, "design": False})

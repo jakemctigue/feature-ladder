@@ -15,6 +15,14 @@ Usage
                                                     short "Skills" line for the Task Card
   python3 select_skills.py --file task.json [--inject] [--out PATH]
   python3 select_skills.py --list                   every resolvable skill + rule problems
+  python3 select_skills.py --scan [--out PATH] [--check]
+                                                    rescan every installed skill into a catalog
+                                                    (default ~/.claude/feature-ladder/skill-catalog.json)
+                                                    and report: rules whose skill is not installed,
+                                                    installed skills no rule reaches, and what was
+                                                    added, removed or edited since the last scan.
+                                                    --check writes nothing and exits 1 on any of
+                                                    the first or the last.
 
 --out is the normal way to use the selector from a coordinator: the skill text
 (up to max_chars) goes straight to a file the worker reads, so it never passes
@@ -42,6 +50,7 @@ Rules are merged from, in order (later wins on the same rule id):
   3. <repo>/.feature-ladder/skill-rules.json            (per-project rules)
 """
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -94,6 +103,23 @@ def load_rules():
 
 
 # ------------------------------------------------------------ inventory ----
+def _parse_meta(lines):
+    """Top-level `key: value` pairs of a SKILL.md frontmatter. A YAML block
+    scalar (`>`, `|`, with or without `-`/`+`) or a value continued on indented
+    lines is folded into one line, so a multi-line description is read whole."""
+    meta, key = {}, None
+    for line in lines:
+        m = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$", line)
+        if m:
+            key, val = m.group(1), m.group(2).strip()
+            meta[key] = "" if re.fullmatch(r"[>|][+-]?\d*", val) else val
+        elif key is not None and line[:1] in (" ", "\t") and line.strip():
+            meta[key] = (meta[key] + " " + line.strip()).strip()
+        elif line.strip() and not line.lstrip().startswith("#"):
+            key = None
+    return {k: v.strip().strip("'\"") for k, v in meta.items()}
+
+
 def _frontmatter(path):
     try:
         text = Path(path).read_text(encoding="utf-8", errors="replace")
@@ -104,10 +130,7 @@ def _frontmatter(path):
         parts = text.split("\n")
         for i in range(1, len(parts)):
             if parts[i].strip() == "---":
-                for line in parts[1:i]:
-                    m = re.match(r"^([A-Za-z_-]+):\s*(.*)$", line)
-                    if m:
-                        meta[m.group(1)] = m.group(2).strip().strip("'\"")
+                meta = _parse_meta(parts[1:i])
                 body = "\n".join(parts[i + 1:]).lstrip("\n")
                 break
     return meta, body
@@ -127,33 +150,47 @@ def _skill_files(root, depth=3):
     return sorted(out)
 
 
-def inventory():
-    """name -> path of SKILL.md. Precedence: personal > project > plugins."""
-    found = {}
+def _plugin_name(root):
+    """The plugin's own name from its manifest (what Claude Code prefixes its
+    skills with), or None."""
+    try:
+        data = json.loads((Path(root) / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8-sig"))
+        return str(data.get("name") or "").strip() or None
+    except (ValueError, OSError, AttributeError):
+        return None
 
-    def put(name, path):
-        if name and name not in found:
-            found[name] = Path(path)
+
+def inventory_entries():
+    """[(name, path of SKILL.md, source)] in a fixed order; the first entry for
+    a name wins. Precedence: personal > project > plugins. Sources: personal,
+    account (synced from the Claude account), project, plugin:<name>."""
+    seen, out = set(), []
+
+    def put(name, path, source):
+        if name and name not in seen:
+            seen.add(name)
+            out.append((name, Path(path), source))
 
     home = Path.home() / ".claude"
     for f in _skill_files(home / "skills"):
         meta, _ = _frontmatter(f)
         n = meta.get("name") or f.parent.name
-        put(n, f)
-        if "synced" in f.relative_to(home / "skills").parts[:1] and ":" not in n:
-            put(f"anthropic-skills:{n}", f)   # how the Claude app lists synced account skills
+        synced = "synced" in f.relative_to(home / "skills").parts[:1]
+        put(n, f, "account" if synced else "personal")
+        if synced and ":" not in n:
+            put(f"anthropic-skills:{n}", f, "account")   # how the Claude app lists synced account skills
 
     d = Path.cwd().resolve()
     for p in [d, *d.parents]:
         for f in _skill_files(p / ".claude" / "skills"):
             meta, _ = _frontmatter(f)
-            put(meta.get("name") or f.parent.name, f)
+            put(meta.get("name") or f.parent.name, f, "project")
 
     def plugin_skills(plugin, root):
         for f in _skill_files(Path(root) / "skills", depth=1):
             meta, _ = _frontmatter(f)
             n = meta.get("name") or f.parent.name
-            put(n if ":" in n else f"{plugin}:{n}", f)
+            put(n if ":" in n else f"{plugin}:{n}", f, f"plugin:{plugin}")
 
     plugin_skills(PLUGIN_NAME, PLUGIN_ROOT)
     ip = home / "plugins" / "installed_plugins.json"
@@ -165,7 +202,11 @@ def inventory():
                 entry = entries[0] if isinstance(entries, list) and entries else entries
                 path = (entry or {}).get("installPath")
                 if path:
-                    plugin_skills(key.split("@")[0], path)
+                    # Both names resolve: the marketplace key (data-agent-kit) and the
+                    # manifest name Claude Code shows the skills under (dak).
+                    for pname in dict.fromkeys([key.split("@")[0], _plugin_name(path)]):
+                        if pname:
+                            plugin_skills(pname, path)
         except (ValueError, OSError, AttributeError):
             pass
 
@@ -173,13 +214,80 @@ def inventory():
     synced = home / "plugins" / "synced"
     if synced.is_dir():
         for manifest in sorted(synced.glob("*/*/.claude-plugin/plugin.json")):
-            try:
-                pname = json.loads(manifest.read_text(encoding="utf-8-sig")).get("name")
-            except (ValueError, OSError):
-                continue
+            pname = _plugin_name(manifest.parent.parent)
             if pname:
                 plugin_skills(pname, manifest.parent.parent)
-    return found
+    return out
+
+
+def inventory():
+    """name -> path of SKILL.md (see inventory_entries for the precedence)."""
+    return {name: path for name, path, _ in inventory_entries()}
+
+
+# ----------------------------------------------------------------- scan ----
+CATALOG = Path.home() / ".claude" / "feature-ladder" / "skill-catalog.json"
+
+
+def build_catalog(entries, rules):
+    """Every installed skill, one record per SKILL.md file, in name order.
+    Same installed skills + same rules -> the same catalog, byte for byte
+    (no timestamps; the digest leaves machine paths out)."""
+    by_path = {}
+    for name, path, source in entries:
+        by_path.setdefault(str(path), {"names": [], "source": source})["names"].append(name)
+    ruled = {}
+    for i, r in enumerate(rules):
+        if _valid(r):
+            ruled.setdefault(r["skill"], []).append(str(r.get("id", i)))
+    known = {name for name, _, _ in entries}
+    skills = []
+    for path, e in by_path.items():
+        meta, body = _frontmatter(path)
+        ids = sorted({i for n in e["names"] for i in ruled.get(n, [])})
+        skills.append({"name": e["names"][0], "aliases": e["names"][1:], "source": e["source"],
+                       "path": path, "chars": len(body),
+                       "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest()[:16],
+                       "description": " ".join((meta.get("description") or "").split())[:200],
+                       "rules": ids})
+    skills.sort(key=lambda k: k["name"])
+    missing = sorted(({"rule": i, "skill": sk} for sk, ids in ruled.items() if sk not in known for i in ids),
+                     key=lambda m: (m["skill"], m["rule"]))
+    digest = hashlib.sha256(json.dumps(
+        [[k["name"], k["aliases"], k["chars"], k["sha256"]] for k in skills]).encode("utf-8")).hexdigest()[:16]
+    return {"version": 1, "digest": digest, "count": len(skills), "skills": skills,
+            "rules_missing_skill": missing,
+            "unreached": [k["name"] for k in skills if not k["rules"]]}
+
+
+def catalog_changes(old, new):
+    """What differs between two catalogs: skills added, removed, or edited."""
+    a = {k["name"]: k["sha256"] for k in (old or {}).get("skills", [])}
+    b = {k["name"]: k["sha256"] for k in new["skills"]}
+    return {"added": sorted(set(b) - set(a)), "removed": sorted(set(a) - set(b)),
+            "changed": sorted(n for n in set(a) & set(b) if a[n] != b[n])}
+
+
+def scan(rules, used, out=None, check=False):
+    """Rescan and report. Returns (report dict, exit code)."""
+    out = Path(out).expanduser() if out else CATALOG
+    cat = build_catalog(inventory_entries(), rules)
+    try:
+        old = json.loads(out.read_text(encoding="utf-8")) if out.is_file() else None
+    except (ValueError, OSError):
+        old = None
+    changes = catalog_changes(old, cat) if old else None
+    drift = bool(changes and any(changes.values()))
+    if not check:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(cat, indent=1) + "\n", encoding="utf-8")
+        _ignore_in_feature_ladder(out)
+    report = {"catalog": str(out), "written": not check, "digest": cat["digest"], "skills": cat["count"],
+              "names": sum(1 + len(k["aliases"]) for k in cat["skills"]), "rule_files": used,
+              "rules_missing_skill": cat["rules_missing_skill"],
+              "unreached_count": len(cat["unreached"]), "unreached": cat["unreached"],
+              "since_last_scan": changes if old else "no earlier catalog"}
+    return report, (1 if check and (cat["rules_missing_skill"] or drift or old is None) else 0)
 
 
 # -------------------------------------------------------------- matching ---
@@ -262,11 +370,14 @@ def select(task, settings, rules, inv):
         picked.pop(n, None)
 
     ranked = sorted(picked.items(), key=lambda kv: (-kv[1][0], kv[1][1], kv[0]))
-    chosen, dropped, unresolved, total, groups = [], [], [], 0, set()
+    chosen, dropped, unresolved, total, groups, files = [], [], [], 0, set(), {}
     for name, (pri, _, why, group) in ranked:
         path = inv.get(name)
         if path is None:
             unresolved.append(name)
+            continue
+        if str(path) in files:   # two names for one SKILL.md (docx, anthropic-skills:docx)
+            dropped.append({"skill": name, "reason": f"same file as {files[str(path)]}"})
             continue
         if group and group in groups:
             dropped.append({"skill": name, "reason": f"group '{group}' already filled"})
@@ -279,6 +390,7 @@ def select(task, settings, rules, inv):
             dropped.append({"skill": name, "reason": f"over max_chars for this role ({size} chars, budget {max_chars})"})
         else:
             total += size
+            files[str(path)] = name
             if group:
                 groups.add(group)
             chosen.append({"skill": name, "priority": pri, "chars": size,
@@ -363,6 +475,12 @@ def main(argv):
     if argv[0] == "--list":
         list_all(settings, rules, used, inv)
         return 0
+    if argv[0] == "--scan":
+        rest = argv[1:]
+        out = rest[rest.index("--out") + 1] if "--out" in rest and rest.index("--out") + 1 < len(rest) else None
+        report, code = scan(rules, used, out, "--check" in rest)
+        print(json.dumps(report, indent=2))
+        return code
     want_inject = "--inject" in argv
     out = None
     args = []

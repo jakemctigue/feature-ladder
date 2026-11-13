@@ -34,6 +34,10 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           may be worth it at the end of the session), `switches` and
           `secrets` (names the feature needs, never values). A
           `session_agents` decision sets the session's subagent budget.
+          An `orchestrator` decision (asked up front, once per session:
+          "Opus 5.5 xhigh" or "Fable 5.2") sets the model the coordinator
+          runs on; the answers' "orchestrator": "fable" | "opus" (the
+          --orchestrator switch) does the same for this run without asking.
 
   card    '<task json>'
           Route one task AND select its skills in one call. The JSON takes
@@ -632,6 +636,14 @@ def decide(prop, mode="default", max_q=8):
                                          "(The intake scout and the coordinator are not counted; GLM workers are.)",
                              "options": opts})
 
+    # The orchestrator: asked once per coding session, first of all. Fable is
+    # only ever used when the user picks it here (or passed --orchestrator).
+    if not sess.get("orchestrator", {}).get("chosen") and mode != "auto":
+        decisions.insert(0, {"id": "orchestrator", "header": "Orchestrator",
+                             "question": "Which model should orchestrate this coding session (run the coordinator)?",
+                             "options": [{"label": o["label"], "description": o["description"]}
+                                         for o in (session_budget.ORCHESTRATORS[k] for k in ("opus", "fable"))]})
+
     # No outside-repo policy question since v1.11: every step the feature needs
     # (deploys, data steps, the merge) runs and is logged by irreversible.py
     # with "review: pending" where it touched production; the report lists it.
@@ -700,7 +712,7 @@ def apply(prop, answers):
     # Answering every design decision the scout raised removes the ambiguity
     # that would otherwise escalate. Built-in questions (workspace, policy) are
     # not design decisions, and an explicit user answer for ambiguity stands.
-    builtin = {"workspace", "outside_policy", "session_agents"}
+    builtin = {"workspace", "outside_policy", "session_agents", "orchestrator"}
     scout_ids = {d.get("id") or slugify(d.get("question", "decision")) for d in prop.get("open_decisions", [])}
     answered = [k for k in decisions if k in scout_ids and k not in assumed_decisions]
     unresolved = [k for k in answered if not decisions[k] or str(decisions[k]).lower().startswith("you decide")]
@@ -720,6 +732,13 @@ def apply(prop, answers):
         agents_left = session_status(prop.get("repo_root")).get("left")
     switches = sorted({str(x).strip().lstrip("-").replace("-", "_") for x in answers.get("switches") or []}
                       & {"second_opinion", "escalate", "ultra"})
+    # The --orchestrator switch wins for this run; then the up-front answer;
+    # then what the session already holds; then Opus xhigh. Never Fable unasked.
+    orch_pick = answers.get("orchestrator")
+    orch_asked = None if orch_pick else decisions.get("orchestrator")
+    orch = session_budget.orchestrator(session_budget.find_root(prop.get("repo_root") or os.getcwd()),
+                                       orch_pick or orch_asked)
+    orch["asked"] = bool(orch_asked)
     secrets = prop.get("secrets") or {}
     needed = answers.get("secrets") if isinstance(answers.get("secrets"), list) else secrets.get("names", [])
     return {
@@ -732,6 +751,7 @@ def apply(prop, answers):
         "codex": codex_recommendation(final, prop.get("request", ""), r),
         "budget": budget_for(r, final, agents_left),
         "session_agents": sess_size,
+        "orchestrator": orch,
         "switches": switches,
         "secrets": {"provider": secrets.get("provider"), "project": secrets.get("project"),
                     "names": needed, "template_keys": secrets.get("template_keys", [])},
@@ -880,9 +900,15 @@ def main(argv):
             prop = _load(rest[0])
             answers = _load(rest[1]) if len(rest) > 1 else {}
             result = apply(prop, answers)
+            sroot = session_budget.find_root(prop.get("repo_root") or os.getcwd())
+            if result["orchestrator"].pop("asked", False):  # the session's answer; a switch is one run only
+                session_budget.set_orchestrator(sroot, result["orchestrator"]["key"])
+                result["orchestrator"]["source"] = "asked"
+            session_budget.set_run_orchestrator(  # the switch, for the hook; cleared when there is none
+                sroot, result["orchestrator"]["key"] if result["orchestrator"]["source"] == "switch" else None,
+                prop.get("slug"))
             if result.get("session_agents"):
-                result["session"] = session_budget.set_size(
-                    session_budget.find_root(prop.get("repo_root") or os.getcwd()), result["session_agents"])
+                result["session"] = session_budget.set_size(sroot, result["session_agents"])
             if not out:
                 root = prop.get("repo_root") or os.getcwd()
                 _ensure_ignore(root)

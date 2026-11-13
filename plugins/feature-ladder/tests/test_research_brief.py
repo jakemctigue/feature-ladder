@@ -106,6 +106,18 @@ class Brief(unittest.TestCase):
                 self.assertNotIn(pct, cost)
             self.assertRegex(cost, r"(low|medium|high) token cost")
 
+    def test_orchestrator_shows_without_digits_and_is_not_a_design_decision(self):
+        f = fields()
+        for orch, want in (({"key": "fable", "label": "Fable 5.2", "model": "fable", "effort": "medium"}, "Fable medium"),
+                           ({"key": "opus", "label": "Opus 5.5 xhigh", "model": "opus", "effort": "xhigh"}, "Opus xhigh"),
+                           (None, "Opus xhigh")):
+            md = brief.make_brief(data(fields=f, route=router.route(f), orchestrator=orch, open_decisions=[],
+                                       decisions={"orchestrator": "Fable 5.2", "session_agents": "Small"}))
+            cost = sections(md)["2"]
+            self.assertIn(f"| coordinator | {want} |", cost)
+            self.assertIsNone(re.search(r"\d", cost), cost)
+            self.assertNotIn("orchestrator: Fable", md)
+
     def test_three_parts_in_order(self):
         md = brief.make_brief(data())
         heads = re.findall(r"(?m)^## (.*)$", md)

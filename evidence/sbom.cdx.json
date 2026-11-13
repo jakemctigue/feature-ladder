@@ -61,7 +61,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "091484efeeda37e30b1111ec0e3c42abc84b53a03d1a1a4a0c0ddaa589c414c8"
+          "content": "03be4a21b5d720ef15def5402f4bb98153ca4be4abddfa187f67df774d11ef89"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/brief.py",
@@ -72,7 +72,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "b61b935ce246355fcbaa898d78c82c6bf5e43d66ea340f9b4dede6145879adcd"
+          "content": "d89bae01e5b57a32f72c242d0a020812fe26d716868b97ad5cbbd4a65e475e11"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/intake.py",
@@ -160,7 +160,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "43194606116dae3519ffe11cd74ba9e2931e21a9d357f7160d72149f2ee0db60"
+          "content": "7b282dd5c914824f0a25778688766e41df697b3b0989aaaf01a714a05e226416"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/pr_checkpoint.py",
@@ -171,7 +171,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "e8e93cc0a3d2833c2ac0d62e1b726b5a24b1b7ec6384e5e53c0c18a8c640a29f"
+          "content": "4a059ad82e8e1aaae44c7d32c9a2b31f774e44887ac04e688fa29291f6c18627"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/session_budget.py",
@@ -204,7 +204,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "453c7f5222816a22418297b9db6180907341a7795697a14152c265cf9d68fcdf"
+          "content": "cb7febb747aec494c005ff06997a8b98130130c997326f1af80aabce2b5653df"
         }
       ],
       "name": "plugins/feature-ladder/skills/skill-selector/scripts/select_skills.py",
@@ -229,7 +229,7 @@
       ],
       "name": "feature-ladder",
       "type": "application",
-      "version": "1.15.2"
+      "version": "1.16.0"
     },
     "tools": {
       "components": [
