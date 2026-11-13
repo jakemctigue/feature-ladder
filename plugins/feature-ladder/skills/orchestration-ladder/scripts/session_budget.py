@@ -12,6 +12,16 @@ The intake scout and the coordinator are not counted; every worker, expert,
 reviewer and mechanic is, and so is every external (GLM) worker. State lives
 in <repo>/.feature-ladder/session.json (git-ignored).
 
+In the same round the user picks the session's orchestrator, the model the
+coordinator runs on:
+
+    opus  = Opus 5.5 at xhigh effort     fable = Fable 5.2
+
+It is asked once per coding session, up front, beside the budget. A run
+started with `--orchestrator fable|opus` answers it in advance. Nothing picks
+Fable on its own: with no answer (--auto) the coordinator runs on Opus xhigh,
+and a coordinator spawn on Fable is denied unless the user chose Fable.
+
 As a PreToolUse hook on Agent/Task it denies a spawn when:
   - the session budget is spent;
   - a run is active and the spawn is something a feature run never does:
@@ -27,6 +37,9 @@ As a PreToolUse hook on Agent/Task it denies a spawn when:
 
     session_budget.py status [--cwd DIR]          JSON: size, max, used, left (or "unset")
     session_budget.py set --size S|M|L [--cwd DIR]
+    session_budget.py orchestrator [--set opus|fable] [--cwd DIR]
+                                                  JSON: the session's orchestrator (key, label, model,
+                                                  effort, chosen); --set stores the user's answer
     session_budget.py charge --agent NAME [--model M] [--cwd DIR]
                                                   for spawns no hook sees (external workers);
                                                   exit 0 allowed, 4 denied (reason on stdout)
@@ -57,6 +70,17 @@ WRAP_ONLY = {"codex-reviewer", "memory-scribe"}  # memory is written by memory_g
 DESIGN_RUNGS = {"domain-expert", "domain-expert-high"}
 INTEGRATOR = "integrator"  # the one Fable rung a run reaches on its own: after >= 2 coding agents
 INTEGRATOR_MIN_WORKERS = 2
+
+# The orchestrator: the model the coordinator runs on, picked by the user once
+# per session in the up-front question. `model` and `effort` are what the Agent call passes; `model_id` is
+# the full id for callers that need one.
+ORCHESTRATORS = {
+    "opus": {"label": "Opus 5.5 xhigh", "model": "opus", "model_id": "claude-opus-5-5", "effort": "xhigh",
+             "description": "Opus 5.5 at xhigh effort runs the coordinator. Used when nothing is picked."},
+    "fable": {"label": "Fable 5.2", "model": "fable", "model_id": "claude-fable-5-2", "effort": "medium",
+              "description": "Fable 5.2 runs the coordinator. Only ever used when you pick it here."},
+}
+DEFAULT_ORCHESTRATOR = "opus"  # never Fable unless the user said so
 
 
 def now():
@@ -117,10 +141,52 @@ def status(root):
     s = load(root)
     if not s.get("max_agents"):
         return {"budget": "unset", "session_id": s.get("session_id"),
-                "options": {k: SIZE_LABELS[k] for k in SIZES}}
+                "options": {k: SIZE_LABELS[k] for k in SIZES}, "orchestrator": orchestrator(root)}
     used = len(s.get("spawned", []))
     return {"budget": s["size"], "label": SIZE_LABELS[s["size"]], "max": s["max_agents"],
-            "used": used, "left": max(0, s["max_agents"] - used), "session_id": s.get("session_id")}
+            "used": used, "left": max(0, s["max_agents"] - used), "session_id": s.get("session_id"),
+            "orchestrator": orchestrator(root)}
+
+
+def orchestrator_key(value):
+    """'Fable 5.2', 'fable', 'claude-fable-5-2', 'Opus 5.5 xhigh', 'opus' -> key, or None."""
+    v = str(value or "").strip().lower()
+    if v.startswith("claude-"):
+        v = v[len("claude-"):]
+    for key in ORCHESTRATORS:
+        if v.startswith(key):
+            return key
+    return None
+
+
+def orchestrator(root, override=None):
+    """Which model coordinates this session. `override` is a run's
+    --orchestrator switch; otherwise the user's answer to the up-front
+    question, stored in session.json. `chosen` is False until one of those
+    exists: the fallback is then Opus xhigh, never Fable."""
+    key, source = orchestrator_key(override), "switch"
+    if override and key is None:
+        raise ValueError(f"orchestrator must be one of {sorted(ORCHESTRATORS)}")
+    if key is None:
+        key, source = orchestrator_key(load(root).get("orchestrator")), "asked"
+    if key is None:
+        key, source = DEFAULT_ORCHESTRATOR, "default"
+    o = ORCHESTRATORS[key]
+    return {"key": key, "label": o["label"], "model": o["model"], "model_id": o["model_id"],
+            "effort": o["effort"], "source": source, "chosen": source != "default"}
+
+
+def set_orchestrator(root, value):
+    """Store the user's answer for this session (asked again in the next one)."""
+    key = orchestrator_key(value)
+    if key is None:
+        raise ValueError(f"orchestrator must be one of {sorted(ORCHESTRATORS)}")
+    s = load(root)
+    s.update({"orchestrator": key, "orchestrator_set_at": now()})
+    s.setdefault("spawned", [])
+    s.setdefault("started", now())
+    save(root, s)
+    return orchestrator(root)
 
 
 def set_size(root, size):
@@ -143,6 +209,12 @@ def active_run(root):
 def check(root, agent, model=None, via="subagent"):
     """Decide one spawn. Returns (allowed, reason). Records it when allowed."""
     agent = str(agent or "").split(":")[-1]
+    if agent == "coordinator" and "fable" in str(model or "").lower():
+        run_pick = orchestrator_key(((active_run(root) or {}).get("orchestrator") or {}).get("key"))
+        if orchestrator(root, run_pick)["key"] != "fable":
+            return False, ("feature-ladder: the coordinator runs on Fable only when the user picked Fable 5.2 "
+                           "as the orchestrator (the up-front question, or --orchestrator fable on this "
+                           "run). Dispatch it with model opus, effort xhigh.")
     if agent in NOT_COUNTED:
         return True, ""
     sess = load(root)
@@ -282,6 +354,9 @@ def main(argv):
             print(json.dumps(status(root), indent=2))
         elif cmd == "set":
             print(json.dumps(set_size(root, opts.get("--size", "")), indent=2))
+        elif cmd == "orchestrator":
+            print(json.dumps(set_orchestrator(root, opts["--set"]) if "--set" in opts else orchestrator(root),
+                             indent=2))
         elif cmd == "charge":
             ok, reason = check(root, opts.get("--agent"), opts.get("--model"), via="external")
             print(json.dumps({"allowed": ok, "reason": reason}))

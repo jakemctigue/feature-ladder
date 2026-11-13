@@ -25,7 +25,7 @@ coordinator's judgment.
 | T3 | `implementer` | sonnet / high | Bounded coding, harder |
 | T4-T5 | `senior-implementer` | opus / medium or high | Difficult implementation under an agreed design |
 | D | `domain-expert(-high)` | opus / medium or high | One design step, only on a hard flag |
-| C | `coordinator` | opus / medium | Confidence, card, dispatch, verify.py, accept, merge: 12-24 turns |
+| C | `coordinator` | opus / xhigh, or fable when the user picked Fable 5.2 up front | Confidence, card, dispatch, verify.py, accept, merge: 12-24 turns |
 | FI | `integrator` | fable / medium | Once per feature, only after two or more different coding agents wrote code; coding tools (Read, Edit, Write, Bash, Glob, Grep) to reconcile seams, plus superpowers skills |
 | F-Low/High/Extra/Ultra | `second-opinion`, `deep-verifier`, `architect-escalation`, `ultra-investigator` | fable | Only with `--second-opinion`, `--escalate`, `--ultra` |
 | X | `codex-reviewer` | haiku / low driving OpenAI Codex | Only at `/feature-ladder:wrap --review` |
@@ -52,6 +52,12 @@ coordinator's judgment.
 ```
 
 ## Budgets (binding, enforced)
+
+**Orchestrator**: asked once per coding session, first, and stored in
+`.feature-ladder/session.json`: Opus 5.5 at xhigh effort or Fable 5.2 runs
+the coordinator. `--orchestrator fable|opus` answers it for one run without
+asking; with no answer it is Opus xhigh. The spawn hook denies a coordinator
+on Fable the user did not pick.
 
 **Session**: asked once per coding session, stored in
 `.feature-ladder/session.json`: Small 2 subagents, Medium 4, Large 8. The

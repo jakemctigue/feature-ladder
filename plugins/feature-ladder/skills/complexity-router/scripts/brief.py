@@ -53,14 +53,14 @@ def _rank(model, effort, glm):
     return 2
 
 
-def cost_rows(route, budget, reviewer=False, evidence=False):
+def cost_rows(route, budget, reviewer=False, evidence=False, orchestrator=None):
     """[(agent, rung text, label, billing)] for the predicted plan. No numbers."""
     size = route.get("size", "S")
     glm = route.get("provider") == "glm"
     rows = [("scout", "Sonnet medium", LABELS[1], CLAUDE)]
     if evidence:
         rows.append(("evidence collector (one call, external library)", "Haiku medium", LABELS[0], CLAUDE))
-    rows.append(("coordinator", "Opus medium", LABELS[2], CLAUDE))
+    rows.append(("coordinator", orchestrator or "Opus xhigh", LABELS[2], CLAUDE))
     if route.get("design_first"):
         rows.append(("design step", "Opus medium", LABELS[2], CLAUDE))
     model, effort = route.get("model"), route.get("effort")
@@ -97,7 +97,7 @@ def _top_modules(files):
 def make_brief(data):
     """data: request, fields{name: value}, route, budget, candidate_files, test_command,
     secrets{names}, environments, open_decisions, decisions, switches, skills,
-    external{name, notes}, reviewer, assumed. Returns markdown."""
+    external{name, notes}, reviewer, assumed, orchestrator{label}. Returns markdown."""
     fields = data.get("fields") or {}
     route = data.get("route") or router.route(fields)
     budget = data.get("budget") or intake.budget_for(route, fields)
@@ -145,7 +145,8 @@ def make_brief(data):
         if external.get("notes"):
             lines += _bullets(str(external["notes"]).strip().splitlines()[:8], "")
     lines.append("")
-    lines.append(cost_section(cost_rows(route, budget, bool(data.get("reviewer")), bool(external))))
+    lines.append(cost_section(cost_rows(route, budget, bool(data.get("reviewer")), bool(external),
+                                        (data.get("orchestrator") or {}).get("label"))))
     model = MODEL_NAMES.get(route.get("model"), route.get("model"))
     rung = (f"GLM Flash worker (falls back to {model} {route.get('effort')} if the GLM tier is off)"
             if route.get("provider") == "glm" else f"{model} {route.get('effort')} ({route.get('agent')})")
@@ -198,6 +199,8 @@ def data_from(prop, conf, switches, evidence=None, external=None):
         "decisions": conf.get("decisions") or {},
         "switches": switches, "assumed": assumed,
         "reviewer": bool((conf.get("codex") or {}).get("at_wrap")),
+        "orchestrator": conf.get("orchestrator") or intake.session_budget.orchestrator(
+            intake.session_budget.find_root(prop.get("repo_root") or os.getcwd())),
     }
     if external:
         data["external"] = {"name": external, "notes": evidence or ""}

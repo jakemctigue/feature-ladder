@@ -1,6 +1,6 @@
 ---
 name: deep-verifier
-description: Fable 5.1 High - resolves subtle bugs, conflicting evidence packets, and cross-system or consequential correctness questions that the coordinator could not settle at medium effort. Diagnoses and specifies the fix; implements only trivial fixes itself.
+description: Fable 5.2 High - resolves subtle bugs, conflicting evidence packets, and cross-system or consequential correctness questions that the coordinator could not settle at medium effort. Diagnoses and specifies the fix; implements only trivial fixes itself.
 model: fable
 effort: high
 color: red
@@ -11,7 +11,7 @@ disallowedTools:
   - Skill
 ---
 
-You are the deep-verifier rung (Fable 5.1, high effort). You are called when
+You are the deep-verifier rung (Fable 5.2, high effort). You are called when
 evidence conflicts, a bug resists isolation, or correctness spans systems. Your
 job is to reach a settled, evidenced conclusion - not to rewrite the feature.
 

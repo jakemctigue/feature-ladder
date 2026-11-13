@@ -22,9 +22,6 @@
       }
     },
     {
-      "expect_absent": [
-        "superpowers:systematic-debugging"
-      ],
       "expect_dropped": {},
       "expect_order": [
         "engineering:debug",
@@ -63,10 +60,6 @@
       }
     },
     {
-      "expect_absent": [
-        "superpowers:test-driven-development",
-        "engineering:testing-strategy"
-      ],
       "expect_dropped": {},
       "expect_order": [],
       "expect_unresolved": [],
@@ -106,13 +99,12 @@
         "engineering:testing-strategy": "group 'testing' already filled"
       },
       "expect_order": [
-        "figma:figma-design-to-code",
-        "frontend-design",
+        "frontend-ui-engineering",
         "superpowers:test-driven-development"
       ],
       "expect_unresolved": [],
       "installed": "claude-code",
-      "name": "figma-keyword-outranks-everything-for-implementer",
+      "name": "frontend-file-in-scope-adds-the-ui-skill",
       "task": {
         "flags": {},
         "kind": "code",
@@ -120,7 +112,63 @@
           "web/settings.tsx"
         ],
         "role": "implementer",
-        "text": "build the settings page from the figma frame"
+        "text": "build the settings page"
+      }
+    },
+    {
+      "expect_dropped": {
+        "engineering:testing-strategy": "group 'testing' already filled"
+      },
+      "expect_order": [
+        "security-and-hardening",
+        "superpowers:test-driven-development",
+        "superpowers:verification-before-completion"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "security-flag-gives-the-senior-the-hardening-skill",
+      "task": {
+        "flags": {
+          "security": true
+        },
+        "kind": "code",
+        "paths": [],
+        "role": "senior-implementer",
+        "text": "add the token exchange endpoint"
+      }
+    },
+    {
+      "expect_dropped": {
+        "engineering:testing-strategy": "group 'testing' already filled"
+      },
+      "expect_order": [
+        "superpowers:test-driven-development"
+      ],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "security-flag-alone-gives-an-implementer-nothing-extra",
+      "task": {
+        "flags": {
+          "security": true
+        },
+        "kind": "code",
+        "paths": [],
+        "role": "implementer",
+        "text": "add the token exchange endpoint"
+      }
+    },
+    {
+      "expect_dropped": {},
+      "expect_order": [],
+      "expect_unresolved": [],
+      "installed": "claude-code",
+      "name": "removed-aws-and-figma-rules-select-nothing",
+      "task": {
+        "flags": {},
+        "kind": "fixture",
+        "paths": [],
+        "role": "mechanic",
+        "text": "sync the figma export to s3 with boto3 and cdk"
       }
     },
     {
@@ -151,8 +199,8 @@
         "superpowers:test-driven-development": "over max_skills"
       },
       "expect_order": [
-        "figma:figma-design-to-code",
         "superpowers:systematic-debugging",
+        "setup-pre-commit",
         "superpowers:receiving-code-review"
       ],
       "expect_unresolved": [],
@@ -165,13 +213,10 @@
           "a.sql"
         ],
         "role": "implementer",
-        "text": "fix the failing code review feedback in the figma export"
+        "text": "fix the failing code review feedback in the husky hook"
       }
     },
     {
-      "expect_absent": [
-        "engineering:documentation"
-      ],
       "expect_dropped": {
         "engineering:documentation": "over max_chars for this role (100 chars, budget 0)"
       },
@@ -228,9 +273,6 @@
       }
     },
     {
-      "expect_absent": [
-        "superpowers:test-driven-development"
-      ],
       "expect_dropped": {},
       "expect_order": [
         "engineering:testing-strategy"

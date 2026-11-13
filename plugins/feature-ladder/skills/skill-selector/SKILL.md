@@ -73,6 +73,18 @@ implementer. Anything cut is reported, never silently included.
 Skill names: personal and project skills by their own name (`aws-cdk`,
 `eh:debug`); plugin skills as `plugin:skill` (`superpowers:test-driven-development`).
 
+## Rescan
+
+`select_skills.py --scan [--out PATH] [--check]` walks every installed skill
+and writes a catalog (default `~/.claude/feature-ladder/skill-catalog.json`):
+one record per SKILL.md with its names, source, size, content hash and
+description. It reports rules whose skill is not installed, installed skills
+no rule reaches, and what changed since the last scan. Same installed skills,
+same catalog and digest; `--check` writes nothing and exits 1 on a missing
+rule target or on drift. A plugin's skills resolve under both its marketplace
+key and its manifest name (`data-agent-kit:bigquery-sql`, `dak:bigquery-sql`);
+one SKILL.md is never injected twice under two names.
+
 ## When a rule is wrong
 
 Do not override it in the moment. Note the miss in FEATURE-REPORT.md with the
