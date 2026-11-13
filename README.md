@@ -40,6 +40,10 @@ flowchart LR
     G -. "end of session" .-> W["/feature-ladder:wrap<br/>memory flush, ledger,<br/>reviews if asked"]
 ```
 
+For a whole app, `--brainstorm` puts one step in front: every application and
+architecture detail is settled in one round of questions, the app is split
+into features in build order, and each feature then takes the run above.
+
 ### The ladder
 
 🟩 GLM 5.3 Flash (OpenRouter) · 🟢 Haiku · 🟦 Sonnet 5.5 · 🟪 Opus 5.5 · 🟧 Fable 5.2 · ⬜ Codex
@@ -313,7 +317,7 @@ the start of a conversation it downloads `route.py`, `intake.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
 `skill-rules.json`, `resolve_bank.py` and `memory_gate.py` from this repo,
-pinned to a release tag (currently `v1.16.0`), so the app and Claude Code
+pinned to a release tag (currently `v1.17.0`), so the app and Claude Code
 always run identical logic. The app session needs code execution and network
 access to GitHub.
 
@@ -341,7 +345,7 @@ fill in the keys, then `./start.sh` and `python3 roundtrip_test.py`.
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto] [--no-merge] [--orchestrator fable\|opus] [--researcher] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
+| `/feature-ladder:feature <request> [--auto] [--no-merge] [--orchestrator fable\|opus] [--brainstorm] [--researcher] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR. With `--brainstorm`: the whole app is settled first, then built feature by feature |
 | `/feature-ladder:scope <request>` | Intake alone; the next `feature` with the same text reuses it without asking |
 | `/feature-ladder:research <request>` | A short research brief, no build and no questions: what the feature wants from this codebase, a qualitative cost label per agent (never a number) and what to expect |
 | `/feature-ladder:wrap [--review] [--adversarial] [--second-opinion]` | End of session: optional reviews over the whole session's diff, then the memory flush |
@@ -354,9 +358,31 @@ fill in the keys, then `./start.sh` and `python3 roundtrip_test.py`.
 Switches on `feature`: `--auto` asks nothing and takes the scout's values and
 the recommended options; `--no-merge` leaves the PR stack open;
 `--orchestrator fable|opus` picks the coordinator's model for this run
-without asking; `--second-opinion` allows one Fable answer to one sharp question;
+without asking; `--brainstorm` settles the whole app before any feature is
+scoped (below); `--second-opinion` allows one Fable answer to one sharp question;
 `--escalate` allows the Fable debugging rungs; `--ultra` also allows the
 ultra-investigator. Reviews are not feature switches: they belong to `wrap`.
+
+**Brainstorm.** `--brainstorm` on `feature` is for a whole app, or a large
+piece of one. Before anything is narrowed into features, the scout fills an
+app sheet of 30 details, 12 about the application (purpose, users, workflows,
+screens, data model, permissions, integrations, notifications, content, edge
+cases, what is out of scope, what success looks like) and 18 about the
+architecture (platform, stack, frontend, backend, data store, sign-in,
+hosting, secrets, background work, files, monitoring, testing, CI, scale,
+security, layout, libraries, rollout), plus any the app needs that the sheet
+lacks. `brainstorm.py scan` settles what the repo's manifests and files
+already settle, with no model. Then you are asked once, in batches of four:
+every detail that is not certain (not only the ones that would change the
+model), the two session questions, and what to build afterwards (every
+feature, the first only, or plan only). Your answers become
+`.feature-ladder/brainstorm/<slug>.md` and a feature queue in build order; a
+feature whose details you changed is rewritten, and one whose details you
+all marked not needed is dropped. Each feature then runs as a normal atomic
+feature without asking again, and its cards carry only the details that
+feature covers. The session subagent budget still stops the queue; the same
+request with `--brainstorm` again continues it. It adds no agent beyond the
+Sonnet scout: no Opus, no Fable.
 
 **Researcher.** `/feature-ladder:research` (or `--researcher` on `feature`) reuses
 the intake scan, the scout's proposal, the router and the skill selector, and
@@ -855,6 +881,7 @@ here is stdlib Python; nothing calls a model.
 | Deterministic routing (`route.py`) | ✅ | ✅ same script |
 | Deterministic skill selection (`select_skills.py`) | ✅ | ✅ same script, same rules |
 | Intake (ask once, up front) | ✅ scoper agent + question cards | ✅ same script; questions asked in chat |
+| Brainstorm (`--brainstorm`: the whole app settled before features) | ✅ scoper in brainstorm mode + `brainstorm.py` | ✅ same script; the conversation is the scout |
 | Confidence surface (recall -> sentiment -> proceed / reshard) | ✅ `confidence.py` | ✅ same script |
 | Session subagent budget | ✅ enforced by a spawn hook | ✅ `session_budget.py charge` before each subagent |
 | GLM tier through OpenRouter | ✅ | ✅ when the Claude CLI and a key are on that machine |
@@ -879,7 +906,7 @@ plugins/feature-ladder/
   agents/                              14 agents (13 rungs + scoper)
   commands/                            feature, wrap, scope, route, skills, recall, codex-review, workers
   skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, confidence.py, with_secrets.py, verify.py, session_budget.py, external_worker.py
-  skills/complexity-router/            route.py + intake.py
+  skills/complexity-router/            route.py + intake.py + brief.py + brainstorm.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/worker-contract/              the short contract every worker preloads instead of the full protocol
   skills/hindsight-memory/             memory rules + resolve_bank.py + memory_gate.py
@@ -938,7 +965,8 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.16.0** | The orchestrator is your pick, asked up front once per session: Opus 5.5 xhigh or Fable 5.2 runs the coordinator (`--orchestrator fable\|opus` answers in advance; a hook denies a Fable coordinator you did not pick). `select_skills.py --scan` rescans every installed skill into a deterministic catalog with a coverage report; multi-line descriptions and plugin manifest names (`dak:`) are read correctly; the shipped rules were refreshed against the rescan (22 rules for skills that are gone removed, 3 retargeted, 20 added) |
+| **v1.17.0** | `--brainstorm` on `feature` and in the app skill: every application and architecture detail of the whole app (30 on the sheet, plus any the scout adds) is settled at the very front in one round of questions, then the app is split into a feature queue in build order and each feature runs as a normal atomic run with only its own details on its cards. `brainstorm.py` (scan, decide, apply, features, next, done, context) costs no model tokens; the phase adds no agent beyond the Sonnet scout, and the session subagent budget still stops the queue |
+| v1.16.0 | The orchestrator is your pick, asked up front once per session: Opus 5.5 xhigh or Fable 5.2 runs the coordinator (`--orchestrator fable\|opus` answers in advance; a hook denies a Fable coordinator you did not pick). `select_skills.py --scan` rescans every installed skill into a deterministic catalog with a coverage report; multi-line descriptions and plugin manifest names (`dak:`) are read correctly; the shipped rules were refreshed against the rescan (22 rules for skills that are gone removed, 3 retargeted, 20 added) |
 | v1.15.2 | The `orchestration-ladder` skill and the `/feature-ladder:feature` command have valid frontmatter again: both descriptions held an unquoted `review: pending`, which is invalid YAML, so a strict parser rejected the whole block and the skill was dropped; both are quoted, and `test_skill_frontmatter.py` now checks every skill, agent and command for the same mistake |
 | v1.15.1 | Windows CI: the research-brief round-trip test compares resolved paths, so an 8.3 short temp path (`RUNNER~1`) no longer fails it; README gains an At a glance section |
 | v1.15.0 | `--researcher` switch and `/feature-ladder:research`: a brief of what a feature wants from the codebase, qualitative per-agent cost labels (never a number) and what to expect; the Fable integrator has coding tools and returns an Evidence Packet; the Jev confidence scorer gets an indexed contract, lexicon-scale anchors, per-fact fallback and an injectable transport with recorded fixtures |

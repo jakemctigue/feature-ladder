@@ -552,6 +552,36 @@ def _options(name, f):
     return out[:4]
 
 
+def session_decisions(repo_root_path, rec="S", mode="default"):
+    """The questions asked once per coding session, in asking order: which
+    model orchestrates, then how many subagents the session may spawn. Empty
+    once answered, and with --auto. Shared with brainstorm.py, which asks them
+    in its own up-front round so no later intake has to."""
+    if mode == "auto":
+        return []
+    sess = session_status(repo_root_path)
+    out = []
+    # The orchestrator: asked first of all. Fable is only ever used when the
+    # user picks it here (or passed --orchestrator).
+    if not sess.get("orchestrator", {}).get("chosen"):
+        out.append({"id": "orchestrator", "header": "Orchestrator",
+                    "question": "Which model should orchestrate this coding session (run the coordinator)?",
+                    "options": [{"label": o["label"], "description": o["description"]}
+                                for o in (session_budget.ORCHESTRATORS[k] for k in ("opus", "fable"))]})
+    if sess.get("budget") == "unset":
+        opts = [{"label": f"{session_budget.SIZE_LABELS[k]}" + (" (Recommended)" if k == rec else ""),
+                 "description": {"S": "Enough for one or two small features",
+                                 "M": "Several features, or one with a design step",
+                                 "L": "A long session of many features"}[k]}
+                for k in ("S", "M", "L")]
+        opts.sort(key=lambda o: 0 if o["label"].endswith("(Recommended)") else 1)
+        out.append({"id": "session_agents", "header": "Subagents",
+                    "question": "How many subagents may the ladder spawn in this whole coding session? "
+                                "(The intake scout and the coordinator are not counted; GLM workers are.)",
+                    "options": opts})
+    return out
+
+
 def decide(prop, mode="default", max_q=8):
     vals = _values(prop)
     base = router.route(vals)
@@ -621,28 +651,8 @@ def decide(prop, mode="default", max_q=8):
                                          {"label": "Stash them", "description": "git stash; you get them back with git stash pop"},
                                          {"label": "Stop", "description": "Do not start; I will commit them myself"}]})
 
-    # Session subagent budget: asked once per coding session, in this round.
-    sess = session_status(prop.get("repo_root"))
-    if sess.get("budget") == "unset" and mode != "auto":
-        rec = base.get("size", "S")
-        opts = [{"label": f"{session_budget.SIZE_LABELS[k]}" + (" (Recommended)" if k == rec else ""),
-                 "description": {"S": "Enough for one or two small features",
-                                 "M": "Several features, or one with a design step",
-                                 "L": "A long session of many features"}[k]}
-                for k in ("S", "M", "L")]
-        opts.sort(key=lambda o: 0 if o["label"].endswith("(Recommended)") else 1)
-        decisions.insert(0, {"id": "session_agents", "header": "Subagents",
-                             "question": "How many subagents may the ladder spawn in this whole coding session? "
-                                         "(The intake scout and the coordinator are not counted; GLM workers are.)",
-                             "options": opts})
-
-    # The orchestrator: asked once per coding session, first of all. Fable is
-    # only ever used when the user picks it here (or passed --orchestrator).
-    if not sess.get("orchestrator", {}).get("chosen") and mode != "auto":
-        decisions.insert(0, {"id": "orchestrator", "header": "Orchestrator",
-                             "question": "Which model should orchestrate this coding session (run the coordinator)?",
-                             "options": [{"label": o["label"], "description": o["description"]}
-                                         for o in (session_budget.ORCHESTRATORS[k] for k in ("opus", "fable"))]})
+    # The once-per-session questions come first: orchestrator, then the budget.
+    decisions[0:0] = session_decisions(prop.get("repo_root"), base.get("size", "S"), mode)
 
     # No outside-repo policy question since v1.11: every step the feature needs
     # (deploys, data steps, the merge) runs and is logged by irreversible.py
@@ -758,6 +768,9 @@ def apply(prop, answers):
         "decisions": decisions,
         "assumed_decisions": assumed_decisions,
         "notes": answers.get("notes", []),
+        # With --brainstorm: {"sheet", "feature", "context"} from brainstorm.py next;
+        # `context` is the settled app detail this feature's cards carry.
+        "brainstorm": answers.get("brainstorm") if isinstance(answers.get("brainstorm"), dict) else None,
         "workspace": ("stash" if str(decisions.get("workspace", "")).lower().startswith("stash")
                       else "stop" if str(decisions.get("workspace", "")).lower().startswith("stop")
                       else "include"),
@@ -776,7 +789,7 @@ def _ensure_ignore(root):
     gi = d / ".gitignore"
     lines = gi.read_text(encoding="utf-8").splitlines() if gi.is_file() else []
     changed = False
-    for entry in ("intake/", "reviews/", "adversarial/", "checkpoints/", "run.json", "session.json", "session-memory*.md",
+    for entry in ("intake/", "brainstorm/", "reviews/", "adversarial/", "checkpoints/", "run.json", "session.json", "session-memory*.md",
               "memory-gate.json", "memory-ledger.jsonl"):
         if entry not in lines:
             lines.append(entry)

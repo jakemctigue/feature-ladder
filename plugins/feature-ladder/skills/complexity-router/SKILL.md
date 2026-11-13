@@ -59,6 +59,24 @@ delegated (driven by the `scoper` agent and `/feature-ladder:feature`):
 
 The coordinator treats the confirmed intake as binding for per-task fields.
 
+## Brainstorm: the whole app before any feature (`--brainstorm`)
+
+`scripts/brainstorm.py` runs before the intake when the user asks for it:
+
+1. `scan "<request>"` - the app sheet: 30 application and architecture
+   details, each settled where the repo's manifests and files settle it.
+2. The scout follows `guide`: settles every detail (value, confidence,
+   evidence, options) and drafts the features.
+3. `decide SHEET` - asks **every** applicable detail that is not high
+   confidence, application first, plus the session questions and what to
+   build (every feature, the first, plan only). One round.
+4. `apply SHEET ANSWERS` - the confirmed sheet (`.feature-ladder/brainstorm/<slug>.json`
+   and `.md`) and the feature queue in build order (`features` replaces it
+   after a revision).
+5. `next` / `done` hand the features out one at a time; `context --feature ID`
+   is the short block that feature's cards carry (the details it covers plus
+   stack, layout and tests), never the whole sheet.
+
 ## Filling the fields
 
 - `files`, `loc`, `modules`: estimate from a quick `Grep`/`Glob` of the area, not from the feature description.
