@@ -186,6 +186,16 @@ class SmallFirestoreWrite(unittest.TestCase):
         with self.assertRaises(ValueError):
             intake.apply(dict(self.scan, fields=scoper_fields(self.scan)), {"orchestrator": "sonnet"})
 
+    def test_orchestrator_switch_reaches_the_hook_without_a_run_file(self):
+        # Not a git repo, or the hand-off before `start`: there is no run.json.
+        self.assertFalse(session_budget.check(self.root, "coordinator", "fable")[0])
+        self.apply_cli({"orchestrator": "fable", "decisions": {"session_agents": "Small"}})
+        self.assertFalse((self.root / ".feature-ladder" / "run.json").exists())
+        self.assertTrue(session_budget.check(self.root, "coordinator", "fable")[0])
+        self.assertFalse(session_budget.orchestrator(self.root)["chosen"])  # still one run only
+        self.apply_cli({"decisions": {"session_agents": "Small"}})          # the next run, no switch
+        self.assertFalse(session_budget.check(self.root, "coordinator", "fable")[0])
+
     def test_router_never_picks_fable(self):
         for score_fields in ({}, {"files": 8, "loc": 400, "modules": 3, "security": True, "concurrency": True,
                                   "cross_system": True, "novelty": 3, "blast_radius": 3, "ambiguity": 3}):

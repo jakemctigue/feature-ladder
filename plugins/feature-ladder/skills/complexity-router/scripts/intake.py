@@ -904,6 +904,9 @@ def main(argv):
             if result["orchestrator"].pop("asked", False):  # the session's answer; a switch is one run only
                 session_budget.set_orchestrator(sroot, result["orchestrator"]["key"])
                 result["orchestrator"]["source"] = "asked"
+            session_budget.set_run_orchestrator(  # the switch, for the hook; cleared when there is none
+                sroot, result["orchestrator"]["key"] if result["orchestrator"]["source"] == "switch" else None,
+                prop.get("slug"))
             if result.get("session_agents"):
                 result["session"] = session_budget.set_size(sroot, result["session_agents"])
             if not out:

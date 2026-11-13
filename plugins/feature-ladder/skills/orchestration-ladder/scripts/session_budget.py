@@ -189,6 +189,20 @@ def set_orchestrator(root, value):
     return orchestrator(root)
 
 
+def set_run_orchestrator(root, value, slug=None):
+    """Remember a run's --orchestrator switch in session.json, so the spawn
+    hook honours it even when no run.json exists (a folder that is not a git
+    repo). The next confirmed intake replaces or clears it: one run only."""
+    key = orchestrator_key(value)
+    s = load(root)
+    if key is None and not s.get("orchestrator_run"):
+        return
+    s["orchestrator_run"] = {"key": key, "slug": slug, "at": now()} if key else None
+    s.setdefault("spawned", [])
+    s.setdefault("started", now())
+    save(root, s)
+
+
 def set_size(root, size):
     size = str(size).strip().upper()[:1]
     if size not in SIZES:
@@ -210,7 +224,8 @@ def check(root, agent, model=None, via="subagent"):
     """Decide one spawn. Returns (allowed, reason). Records it when allowed."""
     agent = str(agent or "").split(":")[-1]
     if agent == "coordinator" and "fable" in str(model or "").lower():
-        run_pick = orchestrator_key(((active_run(root) or {}).get("orchestrator") or {}).get("key"))
+        run_pick = (orchestrator_key(((active_run(root) or {}).get("orchestrator") or {}).get("key"))
+                    or orchestrator_key((load(root).get("orchestrator_run") or {}).get("key")))
         if orchestrator(root, run_pick)["key"] != "fable":
             return False, ("feature-ladder: the coordinator runs on Fable only when the user picked Fable 5.2 "
                            "as the orchestrator (the up-front question, or --orchestrator fable on this "
