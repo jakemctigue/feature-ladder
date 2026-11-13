@@ -57,6 +57,17 @@
       "type": "file"
     },
     {
+      "bom-ref": "file:plugins/feature-ladder/skills/complexity-router/scripts/brainstorm.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "31c5a7fd22e80b0ebe3c6109ac8d3eafbf1d106a2d2f96b6145912c8a59a357a"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/complexity-router/scripts/brainstorm.py",
+      "type": "file"
+    },
+    {
       "bom-ref": "file:plugins/feature-ladder/skills/complexity-router/scripts/brief.py",
       "hashes": [
         {
@@ -72,7 +83,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "d89bae01e5b57a32f72c242d0a020812fe26d716868b97ad5cbbd4a65e475e11"
+          "content": "40fb17ed2cc447a6f8c8e47e30289ad8c7fa4285488af4bb25809f28f0681db5"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/intake.py",
@@ -229,7 +240,7 @@
       ],
       "name": "feature-ladder",
       "type": "application",
-      "version": "1.16.0"
+      "version": "1.17.0"
     },
     "tools": {
       "components": [

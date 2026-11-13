@@ -87,6 +87,7 @@ the design.
    Done when: <exact shell commands>
    Do not: <out of scope>
    Memory: <the recall snippets, verbatim, or none>
+   App: <only in a --brainstorm run: the intake's brainstorm.context, verbatim; otherwise leave the line out>
    Secrets: <NAME -> ENV_VAR, ... | none>
    Return: Evidence Packet
    <the "## Skills for this task" block>
