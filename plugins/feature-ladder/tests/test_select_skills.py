@@ -20,7 +20,7 @@ def make_repo(tmp):
     empty fake home beside it. The project is a repository root (.git), so the
     selector's walk up from the cwd stops there and never reaches the real
     profile the temp folder sits under."""
-    root = Path(tmp) / "repo"
+    root = Path(tmp).resolve() / "repo"  # resolve: a CI temp folder can be an 8.3 short path (RUNNER~1)
     (root / ".git").mkdir(parents=True)
     (Path(tmp) / "home").mkdir()
     skill = root / ".claude" / "skills" / "demo"
