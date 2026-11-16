@@ -17,15 +17,20 @@ limits. No credentials are read, copied, or passed around by this plugin.
 
 | Trigger | Mode | Codex reasoning effort |
 |---|---|---|
-| `/feature-ladder:wrap --review`, once at the end of a session (many features) | `review`, once, over the whole session's diff | medium; high if the diff touches security, persistence, concurrency or public API code |
+| `/feature-ladder:wrap --review`, once at the end of a session (many features) | `review`, once, over the whole session's diff | medium; high when a feature of the session was flagged security, persistence, concurrency, cross-system, public API or irreversible (wrap passes `--flags auto`, which reads the session's intakes) |
 | `/feature-ladder:wrap --adversarial` | `review` then `adversarial`, once each | same rule as review |
-| `/feature-ladder:codex-review [--adversarial]` | on demand, any branch or uncommitted work | same rules |
+| `/feature-ladder:codex-review [--adversarial]` | on demand, any branch or uncommitted work | medium unless `--flags` or `--tier` is passed |
+
+The script never reads the diff to pick an effort: it is high only for
+`--tier` T4/T5/ESC/D or a risk flag in `--flags`, medium otherwise.
 
 Never during a feature run: the spawn hook denies `codex-reviewer` while a
 run is active. The intake's `codex.at_wrap` lists reasons (Opus-tier, novel or
 algorithmic work) to schedule `--review` at the end of the session. **One attempt per mode.** A
 timeout (exit 1 after `FEATURE_LADDER_CODEX_TIMEOUT` seconds) or exit 3 is
 recorded as "skipped" and the run continues; no retries, no background runs.
+A timeout stops Codex and every process it started; the guard check and the
+JSON record (`"timed_out": true`) are still written.
 
 Effort and model can be overridden with `FEATURE_LADDER_CODEX_EFFORT` and
 `FEATURE_LADDER_CODEX_MODEL`; otherwise Codex's own configured model is used.
@@ -44,8 +49,9 @@ A review usually takes a few minutes. Each Codex call is capped at
 - **review**: read-only sandbox. It may read the repo and run git, nothing else.
 - **adversarial**: workspace-write sandbox, told to write tests only under
   `.feature-ladder/adversarial/<slug>/` and run them with the repo's own test
-  runner. The script snapshots `git status` before and after; any change outside
-  that folder is reported as a `GUARD VIOLATION`.
+  runner. The script snapshots `git status` (with a content fingerprint per
+  path) before and after, in both modes; any file outside that folder that was
+  added, edited, deleted or reverted is reported as a `GUARD VIOLATION`.
 
 Results are saved to `.feature-ladder/reviews/<slug>-codex-<mode>.json`.
 

@@ -25,5 +25,30 @@ class McpEnvelopes(unittest.TestCase):
                     self.assertEqual(got, EXPECT)
 
 
+class LiveRecallBeforeAnyMemory(unittest.TestCase):
+    def test_a_repository_without_a_bank_is_no_memories_and_no_call(self):
+        import tempfile
+        from unittest import mock
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "hindsight-memory" / "scripts"))
+        import resolve_bank
+        calls = []
+
+        class Boom:
+            def start(self):
+                return self
+
+            def call(self, tool, args):
+                calls.append(tool)
+                raise AssertionError("no network call is needed")
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(resolve_bank, "resolve", return_value={"bank_id": "coding-agent::x", "how": "planned"}), \
+                mock.patch.object(resolve_bank, "Mcp", Boom):
+            memories, why = conf.live_recall("retries in upload", tmp)
+        self.assertEqual(memories, [])
+        self.assertIn("no memories", why)
+        self.assertEqual(calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

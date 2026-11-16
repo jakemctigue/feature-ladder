@@ -16,8 +16,13 @@ SCRIPT = PLUGIN / "skills" / "skill-selector" / "scripts" / "select_skills.py"
 
 
 def make_repo(tmp):
-    """A fake project with one personal-style skill and a project rule for it."""
-    root = Path(tmp)
+    """A fake project with one project skill and a project rule for it, plus an
+    empty fake home beside it. The project is a repository root (.git), so the
+    selector's walk up from the cwd stops there and never reaches the real
+    profile the temp folder sits under."""
+    root = Path(tmp).resolve() / "repo"  # resolve: a CI temp folder can be an 8.3 short path (RUNNER~1)
+    (root / ".git").mkdir(parents=True)
+    (Path(tmp) / "home").mkdir()
     skill = root / ".claude" / "skills" / "demo"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: demo\ndescription: demo skill\n---\n# Demo\nDo demo things.\n",
@@ -32,13 +37,30 @@ def make_repo(tmp):
 
 
 def run(root, *args):
-    env = dict(os.environ, HOME=str(root))  # no personal rules or skills from the real home
+    # No personal rules or skills from the real home: HOME is what POSIX reads,
+    # USERPROFILE what Windows reads.
+    home = str(root.parent / "home")
+    env = dict(os.environ, HOME=home, USERPROFILE=home)
     r = subprocess.run([sys.executable, str(SCRIPT), *args], cwd=str(root), env=env,
                        capture_output=True, text=True, encoding="utf-8", timeout=60)
     return r.returncode, r.stdout, r.stderr
 
 
 TASK = json.dumps({"role": "implementer", "kind": "code", "paths": ["x.py"], "text": "add the demo widget"})
+
+
+class Isolation(unittest.TestCase):
+    def test_only_the_fake_project_and_this_plugin_are_visible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(tmp)
+            code, out, err = run(root, "--list")
+            self.assertEqual(code, 0, err)
+            names = [l.strip() for l in out.split("Resolvable skills")[1].split("Rule problems")[0].splitlines()[1:]]
+            self.assertIn("demo", names)
+            self.assertEqual([n for n in names if n != "demo" and not n.startswith("feature-ladder:")], [])
+            rule_files = out.splitlines()[0]
+            self.assertIn(str(root / ".feature-ladder" / "skill-rules.json"), rule_files)
+            self.assertEqual(rule_files.count("skill-rules.json"), 2)  # shipped + this project's
 
 
 class OutFile(unittest.TestCase):
@@ -58,8 +80,10 @@ class OutFile(unittest.TestCase):
             self.assertIn("demo", out)
             self.assertNotIn("Do demo things.", out)
             self.assertLess(len(out), 600)
-            # the cards folder is git-ignored inside .feature-ladder
-            self.assertIn("cards/", (root / ".feature-ladder" / ".gitignore").read_text(encoding="utf-8"))
+            # the cards folder is git-ignored inside .feature-ladder, with every other runtime file
+            ignored = (root / ".feature-ladder" / ".gitignore").read_text(encoding="utf-8").splitlines()
+            for entry in ("cards/", "runs/", "run.json"):
+                self.assertIn(entry, ignored)
 
     def test_out_with_no_selection_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -86,10 +110,6 @@ class OutFile(unittest.TestCase):
             names = [s["skill"] for s in data["skills"]]
             self.assertIn("demo", names)
             self.assertTrue(any("rule demo" in w for s in data["skills"] for w in s["why"]))
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class RoleBudgets(unittest.TestCase):
@@ -133,3 +153,28 @@ class RoleBudgets(unittest.TestCase):
             data = json.loads(out)
             self.assertEqual(data["max_chars"], 0)
             self.assertEqual(data["skills"], [])
+
+
+class BadArguments(unittest.TestCase):
+    def test_missing_or_broken_arguments_give_a_message_not_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(tmp)
+            for args in (["--inject"], ["--file"], ["--file", "missing.json"], ["{not json"], ["[1, 2]"],
+                         ["--inject", "--out", "x.md"]):
+                code, out, err = run(root, *args)
+                self.assertEqual(code, 2, (args, out, err))
+                self.assertNotIn("Traceback", err, args)
+                self.assertIn("select_skills", err, args)
+
+    def test_a_broken_rules_file_is_named(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_repo(tmp)
+            (root / ".feature-ladder" / "skill-rules.json").write_text("{broken", encoding="utf-8")
+            code, _, err = run(root, TASK)
+            self.assertEqual(code, 2)
+            self.assertNotIn("Traceback", err)
+            self.assertIn("skill-rules.json", err)
+
+
+if __name__ == "__main__":
+    unittest.main()

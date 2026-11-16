@@ -6,11 +6,17 @@ As a SubagentStop hook it reads the finished subagent's transcript, sums its
 token usage, and appends one record to
     <repo>/.feature-ladder/runs/<slug>/usage.jsonl
 (slug from .feature-ladder/run.json; nothing is written when there is no
-run.json, so repositories that never ran the ladder are untouched). A record
+run.json, so repositories that never ran the ladder are untouched). Only a
+subagent of the run is recorded: the run is active, or the subagent started
+while it was (the coordinator stops just after `finish`). A subagent spawned
+days later in the same repository is not added to the old run. A record
 carries the rung (agent type), model, effort and task id parsed from the Task
-Card, turns, and input / cache-read / cache-write / output token counts. The
-same subagent stopping twice (the retain gate bounced it once) replaces its
-earlier record instead of double counting.
+Card, turns, and input / cache-read / cache-write / output token counts.
+Claude Code writes one transcript line per content block of an assistant
+message, each repeating the message's usage, so usage is counted once per
+message id and `turns` is the number of API messages. The same subagent
+stopping twice (the retain gate bounced it once) replaces its earlier record
+instead of double counting.
 
     ledger.py report [--slug S] [--cwd DIR] [--json]
         Markdown table by rung and model for FEATURE-REPORT.md: agents, turns,
@@ -28,6 +34,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent.parent / "skills" / "orchestration-ladder" / "scripts"))
 
 RUNG_RE = re.compile(r"Rung:\s*([\w-]+)\s*\(\s*([\w.-]+)\s*/\s*([\w-]+)\s*\)")
 TASK_RE = re.compile(r"\bTASK\s+([A-Za-z0-9._-]+)\s*[:\-]")
@@ -48,9 +55,13 @@ def _text(content):
 
 
 def summarize_transcript(path):
-    """Sum usage over the assistant messages of a JSONL transcript."""
-    totals = {k: 0 for k in USAGE_KEYS.values()}
-    turns, model, first_user = 0, None, ""
+    """Sum usage over the API messages of a JSONL transcript.
+
+    One assistant message is written as several lines (one per content block)
+    that share the message id and repeat its usage: the last line per id is the
+    message's usage. Lines without an id each count as their own message."""
+    by_id, order = {}, 0
+    model, first_user, started = None, "", None
     with open(path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.strip()
@@ -60,24 +71,48 @@ def summarize_transcript(path):
                 rec = json.loads(line)
             except ValueError:
                 continue
+            if not isinstance(rec, dict):
+                continue
+            if started is None and isinstance(rec.get("timestamp"), str):
+                started = rec["timestamp"]
             msg = rec.get("message") if isinstance(rec.get("message"), dict) else rec
             role = msg.get("role")
             if role == "user" and not first_user:
                 first_user = _text(msg.get("content"))
             if role != "assistant":
                 continue
-            usage = msg.get("usage") or rec.get("usage") or {}
-            if not isinstance(usage, dict):
+            usage = msg.get("usage") or rec.get("usage")
+            if not isinstance(usage, dict) or not usage:
                 continue
-            turns += 1
             model = msg.get("model") or model
-            for k, name in USAGE_KEYS.items():
-                try:
-                    totals[name] += int(usage.get(k) or 0)
-                except (TypeError, ValueError):
-                    pass
+            order += 1
+            by_id[msg.get("id") or rec.get("requestId") or f"line-{order}"] = usage
+    totals = {k: 0 for k in USAGE_KEYS.values()}
+    for usage in by_id.values():
+        for k, name in USAGE_KEYS.items():
+            try:
+                totals[name] += int(usage.get(k) or 0)
+            except (TypeError, ValueError):
+                pass
     totals["total"] = totals["input"] + totals["cache_read"] + totals["cache_write"] + totals["output"]
-    return {"turns": turns, "model": model, "first_user": first_user, **totals}
+    return {"turns": len(by_id), "model": model, "first_user": first_user, "started": started, **totals}
+
+
+def _when(text):
+    try:
+        t = datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def belongs_to_run(run, started):
+    """Is a subagent whose transcript began at `started` part of this run?"""
+    if run.get("active"):
+        return True
+    begun, ended = _when(run.get("started")), _when(run.get("finished") or run.get("aborted"))
+    at = _when(started)
+    return bool(begun and ended and at and begun <= at <= ended)
 
 
 def find_run(cwd):
@@ -90,18 +125,22 @@ def ledger_path(root, slug):
 
 
 def record(payload):
+    import ladder_state
     agent_type = str(payload.get("agent_type") or payload.get("subagent_type") or "").split(":")[-1]
-    path = payload.get("agent_transcript_path") or payload.get("transcript_path") or ""
+    # Only the subagent's own transcript: `transcript_path` is the parent session's,
+    # and summing that would book the whole session to one worker.
+    path = payload.get("agent_transcript_path") or ""
     if not path or not os.path.exists(path):
         return None
     root, run_file = find_run(payload.get("cwd") or os.getcwd())
     if not run_file:
         return None
-    try:
-        run = json.loads(run_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        run = {}
+    run = ladder_state.read_json(run_file)
+    if not isinstance(run, dict):
+        return None
     summary = summarize_transcript(path)
+    if not belongs_to_run(run, summary.pop("started", None)):
+        return None
     card = summary.pop("first_user", "")
     m = RUNG_RE.search(card)
     rung = m.group(1) if m else agent_type or "unknown"
@@ -118,30 +157,21 @@ def record(payload):
         **summary,
     }
     out = ledger_path(root, run.get("slug"))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    lines = []
-    if out.is_file():
-        for line in out.read_text(encoding="utf-8").splitlines():
-            try:
-                if json.loads(line).get("key") == entry["key"]:
-                    continue
-            except ValueError:
-                pass
-            lines.append(line)
-    lines.append(json.dumps(entry, sort_keys=True))
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    _ignore(root)
+    # Parallel workers stop at the same moment: read-modify-write under the lock.
+    with ladder_state.locked(root, "ledger"):
+        lines = []
+        if out.is_file():
+            for line in out.read_text(encoding="utf-8").splitlines():
+                try:
+                    if json.loads(line).get("key") == entry["key"]:
+                        continue
+                except (ValueError, AttributeError):
+                    pass  # keep a line we cannot parse; it is not ours to drop
+                lines.append(line)
+        lines.append(json.dumps(entry, sort_keys=True))
+        ladder_state.write_text(out, "\n".join(lines) + "\n")
+    ladder_state.ensure_gitignore(root)
     return entry
-
-
-def _ignore(root):
-    gi = Path(root) / ".feature-ladder" / ".gitignore"
-    try:
-        lines = gi.read_text(encoding="utf-8").splitlines() if gi.is_file() else []
-        if "runs/" not in lines:
-            gi.write_text("\n".join(lines + ["runs/"]) + "\n", encoding="utf-8")
-    except OSError:
-        pass
 
 
 # ------------------------------------------------------------------ report ---
@@ -158,9 +188,11 @@ def load(root, slug=None):
     if p.is_file():
         for line in p.read_text(encoding="utf-8").splitlines():
             try:
-                entries.append(json.loads(line))
+                e = json.loads(line)
             except ValueError:
-                pass
+                continue
+            if isinstance(e, dict):
+                entries.append(e)
     return slug, entries
 
 
@@ -204,6 +236,8 @@ def table(slug, entries):
 
 def main(argv):
     if argv and argv[0] == "report":
+        import ladder_state
+        ladder_state.utf8_stdio()
         cwd, slug, as_json = os.getcwd(), None, False
         it = iter(argv[1:])
         for a in it:

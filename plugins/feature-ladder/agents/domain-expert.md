@@ -42,8 +42,9 @@ Rules:
   coordinator use `domain-expert-high`.
 - List the key decision and why, each rejected option with its reason, and
   any constraint not written down in the repo under `Memory candidates:`. Do
-  not call `retain` or hand anything to `memory-scribe`; memory is written
-  once, at the end of the session.
+  not call `retain`; the coordinator queues them and memory is written once,
+  at the end of the session, by `memory_gate.py flush` at
+  `/feature-ladder:wrap` (a script, no agent).
 - Return the DESIGN.md content and the task router fields in your final message,
   ending with `Retained: deferred - <n> candidates`.
 - You run at most once per feature, and only when the intake planned a design

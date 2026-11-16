@@ -1,6 +1,6 @@
 ---
 description: Choose where the cheap rungs run - GLM 5.3 Flash through OpenRouter (the default whenever a key is present; bills OpenRouter credits, not your Claude plan), TypeSafe's Jev Router instead, or in-session Claude subagents - and check the setup. Usage - /feature-ladder:workers [glm | jev | claude | check | --probe]
-argument-hint: [glm | jev | claude | check | --probe]
+argument-hint: "[glm | jev | claude | check | --probe]"
 ---
 
 Arguments: $ARGUMENTS

@@ -21,9 +21,22 @@ plan limit alone. Opus rungs and the Fable coordinator stay on Anthropic.
       Bounds: line (turns, time, session budget) and the output contract inline.
       Prints the worker's Evidence Packet followed by one
       `external worker:` line (model, turns, cost). Writes
-      .feature-ladder/evidence/<id>-external.json and a ledger row.
-      Exit 0 packet returned, 3 unavailable, 1 error/timeout,
-      4 refused by the session subagent budget (session_budget.py).
+      .feature-ladder/evidence/<id>-external.json and a ledger row, both in
+      the main checkout (a linked worktree shares them).
+      Exit 0 packet returned,
+           3 unavailable: no CLI, no key, or OpenRouter rejected the key or
+             has no credits (the packet says "blocked"; run the card as a
+             subagent instead),
+           1 the child failed or timed out without a packet (the packet says
+             "partial" and quotes the child's last error lines),
+           4 refused by the session subagent budget (session_budget.py).
+      A worker that never ran (exit 3, or exit 1 before its first turn) does
+      not use a session budget slot.
+      --timeout defaults to "timeout" in the configuration (1500 s). That is
+      longer than one foreground tool call may last (600 s), so run this
+      command in the background (the Bash tool's run_in_background), or pass
+      --timeout 540 to keep it inside one call. At the limit the child and
+      everything it started are killed and a "partial" packet is printed.
 
   external_worker.py config
       Prints the merged configuration (never the key).
@@ -60,8 +73,8 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -70,7 +83,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parents[2] / "hooks" / "scripts"))
+
+import ladder_state  # noqa: E402
 
 DEFAULTS = {
     "workers": "auto",
@@ -85,7 +99,7 @@ DEFAULTS = {
         },
         "context_1m": True,
         "max_turns": 40,
-        "timeout": 1500,
+        "timeout": 1500,  # longer than a foreground tool call: the coordinator runs this in the background
     },
 }
 # Presets for the cheap tier. "glm" is the default; "jev" hands each request to
@@ -102,6 +116,10 @@ EXTERNAL_RUNGS = {"mechanic", "implementer"}  # never senior-implementer, expert
 # (T0 and implementer/medium with score <= route.GLM_MAX_SCORE).
 TOOLS = "Bash,Read,Edit,Write,MultiEdit,Glob,Grep,mcp__plugin_feature-ladder_hindsight__retain,mcp__plugin_feature-ladder_hindsight__recall"
 DISALLOWED = "Agent,Task,Skill,WebSearch,WebFetch,NotebookEdit"
+# The child's own words when OpenRouter turned the request away: nothing ran, so the
+# card should fall back to a subagent (exit 3) instead of being reported as an error.
+UNAVAILABLE = re.compile(r"\b(401|402|403)\b|no auth credentials|invalid (x-)?api[- ]key|unauthori[sz]ed|"
+                         r"authentication[_ ]error|insufficient credits|payment required|credit balance", re.I)
 
 
 def now():
@@ -109,13 +127,9 @@ def now():
 
 
 def repo_root(cwd):
-    try:
-        r = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd, capture_output=True, text=True)
-        if r.returncode == 0 and r.stdout.strip():
-            return Path(r.stdout.strip())
-    except OSError:
-        pass
-    return Path(cwd).resolve()
+    """Where .feature-ladder/ lives: the main checkout (a linked worktree maps to it),
+    the same folder verify.py, the spawn rules and the hooks use."""
+    return Path(ladder_state.state_root(cwd))
 
 
 def _merge(a, b):
@@ -259,13 +273,22 @@ def child_env(cfg, key, model):
     return env
 
 
+# The worker contract: the plugin's skill file, or worker-contract.md beside this
+# script (the Claude app keeps every downloaded file in one folder).
+CONTRACT_FILES = [HERE.parents[1] / "worker-contract" / "SKILL.md", HERE / "worker-contract.md"]
+
+
 def contract_text():
-    f = HERE.parents[1] / "worker-contract" / "SKILL.md"
-    try:
-        txt = f.read_text(encoding="utf-8")
-        return re.sub(r"^---.*?---\s*", "", txt, count=1, flags=re.S).strip()
-    except OSError:
-        return "Follow the Task Card exactly and end with an Evidence Packet whose last line starts with 'Retained:'."
+    for f in CONTRACT_FILES:
+        try:
+            txt = f.read_text(encoding="utf-8")
+            return re.sub(r"^---.*?---\s*", "", txt, count=1, flags=re.S).strip()
+        except OSError:
+            continue
+    # Neither file is here: the rules that matter most, and the packet's exact shape.
+    return ("Follow the Task Card exactly. Edit only the files in Scope; run every 'Done when' command and "
+            "quote its exit code; say 'unverified' for anything you did not check; no subagents, no web.\n\n"
+            + OUTPUT_CONTRACT)
 
 
 OUTPUT_CONTRACT = """Output contract (reply with this and nothing else):
@@ -286,12 +309,10 @@ def _card_line(card, name):
 
 def recall_file(root):
     """The feature's saved recall: runs/<slug>/recall.json (plugin) or recall.json (app)."""
-    fl = Path(root) / ".feature-ladder"
-    run = {}
-    try:
-        run = json.loads((fl / "run.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        pass
+    fl = ladder_state.state_dir(root)
+    run = ladder_state.read_json(fl / "run.json")
+    if not isinstance(run, dict):
+        run = {}
     for f in ([fl / "runs" / run["slug"] / "recall.json"] if run.get("slug") else []) + [fl / "recall.json"]:
         if f.is_file():
             return f
@@ -311,12 +332,7 @@ def memory_line(root, scope):
     except Exception:  # noqa: BLE001 - a bad recall file is "no memory", never a failed card
         return [], 0
 
-    def touches(m):
-        low = m["text"].lower()
-        toks = set(confidence.WORD.findall(low))
-        return any(a in toks or ("/" in a and a in low) for a in anch)
-
-    rel = [m for m in mems if touches(m)]
+    rel = [m for m in mems if confidence.touching(m["text"], anch)]
     picked = (rel + [m for m in mems if m not in rel])[:MEMORY_SNIPPETS]
     return [f"[{m['kind']}] {m['text'][:160]}" for m in picked], len(rel)
 
@@ -350,12 +366,13 @@ def prepare_card(card, root, task_id, max_turns, timeout, budget=None):
 
 
 def record_ledger(root, task_id, rung, model, result):
+    """One row per card in runs/<slug>/usage.jsonl (the file hooks/scripts/ledger.py
+    reports from). Written here directly, so it also works where the hook script is
+    not installed (the Claude app). A line that cannot be read is kept, not fatal."""
     try:
-        import ledger  # noqa: E402
-        _, run_file = ledger.find_run(str(root))
-        if not run_file:
+        run = ladder_state.read_json(ladder_state.state_dir(root) / "run.json")
+        if not isinstance(run, dict):
             return
-        run = json.loads(run_file.read_text(encoding="utf-8"))
         usage = result.get("usage") or {}
         entry = {"at": now(), "key": f"external-{task_id}", "slug": run.get("slug"),
                  "agent": f"{rung} (openrouter)", "rung": rung, "model": model, "effort": None,
@@ -365,13 +382,23 @@ def record_ledger(root, task_id, rung, model, result):
                  "cache_write": int(usage.get("cache_creation_input_tokens") or 0),
                  "output": int(usage.get("output_tokens") or 0),
                  "cost_usd": result.get("openrouter_cost_usd")}
+        if result.get("openrouter_cost_shared"):
+            entry["cost_shared"] = True  # other external cards ran on the key at the same time
         entry["total"] = entry["input"] + entry["cache_read"] + entry["cache_write"] + entry["output"]
-        out = ledger.ledger_path(root, run.get("slug"))
-        out.parent.mkdir(parents=True, exist_ok=True)
-        lines = [l for l in (out.read_text(encoding="utf-8").splitlines() if out.is_file() else [])
-                 if not (l.strip() and json.loads(l).get("key") == entry["key"])]
-        lines.append(json.dumps(entry, sort_keys=True))
-        out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        out = ladder_state.state_dir(root) / "runs" / (run.get("slug") or "no-slug") / "usage.jsonl"
+        with ladder_state.locked(root, "ledger"):
+            lines = []
+            for line in (out.read_text(encoding="utf-8").splitlines() if out.is_file() else []):
+                if not line.strip():
+                    continue
+                try:
+                    if json.loads(line).get("key") == entry["key"]:
+                        continue  # this card ran before: replace its row
+                except (ValueError, AttributeError):
+                    pass
+                lines.append(line)
+            lines.append(json.dumps(entry, sort_keys=True))
+            ladder_state.write_text(out, "\n".join(lines) + "\n")
     except Exception:  # noqa: BLE001 - the ledger is best effort
         pass
 
@@ -417,6 +444,68 @@ def parse_result(stdout):
     return data if isinstance(data, dict) else {"result": str(data), "unparsed": True}
 
 
+def _spawn(cmd, cwd, env, card, timeout):
+    """Run the child with the card on stdin. (exit code, stdout, stderr); the exit code
+    is None when the timeout was reached, after the child's whole process tree was killed."""
+    return ladder_state.run_tree(cmd, cwd=cwd, timeout=timeout, env=env, input=card)
+
+
+def _safe_id(task_id):
+    """The id as a file name, the same way verify.evidence_path spells it."""
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in str(task_id)) or "task"
+
+
+def _refund(cwd, agent, model):
+    """Give the session budget slot back: the worker never ran."""
+    try:
+        import session_budget  # noqa: E402
+        root = session_budget.find_root(cwd)
+        if hasattr(session_budget, "refund"):
+            session_budget.refund(root, agent, model, via="external")
+            return
+        sess = session_budget.load(root)
+        spawned = sess.get("spawned") or []
+        for i in range(len(spawned) - 1, -1, -1):
+            e = spawned[i]
+            if e.get("via") == "external" and e.get("agent") == agent and e.get("model") == model:
+                del spawned[i]
+                session_budget.save(root, sess)
+                return
+    except Exception:  # noqa: BLE001 - budget bookkeeping must not break a worker
+        pass
+
+
+def _others_ran(root, safe, since, window):
+    """True when another external card is running, or finished since `since`: the key's
+    usage counter then covers their spend too, so the delta is not this card's alone."""
+    d = ladder_state.state_dir(root)
+    now_ = time.time()
+    try:
+        for f in d.glob("external-*.lock"):
+            if f.name != f"external-{safe}.lock" and now_ - f.stat().st_mtime < window:
+                return True
+        for f in (d / "evidence").glob("*-external.json"):
+            if f.name != f"{safe}-external.json" and f.stat().st_mtime >= since:
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def _last_lines(text, n=3):
+    lines = [l.strip() for l in str(text or "").splitlines() if l.strip()]
+    return " | ".join(lines[-n:])[:400]
+
+
+def _int_arg(args, name, default):
+    v = args.get(name)
+    if v is None:
+        return int(default)
+    if v is True or not str(v).strip().isdigit() or int(v) < 1:
+        raise ValueError(f"{name} needs a whole number of 1 or more")
+    return int(v)
+
+
 def run(args):
     cwd = args.get("--cwd") or os.getcwd()
     cfg = load_config(cwd)
@@ -441,63 +530,123 @@ def run(args):
         return 3
     model = model_for(cfg, rung, effort, args.get("--model"))
     try:
+        timeout = _int_arg(args, "--timeout", cfg["openrouter"]["timeout"])
+        max_turns = _int_arg(args, "--max-turns", cfg["openrouter"]["max_turns"])
+    except (TypeError, ValueError) as e:
+        print(f"external_worker: {e}", file=sys.stderr)
+        return 1
+    slot_taken = False
+    try:
         import session_budget  # noqa: E402
         ok, why = session_budget.check(session_budget.find_root(cwd), rung, model, via="external")
+        slot_taken = ok
     except Exception:  # noqa: BLE001 - budget bookkeeping must not break a worker
         ok, why = True, ""
     if not ok:
         print(f"TASK {task_id} - blocked\nChanged: none\nChecks run: none\nClaims: {why}\n"
               "Risks: none\nMemory candidates: none\nRetained: none - budget")
         return 4
-    timeout = int(args.get("--timeout") or cfg["openrouter"]["timeout"])
-    max_turns = int(args.get("--max-turns") or cfg["openrouter"]["max_turns"])
     root = repo_root(cwd)
+    safe = _safe_id(task_id)
     try:
         budget = session_budget.status(session_budget.find_root(cwd))
     except Exception:  # noqa: BLE001
         budget = None
     card, added = prepare_card(Path(card_path).read_text(encoding="utf-8-sig"), root, task_id,
                                max_turns, timeout, budget)
-    cmd =[exe, "-p", "--model", "sonnet", "--output-format", "json", "--max-turns", str(max_turns),
+    # The contract goes in a file: an npm-installed `claude.cmd` passes its arguments
+    # through cmd.exe, which cuts a multi-line argument at the first newline.
+    fd, contract_file = tempfile.mkstemp(prefix="fl-contract-", suffix=".md")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(contract_text() + "\n")
+    cmd = [exe, "-p", "--model", "sonnet", "--output-format", "json", "--max-turns", str(max_turns),
            "--permission-mode", "acceptEdits", "--allowedTools", TOOLS, "--disallowedTools", DISALLOWED,
-           "--append-system-prompt", contract_text()]
+           "--append-system-prompt-file", contract_file]
     usage_before = usage_usd(cfg, key)
+    marker = ladder_state.state_dir(root) / f"external-{safe}.lock"  # "this card is running", for the cost note
     t0 = time.time()
+    shared = _others_ran(root, safe, t0, timeout + 120)
     try:
-        r = subprocess.run(cmd, cwd=cwd, env=child_env(cfg, key, model), input=card, capture_output=True,
-                           text=True, encoding="utf-8", errors="replace", timeout=timeout)
-    except subprocess.TimeoutExpired:
-        print(f"TASK {task_id} - partial\nChecks run: none quoted\nClaims: external worker timed out after {timeout}s\n"
-              f"Risks: work may be half-applied; verify.py will show scope changes\nRetained: none - timeout")
-        return 1
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(str(os.getpid()), encoding="utf-8")
+        except OSError:
+            pass
+        try:
+            child_exit, stdout, stderr = _spawn(cmd, cwd, child_env(cfg, key, model), card, timeout)
+        except OSError as e:
+            child_exit, stdout, stderr = 127, "", f"could not start {exe}: {e}"
+    finally:
+        for f in (Path(contract_file), marker):
+            try:
+                f.unlink()
+            except OSError:
+                pass
     secs = round(time.time() - t0)
-    result = parse_result(r.stdout)
-    packet = unfence(str(result.get("result") or ""))
-    if not packet.startswith("TASK"):
-        packet = f"TASK {task_id} - partial\n{packet or '(worker returned no text)'}"
+    timed_out = child_exit is None
+    result = parse_result(stdout) if stdout.strip() else {}
+    said = unfence(str(result.get("result") or ""))
+    has_packet = said.startswith("TASK")
+    failed = timed_out or child_exit != 0 or bool(result.get("is_error"))
+    why_failed = _last_lines(stderr) or _last_lines(said) or "no output"
+    # The exit code is decided from what the child did, before any packet is made up for it.
+    if has_packet:
+        code, packet = 0, said
+    elif timed_out:
+        code = 1
+        packet = (f"TASK {task_id} - partial\nChecks run: none quoted\n"
+                  f"Claims: external worker timed out after {timeout}s and was stopped\n"
+                  "Risks: work may be half-applied; verify.py will show scope changes\nRetained: none - timeout")
+    elif failed and UNAVAILABLE.search(f"{said}\n{stderr}"):
+        code = 3
+        packet = (f"TASK {task_id} - blocked\nChanged: none\nChecks run: none\n"
+                  f"Claims: external worker unavailable, nothing ran: {why_failed}\n"
+                  "Risks: none\nMemory candidates: none\nRetained: none - unavailable")
+    elif failed or not said:
+        code = 1
+        packet = (f"TASK {task_id} - partial\n{said or '(worker returned no text)'}\n"
+                  f"Claims: external worker failed (exit {child_exit}): {why_failed}\n"
+                  "Risks: work may be half-applied; verify.py will show scope changes")
+    else:  # it answered, but not in the contract's shape: hand the text on as a partial packet
+        code, packet = 0, f"TASK {task_id} - partial\n{said}"
     if "Retained:" not in packet:
         packet += "\nRetained: none - external worker did not report"
     usage_after = usage_usd(cfg, key)
     charged = (round(usage_after - usage_before, 4) if usage_before is not None and usage_after is not None else None)
+    if charged is not None and (shared or _others_ran(root, safe, t0, timeout + 120)):
+        result["openrouter_cost_shared"] = True
     result["openrouter_cost_usd"] = charged  # what OpenRouter billed; total_cost_usd is Claude Code's Anthropic-price guess
-    ev = root / ".feature-ladder" / "evidence"
-    ev.mkdir(parents=True, exist_ok=True)
+    try:
+        turns = int(result.get("num_turns") or 0)
+    except (TypeError, ValueError):
+        turns = 0
+    if slot_taken and code in (1, 3) and not timed_out and turns <= 1 and not charged:
+        _refund(cwd, rung, model)  # it never ran: the slot goes back
+    print(packet)  # first: nothing below may lose a packet that was paid for
     record = {"task": task_id, "rung": rung, "model": model, "key_source": source, "seconds": secs,
-              "exit": r.returncode, "is_error": result.get("is_error"), "num_turns": result.get("num_turns"),
+              "exit": child_exit, "timed_out": timed_out, "returned": code,
+              "is_error": result.get("is_error"), "num_turns": result.get("num_turns"),
               "usage": result.get("usage"), "openrouter_cost_usd": charged,
+              "openrouter_cost_shared": bool(result.get("openrouter_cost_shared")),
               "claude_code_estimate_usd": result.get("total_cost_usd"),
-              "session_id": result.get("session_id"), "stderr_tail": (r.stderr or "")[-1500:], "card_added": added, "card": card, "packet": packet}
-    (ev / f"{task_id}-external.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+              "session_id": result.get("session_id"), "stderr_tail": (stderr or "")[-1500:], "card_added": added, "card": card, "packet": packet}
+    try:
+        ladder_state.ensure_gitignore(root)
+        ladder_state.write_json(ladder_state.state_dir(root) / "evidence" / f"{safe}-external.json", record)
+    except OSError as e:
+        print(f"external_worker: evidence not written: {e}", file=sys.stderr)
     record_ledger(root, task_id, rung, model, result)
-    print(packet)
     u = result.get("usage") or {}
     toks = int(u.get("input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0)
-    cost_txt = f"OpenRouter charged ${charged:.4f}" if charged is not None else "cost not available"
+    if charged is None:
+        cost_txt = "cost not available"
+    elif result.get("openrouter_cost_shared"):
+        cost_txt = f"OpenRouter charged ${charged:.4f} on this key meanwhile (other external cards ran too: their spend is in it)"
+    else:
+        cost_txt = f"OpenRouter charged ${charged:.4f}"
     print(f"\nexternal worker: {model} via OpenRouter, {result.get('num_turns', '?')} turns, {secs}s, "
           f"{toks:,} input tokens, {int(u.get('output_tokens') or 0):,} output, {cost_txt}")
-    if r.returncode != 0 and not packet.startswith("TASK"):
-        return 1
-    return 0
+    return code
 
 
 def check(args):
@@ -520,6 +669,9 @@ def check(args):
     return 0 if ok else 3
 
 
+RUN_FLAGS = {"--card", "--id", "--rung", "--model", "--cwd", "--timeout", "--max-turns"}
+
+
 def parse(argv):
     a, i = {}, 0
     while i < len(argv):
@@ -538,7 +690,13 @@ def main(argv):
         print(__doc__)
         return 0
     if argv[0] == "run":
-        return run(parse(argv[1:]))
+        args = parse(argv[1:])
+        unknown = sorted(set(args) - RUN_FLAGS)
+        if unknown:  # a misspelt flag used to be dropped without a word
+            print(f"external_worker: unknown option {', '.join(unknown)} (run takes {', '.join(sorted(RUN_FLAGS))})",
+                  file=sys.stderr)
+            return 1
+        return run(args)
     if argv[0] == "check":
         return check(argv[1:])
     if argv[0] == "config":
@@ -549,4 +707,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    ladder_state.utf8_stdio()
     sys.exit(main(sys.argv[1:]))

@@ -13,26 +13,38 @@ Modes
 
 Usage
   codex_review.py check
-  codex_review.py review      [--base REF | --uncommitted] [--tier T] [--flags a,b] [--slug S] [--effort E]
-  codex_review.py adversarial [--base REF | --uncommitted] [--tier T] [--flags a,b] [--slug S] [--effort E]
+  codex_review.py review      [--base REF | --uncommitted] [--tier T] [--flags a,b | --flags auto] [--slug S] [--effort E]
+  codex_review.py adversarial [--base REF | --uncommitted] [--tier T] [--flags a,b | --flags auto] [--slug S] [--effort E]
 
 Deterministic reasoning effort (unless --effort or FEATURE_LADDER_CODEX_EFFORT):
   medium for tiers T0-T3; high for T4, T5, ESC, D, or any of the flags
-  security, persistence, concurrency, cross_system, public_api (both modes)
+  security, persistence, concurrency, cross_system, public_api, irreversible
+  (both modes). The script never inspects the diff: without --tier or --flags
+  the effort is medium. `--flags auto` takes the risk flags from the intakes
+  confirmed in this coding session (.feature-ladder/intake/*.json newer than
+  session.json's start), which is what /feature-ladder:wrap passes.
 Model: Codex's own configured default, or FEATURE_LADDER_CODEX_MODEL.
 
 Output: JSON written to .feature-ladder/reviews/<slug>-codex-<mode>.json and a
 markdown summary on stdout. Exit 0 on a completed run (findings or not), 3 when
-Codex is unavailable (the ladder continues without the second opinion), 1 on error.
+Codex is unavailable (the ladder continues without the second opinion), 1 on
+error or timeout. A timeout stops Codex and everything it started, and the
+guard check, the record and the temp-file cleanup still happen.
 """
+import hashlib
 import json
 import os
+import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "orchestration-ladder" / "scripts"))
+import ladder_state  # noqa: E402
 
 RISK_FLAGS = {"security", "persistence", "concurrency", "cross_system", "public_api", "irreversible"}
 HIGH_TIERS = ("T4", "T5", "ESC", "D")  # matched by prefix: route.py emits "T4 ...", "ESCALATE ..."
@@ -163,9 +175,29 @@ def verify_card(slug, actionable, record_rel):
     return "\n".join(lines) + "\n"
 
 
+# Stop a process and everything it started. Killing only the direct child is
+# not enough: an npm `codex.cmd` shim is cmd.exe, and the real Codex below it
+# would keep running (and keep the output pipes open).
+kill_tree = ladder_state.kill_tree
+
+
 def run(cmd, cwd, timeout=60, stdin=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
-                          input=stdin, encoding="utf-8", errors="replace")
+    """subprocess.run with captured UTF-8 output, except that a timeout stops
+    the whole process tree before TimeoutExpired is raised."""
+    group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+    proc = subprocess.Popen(cmd, cwd=str(cwd), stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            encoding="utf-8", errors="replace", **group)
+    try:
+        out, err = proc.communicate(stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_tree(proc)
+        try:
+            out, err = proc.communicate(timeout=10)
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            out, err = "", ""
+        raise subprocess.TimeoutExpired(cmd, timeout, output=out, stderr=err)
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
 def codex_bin():
@@ -181,7 +213,8 @@ def check():
     except Exception as e:
         return False, f"codex login status failed: {e}"
     out = (r.stdout + r.stderr).strip()
-    if r.returncode != 0 or "logged in" not in out.lower():
+    low = out.lower()
+    if r.returncode != 0 or "logged in" not in low or re.search(r"\bnot\s+logged\s+in\b", low):
         return False, f"Codex not signed in ({out or 'no output'}); run: codex login"
     return True, out
 
@@ -193,6 +226,26 @@ def effort_for(mode, tier, flags):
     if (tier or "").upper().startswith(HIGH_TIERS) or (set(flags) & RISK_FLAGS):
         return "high"
     return "medium"
+
+
+def session_flags(state_root):
+    """The risk flags of every intake confirmed in this coding session, sorted.
+    Lets the one review at /feature-ladder:wrap pick its effort without a model
+    reading the diff. No session start or no intake: no flags (medium effort)."""
+    state = ladder_state.state_dir(state_root)
+    started = str((ladder_state.read_json(state / "session.json") or {}).get("started") or "")
+    if not started:
+        return []
+    found = set()
+    for f in sorted((state / "intake").glob("*.json")):
+        if f.name.endswith(("-scan.json", "-proposal.json", "-answers.json")):
+            continue
+        intake = ladder_state.read_json(f) or {}
+        fields = intake.get("fields") if isinstance(intake, dict) else None
+        if not isinstance(fields, dict) or str(intake.get("confirmed_at") or "") < started:
+            continue
+        found.update(k for k in RISK_FLAGS if fields.get(k) is True)
+    return sorted(found)
 
 
 def repo_root(cwd):
@@ -214,24 +267,38 @@ def default_base(root):
 
 
 def porcelain(root):
-    """Dirty/untracked paths with a content fingerprint, so edits to files that
-    were already dirty before Codex ran are detected too."""
-    import hashlib
-    r = run(["git", "status", "--porcelain", "--untracked-files=all"], root)
-    out = set()
-    for l in r.stdout.splitlines():
-        if not l.strip():
+    """{path: content fingerprint} for every dirty or untracked path, so edits
+    to files that were already dirty before Codex ran are detected too.
+    `-z` with core.quotepath=off gives real file names (spaces, non-ASCII)."""
+    r = run(["git", "-c", "core.quotepath=off", "status", "--porcelain", "-z", "--untracked-files=all"], root)
+    out = {}
+    entries = iter(r.stdout.split("\0"))
+    for entry in entries:
+        if len(entry) < 4:
             continue
-        p = l[3:].strip().strip('"').replace("\\", "/")
-        if " -> " in p:
-            p = p.split(" -> ", 1)[1]
+        status, p = entry[:2], entry[3:]
+        if "R" in status or "C" in status:
+            next(entries, None)  # the entry after a rename/copy is its old name
         fp = Path(root) / p
         try:
             digest = hashlib.sha1(fp.read_bytes()).hexdigest()[:12] if fp.is_file() else "dir-or-missing"
         except OSError:
             digest = "unreadable"
-        out.add(f"{p}@{digest}")
+        out[p] = digest
     return out
+
+
+def changed_paths(before, after):
+    """Paths whose state differs between two porcelain() snapshots, in BOTH
+    directions: a path that appeared or changed, and one that vanished from the
+    snapshot (a reverted edit, a deleted untracked file)."""
+    return sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
+
+
+def allowed_path(p, outdir_rel):
+    return (p.startswith(outdir_rel) or p.startswith(".feature-ladder/")
+            or any(m in p or p.rstrip("/") + "/" == m for m in CACHE_MARKERS)
+            or p.endswith((".pyc", ".pyo")))
 
 
 def codex_cmd(exe, mode, root, effort, schema_file, out_file):
@@ -258,7 +325,22 @@ def main(argv):
         return 1
 
     def opt(name, default=None):
-        return argv[argv.index(name) + 1] if name in argv else default
+        if name not in argv:
+            return default
+        i = argv.index(name) + 1
+        if i >= len(argv) or argv[i].startswith("--"):
+            raise ValueError(f"{name} needs a value")
+        return argv[i]
+
+    try:
+        slug = opt("--slug", time.strftime("review-%Y%m%d-%H%M%S"))
+        tier = opt("--tier", "")
+        flags_arg = opt("--flags", "") or ""
+        effort_arg = opt("--effort")
+        base_arg = opt("--base")
+    except ValueError as e:
+        print(f"codex_review.py {mode}: {e}", file=sys.stderr)
+        return 1
 
     ok, msg = check()
     if not ok:
@@ -266,16 +348,15 @@ def main(argv):
         return 3
     exe = codex_bin()
     root = repo_root(os.getcwd())
-    slug = opt("--slug", time.strftime("review-%Y%m%d-%H%M%S"))
-    tier = opt("--tier", "")
-    flags = [f for f in (opt("--flags", "") or "").split(",") if f]
-    effort = opt("--effort") or effort_for(mode, tier, flags)
+    state_root = ladder_state.state_root(root)  # the main checkout: one .feature-ladder/ for every worktree
+    flags = session_flags(state_root) if flags_arg.strip().lower() == "auto" else [f for f in flags_arg.split(",") if f]
+    effort = effort_arg or effort_for(mode, tier, flags)
 
     if "--uncommitted" in argv:
         scope_args, scope_txt = ["--uncommitted"], "in the uncommitted working tree (staged, unstaged and untracked files)"
         diffcmd = "git diff HEAD; git status --porcelain"
     else:
-        base = opt("--base") or default_base(root)
+        base = base_arg or default_base(root)
         if base:
             scope_args, scope_txt = ["--base", base], f"on this branch compared with {base} (committed and uncommitted)"
             diffcmd = f"git diff {base}...HEAD; git diff HEAD; git status --porcelain"
@@ -284,13 +365,17 @@ def main(argv):
             diffcmd = "git diff HEAD; git status --porcelain"
 
     outdir_rel = f".feature-ladder/adversarial/{slug}"
-    reviews = root / ".feature-ladder" / "reviews"
+    reviews = ladder_state.state_dir(state_root) / "reviews"
     reviews.mkdir(parents=True, exist_ok=True)
-    gi = root / ".feature-ladder" / ".gitignore"
-    want = ["reviews/", "adversarial/"]
-    have = gi.read_text(encoding="utf-8").splitlines() if gi.exists() else []
-    if any(w not in have for w in want):
-        gi.write_text("\n".join(have + [w for w in want if w not in have]) + "\n", encoding="utf-8")
+    for r_ in {str(state_root): state_root, str(root): root}.values():  # adversarial tests land in this worktree
+        ladder_state.ensure_gitignore(r_)
+
+    def shown(path):
+        try:
+            return path.relative_to(state_root)
+        except ValueError:
+            return path
+
     tmp = Path(tempfile.mkdtemp(prefix="fl-codex-"))
     schema_file = tmp / "schema.json"
     out_file = tmp / "last.json"
@@ -303,33 +388,37 @@ def main(argv):
     else:
         stdin = ADV_PROMPT.format(scope=scope_txt, outdir=outdir_rel)
     started = time.time()
+    timed_out = False
     try:
         r = run(cmd, root, timeout=TIMEOUT, stdin=stdin)
-    except subprocess.TimeoutExpired:
-        print(f"Codex {mode} timed out after {TIMEOUT}s; second opinion incomplete.")
-        return 1
+    except subprocess.TimeoutExpired as e:
+        timed_out = True
+        r = subprocess.CompletedProcess(cmd, None, e.output or "", e.stderr or "")
     secs = round(time.time() - started)
     raw = out_file.read_text(encoding="utf-8", errors="replace") if out_file.exists() else ""
     try:
         result = json.loads(raw)
     except ValueError:
-        result = {"unparsed_output": raw[-4000:], "stderr": r.stderr[-2000:]}
+        result = {"unparsed_output": raw[-4000:], "stderr": (r.stderr or "")[-2000:]}
 
-    after = porcelain(root)
-    stray = sorted(p.rsplit("@", 1)[0] for p in (after - before)
-                   if not p.startswith(outdir_rel) and not p.startswith(".feature-ladder/")
-                   and not any(m in p or p.rstrip("/") + "/" == m for m in CACHE_MARKERS)
-                   and not p.endswith((".pyc", ".pyo")))
-    record = {"mode": mode, "effort": effort, "scope": scope_args, "slug": slug,
-              "codex_exit": r.returncode, "seconds": secs, "result": result,
+    # The guard runs whatever happened to Codex: a run that timed out may have written files first.
+    stray = [p for p in changed_paths(before, porcelain(root)) if not allowed_path(p, outdir_rel)]
+    record = {"mode": mode, "effort": effort, "flags": flags, "scope": scope_args, "slug": slug,
+              "codex_exit": r.returncode, "timed_out": timed_out, "seconds": secs, "result": result,
               "files_changed_outside_allowed_dir": stray}
     dest = reviews / f"{slug}-codex-{mode}.json"
-    dest.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    ladder_state.write_json(dest, record)
     shutil.rmtree(tmp, ignore_errors=True)
 
-    print(f"## Codex {mode} ({effort} effort, {secs}s) - saved to {dest.relative_to(root)}")
+    if timed_out:
+        print(f"Codex {mode} timed out after {TIMEOUT}s; second opinion incomplete. Record: {shown(dest)}")
+        if stray:
+            print(f"**GUARD VIOLATION:** files outside {outdir_rel} were changed, deleted or reverted "
+                  f"before the timeout: {', '.join(stray)}")
+        return 1
+    print(f"## Codex {mode} ({effort} effort, {secs}s) - saved to {shown(dest)}")
     if stray:
-        print(f"**GUARD VIOLATION:** Codex changed files outside {outdir_rel}: {', '.join(stray)}")
+        print(f"**GUARD VIOLATION:** files outside {outdir_rel} were changed, deleted or reverted: {', '.join(stray)}")
     if r.returncode != 0 and not raw:
         print(f"Codex exited {r.returncode}: {r.stderr.strip()[-800:]}")
         return 1
@@ -344,8 +433,8 @@ def main(argv):
             print(f"- [{x['severity']}/{x['confidence']}] {x['file']}:{x['line']} {x['title']} - {x['detail']} Fix: {x['suggested_fix']}")
         if act:
             card = reviews / f"{slug}-codex-verify-card.md"
-            card.write_text(verify_card(slug, act, str(dest.relative_to(root))), encoding="utf-8")
-            print(f"Verification card for ONE mechanic dispatch: {card.relative_to(root)}")
+            card.write_text(verify_card(slug, act, str(shown(dest))), encoding="utf-8")
+            print(f"Verification card for ONE mechanic dispatch: {shown(card)}")
     elif mode == "adversarial" and "tests" in result:
         t = result["tests"]
         bugs = [x for x in t if x["real_bug"]]
@@ -359,8 +448,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except AttributeError:
-        pass
+    ladder_state.utf8_stdio()
     sys.exit(main(sys.argv[1:]))

@@ -134,8 +134,19 @@ class Brief(unittest.TestCase):
         self.assertEqual(brief.make_brief(data()), brief.make_brief(data()))
 
     def test_secret_values_never_present(self):
-        md = brief.make_brief(data(secrets={"names": ["UPLOAD_API_KEY"], "where": {}}))
+        value = "sk-live-9f8e7d6c5b4a"
+        md = brief.make_brief(data(secrets={"names": ["UPLOAD_API_KEY"], "where": {"UPLOAD_API_KEY": "src/upload.py"},
+                                            "values": {"UPLOAD_API_KEY": value}, "UPLOAD_API_KEY": value}))
         self.assertIn("UPLOAD_API_KEY", md)
+        self.assertNotIn(value, md)
+        self.assertNotIn("sk-live", md)
+
+    def test_evidence_that_is_already_a_list_is_not_bulleted_twice(self):
+        md = brief.make_brief(data(external={"name": "tenacity", "notes": "- Use tenacity retry\n* wrap the call\nplain line"}))
+        self.assertNotIn("- - ", md)
+        self.assertNotIn("- * ", md)
+        for want in ("- Use tenacity retry", "- wrap the call", "- plain line"):
+            self.assertIn(want, md)
 
 
 class Cli(unittest.TestCase):
@@ -179,6 +190,27 @@ class Cli(unittest.TestCase):
 
     def test_build_needs_input(self):
         self.assertEqual(self.run_cli("build").returncode, 1)
+
+    def test_build_from_an_intake_without_a_route_still_selects_skills(self):
+        conf = self.root / "i.json"
+        conf.write_text(json.dumps({"request": REQUEST, "repo_root": str(self.root), "fields": fields(),
+                                    "candidate_files": ["src/upload.py"]}), encoding="utf-8")
+        r = self.run_cli("build", "--intake", str(conf))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("Predicted rung", r.stdout)
+
+    def test_saved_brief_uses_lf_line_endings(self):
+        self.run_cli("build", "--proposal", str(self.pp), "--no-skills")
+        saved = self.root / ".feature-ladder" / "intake" / "retry-upload-client-brief.md"
+        self.assertNotIn(b"\r", saved.read_bytes())
+
+    def test_bad_input_gives_a_message_not_a_traceback(self):
+        bad = self.root / "bad.json"
+        bad.write_text(json.dumps({"request": REQUEST, "fields": ["nope"]}), encoding="utf-8")
+        r = self.run_cli("build", "--proposal", str(bad), "--no-skills")
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("Traceback", r.stderr)
 
 
 if __name__ == "__main__":

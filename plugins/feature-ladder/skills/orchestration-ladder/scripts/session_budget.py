@@ -9,8 +9,12 @@ spawn in that session (asked in the intake round of the first feature):
     S = 2 (small, 1-2)   M = 4 (medium, 3-4)   L = 8 (large, up to 8)
 
 The intake scout and the coordinator are not counted; every worker, expert,
-reviewer and mechanic is, and so is every external (GLM) worker. State lives
-in <repo>/.feature-ladder/session.json (git-ignored).
+reviewer and mechanic is, and so is every external (GLM) worker. Outside an
+active run only feature-ladder:* agents are counted, so an unrelated Explore
+or web-fetch spawn never spends the ladder's budget. State lives in
+<main checkout>/.feature-ladder/session.json (git-ignored); it is written
+atomically under a lock, and a file that does not parse denies spawns instead
+of silently meaning "no budget".
 
 In the same round the user picks the session's orchestrator, the model the
 coordinator runs on:
@@ -25,7 +29,8 @@ and a coordinator spawn on Fable is denied unless the user chose Fable.
 As a PreToolUse hook on Agent/Task it denies a spawn when:
   - the session budget is spent;
   - a run is active and the spawn is something a feature run never does:
-      codex-reviewer, memory-scribe (they belong to /feature-ladder:wrap),
+      codex-reviewer (it belongs to /feature-ladder:wrap; the removed
+      memory-scribe name stays denied so nothing spawns a stand-in),
       any Fable rung or `model: fable` except the integrator, unless the
       run's switches allow it (--second-opinion, --escalate, --ultra);
       the integrator before two coding agents have returned packets for the
@@ -56,17 +61,21 @@ As a PreToolUse hook on Agent/Task it denies a spawn when:
 """
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ladder_state  # noqa: E402
 
 SIZES = {"S": 2, "M": 4, "L": 8}
 SIZE_LABELS = {"S": "Small (1-2 subagents)", "M": "Medium (3-4 subagents)", "L": "Large (up to 8 subagents)"}
 NOT_COUNTED = {"scoper", "coordinator"}
 FABLE_RUNGS = {"second-opinion": "second_opinion", "deep-verifier": "escalate",
                "architect-escalation": "escalate", "ultra-investigator": "ultra"}
-WRAP_ONLY = {"codex-reviewer", "memory-scribe"}  # memory is written by memory_gate.py flush, no agent
+# memory-scribe no longer exists (memory is written by memory_gate.py flush, no agent);
+# the name stays here so an old prompt cannot spawn a stand-in inside a run.
+WRAP_ONLY = {"codex-reviewer", "memory-scribe"}
 DESIGN_RUNGS = {"domain-expert", "domain-expert-high"}
 INTEGRATOR = "integrator"  # the one Fable rung a run reaches on its own: after >= 2 coding agents
 INTEGRATOR_MIN_WORKERS = 2
@@ -89,19 +98,7 @@ def now():
 
 def find_root(cwd):
     """The main checkout's root (linked worktrees resolve to it), or cwd."""
-    p = Path(cwd or os.getcwd()).resolve()
-    try:
-        r = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                           cwd=str(p), capture_output=True, text=True, timeout=10)
-        common = Path(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
-    except (OSError, subprocess.SubprocessError):
-        common = None
-    if common and common.name == ".git":
-        return common.parent
-    for d in [p, *p.parents]:
-        if (d / ".feature-ladder").is_dir():
-            return d
-    return p
+    return ladder_state.state_root(cwd)
 
 
 def _path(root, name):
@@ -109,36 +106,36 @@ def _path(root, name):
 
 
 def _read(path):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    return ladder_state.read_json(path)
 
 
 def _write(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    gi = path.parent / ".gitignore"
-    try:
-        lines = gi.read_text(encoding="utf-8").splitlines() if gi.is_file() else []
-        missing = [e for e in ("session.json", "session-memory*.md", "memory-gate.json", "memory-ledger.jsonl")
-                   if e not in lines]
-        if missing:
-            gi.write_text("\n".join(lines + missing) + "\n", encoding="utf-8")
-    except OSError:
-        pass
+    ladder_state.write_json(path, data)
+    ladder_state.ensure_gitignore(Path(path).parent.parent)
 
 
 def load(root):
-    return _read(_path(root, "session.json")) or {}
+    """The session state; {} when there is none. Raises ladder_state.CorruptState
+    (a ValueError) when session.json exists but does not parse: an unreadable
+    budget must never read as "no budget"."""
+    return ladder_state.read_json(_path(root, "session.json"), strict=True) or {}
 
 
 def save(root, sess):
     _write(_path(root, "session.json"), sess)
 
 
+UNREADABLE = ("feature-ladder: .feature-ladder/session.json is unreadable ({why}), so the session's subagent "
+              "budget cannot be checked. Do not spawn; tell the user to run `session_budget.py new` (the "
+              "budget is asked again) or repair the file.")
+
+
 def status(root):
-    s = load(root)
+    try:
+        s = load(root)
+    except ladder_state.CorruptState as e:
+        return {"budget": "unreadable", "reason": str(e), "session_id": None,
+                "options": {k: SIZE_LABELS[k] for k in SIZES}}
     if not s.get("max_agents"):
         return {"budget": "unset", "session_id": s.get("session_id"),
                 "options": {k: SIZE_LABELS[k] for k in SIZES}, "orchestrator": orchestrator(root)}
@@ -181,11 +178,12 @@ def set_orchestrator(root, value):
     key = orchestrator_key(value)
     if key is None:
         raise ValueError(f"orchestrator must be one of {sorted(ORCHESTRATORS)}")
-    s = load(root)
-    s.update({"orchestrator": key, "orchestrator_set_at": now()})
-    s.setdefault("spawned", [])
-    s.setdefault("started", now())
-    save(root, s)
+    with ladder_state.locked(root):
+        s = load(root)
+        s.update({"orchestrator": key, "orchestrator_set_at": now()})
+        s.setdefault("spawned", [])
+        s.setdefault("started", now())
+        save(root, s)
     return orchestrator(root)
 
 
@@ -194,24 +192,26 @@ def set_run_orchestrator(root, value, slug=None):
     hook honours it even when no run.json exists (a folder that is not a git
     repo). The next confirmed intake replaces or clears it: one run only."""
     key = orchestrator_key(value)
-    s = load(root)
-    if key is None and not s.get("orchestrator_run"):
-        return
-    s["orchestrator_run"] = {"key": key, "slug": slug, "at": now()} if key else None
-    s.setdefault("spawned", [])
-    s.setdefault("started", now())
-    save(root, s)
+    with ladder_state.locked(root):
+        s = load(root)
+        if key is None and not s.get("orchestrator_run"):
+            return
+        s["orchestrator_run"] = {"key": key, "slug": slug, "at": now()} if key else None
+        s.setdefault("spawned", [])
+        s.setdefault("started", now())
+        save(root, s)
 
 
 def set_size(root, size):
     size = str(size).strip().upper()[:1]
     if size not in SIZES:
         raise ValueError(f"size must be one of {sorted(SIZES)}")
-    s = load(root)
-    s.update({"size": size, "max_agents": SIZES[size], "set_at": now()})
-    s.setdefault("spawned", [])
-    s.setdefault("started", now())
-    save(root, s)
+    with ladder_state.locked(root):
+        s = load(root)
+        s.update({"size": size, "max_agents": SIZES[size], "set_at": now()})
+        s.setdefault("spawned", [])
+        s.setdefault("started", now())
+        save(root, s)
     return status(root)
 
 
@@ -220,8 +220,24 @@ def active_run(root):
     return run if run.get("active") else None
 
 
+def _same_run(entry, run):
+    """A spawn belongs to this run when slug AND start time match: a retry after
+    an abort reuses the slug and must not inherit the dead run's spawns."""
+    return entry.get("run") == run.get("slug") and entry.get("run_started") == run.get("started")
+
+
 def check(root, agent, model=None, via="subagent"):
-    """Decide one spawn. Returns (allowed, reason). Records it when allowed."""
+    """Decide one spawn. Returns (allowed, reason). Records it when allowed.
+    Load, decide and save happen under one lock, so parallel spawns cannot
+    overspend the budget."""
+    try:
+        with ladder_state.locked(root):
+            return _check(root, agent, model, via)
+    except ladder_state.CorruptState as e:
+        return False, UNREADABLE.format(why=e)
+
+
+def _check(root, agent, model, via):
     agent = str(agent or "").split(":")[-1]
     if agent == "coordinator" and "fable" in str(model or "").lower():
         run_pick = (orchestrator_key(((active_run(root) or {}).get("orchestrator") or {}).get("key"))
@@ -237,16 +253,18 @@ def check(root, agent, model=None, via="subagent"):
     if run is not None:
         switches = set(run.get("switches") or [])
         budget = run.get("budget") or {}
-        mine = [e for e in sess.get("spawned", []) if e.get("run") == run.get("slug")]
+        mine = [e for e in sess.get("spawned", []) if _same_run(e, run)]
         if agent in WRAP_ONLY:
             return False, (f"feature-ladder: {agent} does not run inside a feature run; reviews and memory "
                            "happen once at the end of the session with /feature-ladder:wrap. Carry on without it.")
         workers = [e for e in mine if e["agent"] not in DESIGN_RUNGS and e["agent"] != INTEGRATOR]
         if agent == INTEGRATOR:
-            if len(workers) < INTEGRATOR_MIN_WORKERS:
+            distinct = {(e["agent"], str(e.get("model") or "").lower()) for e in workers}
+            if len(distinct) < INTEGRATOR_MIN_WORKERS:
                 return False, (f"feature-ladder: the integrator (Fable) runs only after {INTEGRATOR_MIN_WORKERS} or "
-                               "more coding agents returned packets for this feature; one worker's work is "
-                               "accepted by verify.py alone.")
+                               "more different coding agents (another agent or another model) returned packets "
+                               "for this feature; one worker's work, or a retry of the same worker, is accepted "
+                               "by verify.py alone.")
             if any(e["agent"] == INTEGRATOR for e in mine):
                 return False, "feature-ladder: one integration pass per feature; route its card and verify."
         else:
@@ -277,9 +295,29 @@ def check(root, agent, model=None, via="subagent"):
                            "and report anything unfinished as partial; do not work around this.")
     if sess.get("max_agents") or run is not None:
         sess.setdefault("spawned", []).append({"at": now(), "agent": agent or "?", "model": model,
-                                               "via": via, "run": run.get("slug") if run else None})
+                                               "via": via, "run": run.get("slug") if run else None,
+                                               "run_started": run.get("started") if run else None})
         save(root, sess)
     return True, ""
+
+
+def refund(root, agent, model=None, via="external"):
+    """Give back the newest matching spawn: the worker was charged but never
+    ran (bad key, empty credits). Returns True when a slot was returned."""
+    agent = str(agent or "").split(":")[-1]
+    try:
+        with ladder_state.locked(root):
+            sess = load(root)
+            spawned = sess.get("spawned") or []
+            for i in range(len(spawned) - 1, -1, -1):
+                e = spawned[i]
+                if e.get("agent") == agent and e.get("model") == model and e.get("via") == via:
+                    del spawned[i]
+                    save(root, sess)
+                    return True
+    except ladder_state.CorruptState:
+        pass
+    return False
 
 
 def remember(root, lines):
@@ -306,11 +344,53 @@ def remember(root, lines):
             rejected.append({"line": l[:200], "reason": str(e)})
     if ok:
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "a", encoding="utf-8") as fh:
-            for l in ok:
-                fh.write(f"- {l}\n")
-        _write(_path(root, "session.json"), load(root) or {"started": now(), "spawned": []})
+        with ladder_state.locked(root):
+            with open(p, "a", encoding="utf-8") as fh:
+                for l in ok:
+                    fh.write(f"- {l}\n")
+            try:
+                sess = load(root)
+            except ladder_state.CorruptState:
+                sess = None  # leave an unreadable budget file for `new` to replace
+            if sess is not None:
+                save(root, sess or {"started": now(), "spawned": []})
     return {"queued": len(ok), "rejected": rejected}
+
+
+def pending_memory(root):
+    """Queued lines that still pass the gate and were never written: what a
+    flush left behind (over the per-session cap, or Hindsight unreachable)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "hindsight-memory" / "scripts"))
+    import memory_gate
+    p = _path(root, "session-memory.md")
+    if not p.is_file():
+        return []
+    seen, out = memory_gate.retained_hashes(root), []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        try:
+            kind, fact, h = memory_gate.check_line(root, line, seen)
+        except ValueError:
+            continue
+        seen.add(h)
+        out.append(f"- [{kind}] {fact}")
+    return out
+
+
+def close(root):
+    """End the session. The queue is archived; lines that were never written
+    go back into a fresh queue so the next wrap picks them up."""
+    with ladder_state.locked(root):
+        s = load(root)
+        s.update({"closed": now(), "max_agents": None})
+        save(root, s)
+    p = _path(root, "session-memory.md")
+    kept = []
+    if p.is_file():
+        kept = pending_memory(root)
+        p.replace(p.with_name(f"session-memory-{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.md"))
+        if kept:
+            ladder_state.write_text(p, "\n".join(kept) + "\n")
+    return {"closed": True, "memory_left_in_queue": len(kept)}
 
 
 # -------------------------------------------------------------------- hooks --
@@ -322,7 +402,10 @@ def hook_session_start(payload):
     root = find_root(payload.get("cwd"))
     if not (Path(root) / ".feature-ladder").is_dir():
         return  # never ran the ladder here: write nothing
-    save(root, {"session_id": payload.get("session_id"), "started": now(), "spawned": []})
+    if active_run(root) is not None:
+        return  # a second window or a background session opened mid-run: the run keeps its budget
+    with ladder_state.locked(root):
+        save(root, {"session_id": payload.get("session_id"), "started": now(), "spawned": []})
 
 
 def hook_pretooluse(payload):
@@ -332,11 +415,20 @@ def hook_pretooluse(payload):
     root = find_root(payload.get("cwd"))
     if not (Path(root) / ".feature-ladder").is_dir():
         return None
-    allowed, reason = check(root, ti.get("subagent_type") or "general-purpose", ti.get("model"))
+    agent_type = str(ti.get("subagent_type") or "general-purpose")
+    if active_run(root) is None and not agent_type.startswith("feature-ladder:"):
+        return None  # not a ladder agent and no run: not the ladder's budget to spend
+    allowed, reason = check(root, agent_type, ti.get("model"))
     if allowed:
         return None
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                    "permissionDecisionReason": reason}}
+
+
+# Every subcommand and the options it takes; anything else is an error, not ignored.
+OPTIONS = {"status": {"--cwd"}, "set": {"--cwd", "--size"}, "orchestrator": {"--cwd", "--set"},
+           "charge": {"--cwd", "--agent", "--model"}, "remember": {"--cwd", "--line"},
+           "memory": {"--cwd"}, "new": {"--cwd"}, "close": {"--cwd"}}
 
 
 def main(argv):
@@ -352,17 +444,30 @@ def main(argv):
         except Exception:  # noqa: BLE001 - a broken hook must never break the session
             pass
         return 0
+    ladder_state.utf8_stdio()
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
         return 0
     cmd, rest = argv[0], argv[1:]
+    known = OPTIONS.get(cmd)
+    if known is None:
+        print(__doc__)
+        return 1
     opts, lines = {}, []
     it = iter(rest)
     for a in it:
+        if a not in known:
+            print(f"session_budget {cmd}: unknown option {a!r} (it takes: {', '.join(sorted(known)) or 'none'})",
+                  file=sys.stderr)
+            return 1
+        value = next(it, None)
+        if value is None:
+            print(f"session_budget {cmd}: {a} needs a value", file=sys.stderr)
+            return 1
         if a == "--line":
-            lines.append(next(it, ""))
-        elif a.startswith("--"):
-            opts[a] = next(it, "")
+            lines.append(value)
+        else:
+            opts[a] = value
     root = find_root(opts.get("--cwd"))
     try:
         if cmd == "status":
@@ -382,16 +487,11 @@ def main(argv):
             p = _path(root, "session-memory.md")
             sys.stdout.write(p.read_text(encoding="utf-8") if p.is_file() else "")
         elif cmd == "new":
-            save(root, {"started": now(), "spawned": []})
+            with ladder_state.locked(root):
+                save(root, {"started": now(), "spawned": []})
             print(json.dumps(status(root)))
         elif cmd == "close":
-            s = load(root)
-            s.update({"closed": now(), "max_agents": None})
-            save(root, s)
-            p = _path(root, "session-memory.md")
-            if p.is_file():
-                p.replace(p.with_name(f"session-memory-{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.md"))
-            print(json.dumps({"closed": True}))
+            print(json.dumps(close(root)))
         else:
             print(__doc__)
             return 1

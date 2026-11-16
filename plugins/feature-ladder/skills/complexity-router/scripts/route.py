@@ -30,7 +30,8 @@ Input fields (all optional; missing = 0 / false)
   security          bool  touches auth, secrets, permissions, crypto, input trust boundary
   concurrency       bool  async/threads/locks/queues/race-prone code
   cross_system      bool  spans >1 service, repo, process, or external system
-  irreversible      bool  effects outside the repo (real data, deploys, publishing, external calls); +3, run under the intake policy
+  irreversible      bool  effects outside the repo (real data, deploys, publishing, external calls); +2,
+                          a risk weight only: the step runs and the audit hook logs it
   no_tests          bool  area has no existing tests to lean on
   ambiguity         0-3   0 fully specified ... 3 goal only, approach unknown
   novelty           0-3   0 pattern exists in repo ... 3 nothing like it anywhere here
@@ -68,7 +69,7 @@ POINTS = {
     "no_tests":     lambda v: 1 if v else 0,
     # Effects outside the repo (real data, deploys, publishing, external calls).
     # Code on a branch is always reversible, so this is a risk weight, not a stop:
-    # the step runs under the intake's outside-repo policy (see irreversible.py).
+    # the step runs and irreversible.py logs it (there is no policy since v1.11).
     "irreversible": lambda v: 2 if v else 0,
     "ambiguity":    lambda v: [0, 1, 3, 5][max(0, min(3, int(v)))],
     "novelty":      lambda v: [0, 1, 3, 5][max(0, min(3, int(v)))],
@@ -106,7 +107,8 @@ NON_CODE_KINDS = {
 }
 
 KEYWORDS = {
-    "security":     ["auth", "login", "password", "secret", "token", "permission", "crypto", "oauth", "jwt", "csrf", "xss", "sanitize"],
+    "security":     ["auth", "authenticat", "authoriz", "login", "password", "secret", "token", "permission", "crypto",
+                     "encrypt", "decrypt", "oauth", "jwt", "csrf", "xss", "sanitize"],
     "persistence":  ["schema", "migration", "database", "db ", "sql", "table", "index", "on-disk", "file format", "serializ"],
     "concurrency":  ["async", "thread", "lock", "mutex", "race", "queue", "worker", "concurren", "parallel", "websocket"],
     "cross_system": ["service", "microservice", "api call", "webhook", "another repo", "cross-repo", "integration with", "third-party", "external"],
@@ -219,17 +221,27 @@ def _out(label, agent, model, effort, total, flags, breakdown, reason, design_fi
     }
 
 
-PREFIX_KEYWORDS = {"serializ", "concurren", "install", "upgrade", "sanitize"}  # match as word prefixes
+# Stems: match as word prefixes (serializ -> serializer, serialization).
+PREFIX_KEYWORDS = {"serializ", "concurren", "install", "upgrade", "sanitize", "idempot",
+                   "authenticat", "authoriz", "encrypt", "decrypt"}
+# Every other keyword matches as a whole word plus its plain inflections
+# (token -> tokens, lock -> locked/locking, delete -> deleted, index -> indexes).
+_INFLECTION = r"(?:s|es|d|ed|ing)?"
 
 
 def keyword_hit(text: str, words):
-    """Whole-word match, so 'author' is not 'auth' and 'stable' is not 'table'."""
+    """The matched text, or None. A keyword matches as a whole word or one of
+    its plain inflections, so 'tokens' is 'token' but 'author' is not 'auth'
+    and 'stable' is not 'table'."""
     t = text.lower()
     for w in words:
-        w = w.strip()
-        pat = r"(?<![a-z0-9])" + re.escape(w) + ("" if w in PREFIX_KEYWORDS else r"(?![a-z0-9])")
-        if re.search(pat, t):
-            return w
+        w = w.strip().lower()
+        if not w:
+            continue
+        tail = "" if w in PREFIX_KEYWORDS else _INFLECTION + r"(?![a-z0-9])"
+        m = re.search(r"(?<![a-z0-9])" + re.escape(w) + tail, t)
+        if m:
+            return m.group(0)
     return None
 
 
@@ -277,11 +289,19 @@ def main(argv):
         result["prefilled_task"] = task
         print(json.dumps(result, indent=2))
         return 0
-    if argv[0] == "--file":
-        with open(argv[1], encoding="utf-8-sig") as fh:
-            task = json.load(fh)
-    else:
-        task = json.loads(argv[0])
+    try:
+        if argv[0] == "--file":
+            if len(argv) < 2:
+                raise ValueError("--file needs a path")
+            with open(argv[1], encoding="utf-8-sig") as fh:
+                task = json.load(fh)
+        else:
+            task = json.loads(argv[0])
+        if not isinstance(task, dict):
+            raise ValueError("the task must be a JSON object")
+    except (ValueError, OSError) as e:
+        print(f"route: {e} (pass a JSON object, --file PATH, --describe TEXT or --table)", file=sys.stderr)
+        return 1
     print(json.dumps(route(task), indent=2))
     return 0
 

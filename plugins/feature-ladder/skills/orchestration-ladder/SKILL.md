@@ -73,7 +73,7 @@ external GLM worker is. A new Claude Code session asks again.
 | L | 20+ | up to 4 | ~24 (the coordinator's maxTurns at every size) |
 
 Every size: at most one mechanic, a design step only when `budget.design`
-(a hard flag), no Codex, no scribe, no check-runner, and no Fable rung but
+(a hard flag), no Codex, no memory agent, no check-runner, and no Fable rung but
 the integrator (once, after two coding agents; it does not count as a
 worker).
 
@@ -81,8 +81,9 @@ worker).
 spawn past the session budget, past the feature's workers (+1 retry, +1
 design), a second mechanic or design step, the integrator before two coding
 agents have returned (or a second integrator), and inside a run any
-`codex-reviewer`, `memory-scribe` or other Fable rung the user did not
-enable. External workers check the same budget (`external_worker.py` exit 4).
+`codex-reviewer` or Fable rung the user did not enable. There is no memory
+agent: memory is written by `memory_gate.py flush` at `/feature-ladder:wrap`.
+External workers check the same budget (`external_worker.py` exit 4).
 
 ## The confidence surface (what the gates became)
 
@@ -129,7 +130,7 @@ model, and the PreToolUse hook records the result in `run.json`:
 | mundane | emulator or dev/staging targets, deploys, index builds, dry runs | runs, logged |
 | risky | `firestore:delete`, imports, destructive SQL, backfills on production | runs, logged `review: pending` |
 | never | the former never-list: merge PRs, push or force-push the base branch, delete a project/database/repo/backups, weaken protection | runs, logged `review: pending`, named first in the report |
-| secret | a command whose output would print a secret value | **denied** - the one denial left; use `with_secrets.py` |
+| secret | a command whose output would print a secret value, or that carries one on its command line (`NAME_API_KEY=sk-...`) | **denied** - the one denial left; use `with_secrets.py`. The value is never stored: the audit log redacts it |
 
 There is no intake policy and no approve step. `irreversible.py pending`
 prints the `review: pending` rows as a checklist; `pr_checkpoint.py finish`
@@ -156,6 +157,9 @@ worker reads it, nobody else does. Workers cannot invoke the Skill tool.
 
 **Secrets.** A command that needs a secret runs as
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`.
+To put a secret into an argument, let a shell inside the wrapper expand it:
+`with_secrets.py --secret NAME -- bash -c '... $NAME ...'` (your own shell
+would expand `$NAME` to nothing before the wrapper ran).
 Never fetch, print, log, commit or quote a value.
 
 ### Evidence Packet (worker -> coordinator)
@@ -192,12 +196,18 @@ accepts it or decides the open points itself.
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> \
     --check "<done-when command>" [--check ...] --scope <path> [--scope ...] \
-    --changed <file the packet says it changed> [--changed ...] [--base <ref>]
+    --changed <file the packet says it changed> [--changed ...] [--base <ref>] \
+    [--timeout S] [--total-timeout S]
 ```
 
 It runs each command as written, records exit code and output tail, and flags
 files outside Scope or a wrong `Changed:` claim (exit 0 green, 1 a check
-failed or would print a secret, 2 scope or claim mismatch). Exit 1:
+failed or would print a secret, 2 scope or claim mismatch). On Windows the
+checks run in Git Bash when it is installed, the shell the worker wrote them
+in. `--timeout` bounds one check and `--total-timeout` the whole run (it
+fits one 10-minute tool call by default); at the limit the command and
+everything it started are stopped. FEATURE-REPORT.md and DESIGN.md at the
+repo root are ignored unless the card's Scope or `Changed:` names them. Exit 1:
 re-dispatch once, then one band up once, then `partial`.
 
 ## Memory

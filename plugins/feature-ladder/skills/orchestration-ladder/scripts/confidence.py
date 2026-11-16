@@ -33,7 +33,8 @@ about size and previews, written into FEATURE-REPORT.md next to the action.
 
 --memories FILE is the recall as the Hindsight MCP tool returned it (JSON of
 any shape; every object with a text/content/fact field counts) or one memory
-per line ("[kind] fact"). --live performs the recall itself over MCP
+per line ("[kind] fact"). A file that is missing or cannot be read counts as
+no memories (Hindsight was down), with a note in the output. --live performs the recall itself over MCP
 (HINDSIGHT_MCP_URL / HINDSIGHT_API_KEY, this repository's bank) and counts it
 against the feature's recall budget through memory_gate.py.
 
@@ -61,6 +62,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1] / "hindsight-memory" / "scripts"))
+
+import ladder_state  # noqa: E402
 
 DEFAULT_THRESHOLD = 0.60
 KINDS = ("decision", "convention", "pitfall", "interface", "test-strategy")
@@ -93,6 +96,13 @@ STOP = {"the", "and", "for", "with", "that", "this", "from", "into", "use", "add
         "than", "are", "was", "were", "has", "have", "had", "its", "it", "an", "a", "to", "of", "in", "on",
         "by", "as", "at", "be", "is", "or", "so", "if", "we", "our", "all", "any", "each", "map", "maps"}
 WORD = re.compile(r"[a-z0-9_]+")
+# File stems that name a role, not a place: "index", "main" or "package" in a path
+# says nothing about which memories are about it.
+GENERIC_STEMS = {"index", "main", "app", "init", "__init__", "mod", "lib", "src", "test", "tests", "spec",
+                 "util", "utils", "helper", "helpers", "common", "base", "core", "config", "settings",
+                 "constants", "types", "type", "model", "models", "schema", "setup", "readme", "package",
+                 "makefile", "dockerfile", "server", "client", "routes", "router", "api", "data", "file",
+                 "files", "page", "pages", "component", "components", "style", "styles"}
 LINE_RE = re.compile(r"^\s*[-*]?\s*\[(" + "|".join(KINDS) + r")\]\s*(.+?)\s*$", re.I)
 
 
@@ -123,7 +133,7 @@ def polarity(text):
 def load_providers(cwd):
     cfg = {}
     for f in (Path.home() / ".claude" / "feature-ladder" / "providers.json",
-              Path(cwd) / ".feature-ladder" / "providers.json"):
+              ladder_state.state_dir(ladder_state.state_root(cwd)) / "providers.json"):
         try:
             if f.is_file():
                 cfg.update(json.loads(f.read_text(encoding="utf-8-sig")).get("confidence") or {})
@@ -301,7 +311,10 @@ def live_recall(query, cwd):
         ok, why, args = memory_gate.gate("recall", args, root, ident.get("project") or "feature-ladder")
         if not ok:
             return [], why
-        bank = (resolve_bank.resolve(cwd) or {}).get("bank_id")
+        resolved = resolve_bank.resolve(cwd) or {}
+        if resolved.get("how") == "planned":  # the bank is only created by the first memory write
+            return [], "no memories yet for this repository"
+        bank = resolved.get("bank_id")
         if bank:
             args["bank_id"] = bank
         res = resolve_bank.Mcp().start().call("recall", args)
@@ -311,14 +324,51 @@ def live_recall(query, cwd):
 
 
 # ----------------------------------------------------------------- surface --
+def _distinctive(word):
+    return len(word) >= 3 and word not in STOP and word not in GENERIC_STEMS and not word.isdigit()
+
+
 def anchors(action, paths):
+    """What a memory must mention to count as touching this card. From the action:
+    its words (3+ letters, no stop words). From each path: the path itself, its last
+    two components, the file name with its extension, and the file's stem when the
+    stem is distinctive. A bare extension ("json", "ts") or a generic stem ("index",
+    "main", "package") is never an anchor: it would match unrelated memories."""
     toks = {t for t in WORD.findall(str(action).lower()) if len(t) >= 3 and t not in STOP}
     for p in paths or []:
-        p = str(p).replace("\\", "/").lower()
-        base = p.rsplit("/", 1)[-1]
-        toks.update({p, base, base.split(".")[0]})
-        toks.update(t for t in WORD.findall(base) if len(t) >= 3 and t not in STOP)
+        p = str(p).replace("\\", "/").lower().strip().strip("/")
+        while p.startswith("./"):
+            p = p[2:]
+        if not p:
+            continue
+        parts = p.split("/")
+        base = parts[-1]
+        toks.add(p)
+        if len(parts) >= 2:
+            toks.add("/".join(parts[-2:]))
+        stem = base.split(".")[0] if "." in base.strip(".") else base
+        if "." in base and len(stem) >= 2:
+            toks.add(base)  # "maproutes.ts": matched whole, see touching()
+        if _distinctive(stem):
+            toks.add(stem)
+            if len(parts) >= 2:
+                toks.add(f"{parts[-2]}/{stem}")  # "server/maproutes", as a test command names it
     return {t for t in toks if t}
+
+
+def touching(text, anch):
+    """How many anchors the text mentions. A word anchor must be a whole word; a
+    path or file name must appear whole (not inside a longer name)."""
+    low = str(text).lower()
+    toks = set(WORD.findall(low))
+    n = 0
+    for a in anch:
+        if "/" in a or "." in a:
+            if re.search(r"(?<![a-z0-9_])" + re.escape(a) + r"(?![a-z0-9_])", low):
+                n += 1
+        elif a in toks:
+            n += 1
+    return n
 
 
 def surface(memories, action, paths, scorer=None, cfg=None):
@@ -328,9 +378,7 @@ def surface(memories, action, paths, scorer=None, cfg=None):
     items = []
     for mem, pol in zip(memories, pols):
         text = mem["text"]
-        low = text.lower()
-        toks = set(WORD.findall(low))
-        matches = sum(1 for a in anch if a in toks or ("/" in a and a in low))
+        matches = touching(text, anch)
         score = clamp(KIND_PRIOR.get(mem["kind"], 0.0) + 0.6 * pol, -1.0, 1.0)
         items.append({"kind": mem["kind"], "text": text[:160], "polarity": pol, "score": round(score, 2),
                       "weight": 1 + min(2, matches), "relevant": matches > 0})
@@ -450,15 +498,32 @@ def parse(argv):
 
 
 def classify_tier(action, cwd):
+    """The command's tier against this repository's run.json: the one in the main
+    checkout, whichever subfolder or worktree the call came from."""
     try:
         from irreversible import classify
-        run = {}
-        p = Path(cwd) / ".feature-ladder" / "run.json"
-        if p.is_file():
-            run = json.loads(p.read_text(encoding="utf-8"))
-        return classify(action, run).get("tier", "none")
+        run = ladder_state.read_json(ladder_state.state_dir(ladder_state.state_root(cwd)) / "run.json")
+        return classify(action, run if isinstance(run, dict) else {}).get("tier", "none")
     except Exception:  # noqa: BLE001
         return "none"
+
+
+def _number(a, flag, kind, lo, hi=None, default=None):
+    """A numeric flag, or ValueError naming the flag. A flag given without a value
+    is an error, not a silent default."""
+    if flag not in a:
+        return default
+    v = a[flag]
+    try:
+        if v is True:
+            raise ValueError
+        n = kind(v)
+        if n != n or n < lo or (hi is not None and n > hi):
+            raise ValueError
+        return n
+    except (TypeError, ValueError):
+        rng = f"{lo} to {hi}" if hi is not None else f"{lo} or more"
+        raise ValueError(f"{flag} needs a number ({rng}); got {'nothing' if v is True else repr(v)}") from None
 
 
 def main(argv):
@@ -477,15 +542,24 @@ def main(argv):
     if not action:
         print("--action is required", file=sys.stderr)
         return 1
+    try:
+        passed = _number(a, "--checks-passed", int, 0, default=0)
+        failed = _number(a, "--checks-failed", int, 0, default=0)
+        threshold = _number(a, "--threshold", float, 0.0, 1.0)
+    except ValueError as e:
+        print(f"confidence.py: {e}", file=sys.stderr)
+        return 1
     memories, note = [], None
-    if a.get("--memories"):
-        memories = parse_memories(Path(a["--memories"]).read_text(encoding="utf-8-sig"))
+    if a.get("--memories") and a["--memories"] is not True:
+        try:
+            memories = parse_memories(Path(a["--memories"]).read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError) as e:  # Hindsight was down, nothing was saved: unknown territory
+            note = f"recall file not read ({Path(a['--memories']).name}: {type(e).__name__}); scored as no memories"
     elif a.get("--live"):
         memories, note = live_recall(a.get("--query") or action, cwd)
     tier = a.get("--tier") or (classify_tier(action, cwd) if mode == "action" else None)
     out = decide(mode, action, a.get("--paths") or [], a.get("--size"), tier, memories,
-                 int(a.get("--checks-passed") or 0), int(a.get("--checks-failed") or 0),
-                 a.get("--threshold"), a.get("--scorer"), load_providers(cwd), note)
+                 passed, failed, threshold, a.get("--scorer"), load_providers(cwd), note)
     text = json.dumps(out, indent=2)
     if a.get("--out"):
         Path(a["--out"]).parent.mkdir(parents=True, exist_ok=True)
@@ -495,4 +569,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    ladder_state.utf8_stdio()
     sys.exit(main(sys.argv[1:]))

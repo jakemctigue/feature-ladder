@@ -41,8 +41,13 @@ callers that cannot write files).
 
 Without `--inject` or `--out` it prints JSON: chosen skills with the rule and matches that
 selected each, skills dropped for `max_skills` / `max_chars`, and names that are
-not installed. `--list` prints every skill it can resolve and every rule that
-points at a skill that is not installed.
+not installed. `--list` prints every skill it can resolve, every rule that
+points at a skill that is not installed, and every broken rule: a rule that
+names an unknown group in `when` or `unless` (a misspelt `keyword` for
+`keywords`, say) is never applied, instead of matching everything.
+
+No skill inventory is built when the role's budget is 0 or no rule matches,
+so a mechanic card costs one interpreter start.
 
 ## Rules
 
@@ -52,6 +57,10 @@ Rules live in `skill-rules.json`, merged in this order (same `id` replaces,
 1. `${CLAUDE_PLUGIN_ROOT}/skills/skill-selector/skill-rules.json` - shipped defaults
 2. `~/.claude/feature-ladder/skill-rules.json` - personal rules, survive plugin updates
 3. `<repo>/.feature-ladder/skill-rules.json` - per-project rules
+
+Project rules and project skills are read from the working folder up to the
+repository root, never beyond it and never from the home folder: a rules
+file in a parent folder does not leak into every repository beneath it.
 
 A rule fires when every group in `when` matches (any value within a group) and
 nothing in `unless` matches:

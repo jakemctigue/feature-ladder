@@ -27,8 +27,12 @@ and hand back what Codex found, verbatim.
    ```
    Without `--base` the script reviews the commits since `origin/main`
    (or `main`/`master`), or the uncommitted changes if there are none.
-   Use `python` if `python3` is not available. Run it once. Do not retry on
-   findings; retry once only if it timed out.
+   Codex runs at medium effort unless the card's command carries `--tier` or
+   `--flags` (`--flags auto` reads this session's intakes); pass them exactly
+   as the card gives them and add none of your own.
+   Use `python` if `python3` is not available. Run it once: one attempt per
+   mode, no retry on findings and no retry after a timeout (exit 1 with
+   "timed out"); report the timeout in one line.
 2. Exit code 3 means Codex is unavailable (not installed or not signed in).
    Report that in one line; it is not a failure of the feature.
 3. Return an Evidence Packet whose Claims section is the script's stdout,

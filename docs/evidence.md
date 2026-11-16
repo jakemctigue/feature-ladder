@@ -19,6 +19,9 @@ python plugins/feature-ladder/scripts/evidence/generate_evidence.py --check  # e
 ```
 
 CI runs `--check` after the tests, and `tests/test_evidence.py` asserts the same.
+The scripts listed are the non-test `.py` files under `plugins/` that git
+tracks or would add: a file git ignores is left out, and a new script counts
+before its first commit, so regenerate after adding one and commit both.
 The output is byte-for-byte reproducible: no timestamps, serial numbers or
 absolute paths, sorted keys and entries, and files are hashed after `\r\n` is
 normalised to `\n`, so Windows and Linux agree.

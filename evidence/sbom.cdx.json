@@ -6,7 +6,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "06916b7662c06380d2d19f2731b0912f2459d24f4bb5b0458f40191784c2e3d7"
+          "content": "e35eba9027449a2606b9b2bb14c42d686d2004b4ce44f77cca96bdb46b8ce7a9"
         }
       ],
       "name": "plugins/feature-ladder/hooks/scripts/guard_irreversible.py",
@@ -17,7 +17,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "57f7255824b20dd2d6052f087c8f0c5a19584d07c03f1a31aaf70b8f46bd72e2"
+          "content": "6fbc7c1fbda878d63e6b0545868e8013b581ba22a95070b4fa1643e6b281e5fb"
         }
       ],
       "name": "plugins/feature-ladder/hooks/scripts/ledger.py",
@@ -28,7 +28,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "4771aae3a25d32054829b5e52e34d92ef25d0221b0c63d727f45707cb9decaac"
+          "content": "4a6096bce1bce408b6ee3dd0aabf7d8dade3c9f56ddeb3d6b20173b2291c5dec"
         }
       ],
       "name": "plugins/feature-ladder/hooks/scripts/require_retained.py",
@@ -50,10 +50,54 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "9f5ca4248943f7f4d2330a61b76f2036f6ae90f37e9ac42ae2de13601bbd1c6c"
+          "content": "eef0c0ed1b978fc67f1cfc5461b5b006b3186ede0d9bfcdf79a0f25a2ce11595"
         }
       ],
       "name": "plugins/feature-ladder/scripts/evidence/generate_evidence.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/scripts/fixtures/fixture_io.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "69d314f6aaf4dcde698e8cfd219da72730ca48a7a6f8c1c5ae9138d5dc4a300f"
+        }
+      ],
+      "name": "plugins/feature-ladder/scripts/fixtures/fixture_io.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/scripts/fixtures/gen_rank.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cc2ca1c3e9869b4fc8c3cd60c7d6658b857805c33fcced66678e826d5c6b7c10"
+        }
+      ],
+      "name": "plugins/feature-ladder/scripts/fixtures/gen_rank.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/scripts/fixtures/gen_routing.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c55405305baf3c14a6d722aba9e98de0d5fa4c5ff0cf67ee76cd99af84d3ab1d"
+        }
+      ],
+      "name": "plugins/feature-ladder/scripts/fixtures/gen_routing.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/scripts/fixtures/gen_triage.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "15b01f47868229edde7059ce705ec14072d1628c98cae7c18e2d5d057a88811a"
+        }
+      ],
+      "name": "plugins/feature-ladder/scripts/fixtures/gen_triage.py",
       "type": "file"
     },
     {
@@ -61,7 +105,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "03be4a21b5d720ef15def5402f4bb98153ca4be4abddfa187f67df774d11ef89"
+          "content": "c7424d4fbf9fdab57c3b043fcad1a02a7fbf1c8b164b78dc13b7e1bd006bf1e0"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/brief.py",
@@ -72,7 +116,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "d89bae01e5b57a32f72c242d0a020812fe26d716868b97ad5cbbd4a65e475e11"
+          "content": "01f4af0564b4df58192f662872b9efb3e11e99ed85a5ce633adf5441dcaece91"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/intake.py",
@@ -83,7 +127,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "91c248ba73499351529487863ce5985849df24afd2c4c2f438d9d0b4c23fdc8d"
+          "content": "b147ea3a242597986825a49dbf845c6283c7015f34b7042bf9887d80b9d17520"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/route.py",
@@ -94,7 +138,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "05d0f8d06c4c43cc9c055f44c964fd3d56a26b027157c89722a5bfa89a71fea0"
+          "content": "d2ae22b541ec25c4304e11bd718a71e9f33aa053ebece23e6b70898cf5fde95e"
         }
       ],
       "name": "plugins/feature-ladder/skills/cross-model-review/scripts/codex_review.py",
@@ -105,7 +149,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "8c291462a0cf19b90284238170822c222793a7e6d8b73cfb8bbb83277a67b337"
+          "content": "196b6369b3baf5a30250e1a8faa66dd29a9e1fe2cd6061b9e6da63cc1e4daad1"
         }
       ],
       "name": "plugins/feature-ladder/skills/hindsight-memory/scripts/memory_gate.py",
@@ -116,7 +160,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a000b2ba4bae487d63c888fa1ad0651d819deb7736128cb6fbfed028b6c7d921"
+          "content": "394d63f6814e4120570b3e0ac9e0058df5343df4472828c7fa8879d1a7077116"
         }
       ],
       "name": "plugins/feature-ladder/skills/hindsight-memory/scripts/resolve_bank.py",
@@ -127,7 +171,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "7ed507b25250ce045dcacd51f71c6b22186f7d95f77c8ec89521e29495064750"
+          "content": "4652d78210d2466aca57ce3e88274e13e76d48e171a20d004734c9203476145b"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/confidence.py",
@@ -138,7 +182,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "bfae8848321ed477ef8db5c5e560d619c9f1b5b92a45890578145c5a4ba1a011"
+          "content": "8e4d25e77df5946fec7c4c5e5d72661c264333e8acb791f3dc85e27bb59afc5a"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/external_worker.py",
@@ -149,10 +193,21 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "9249fb484caa48101a6d6403adbb2e36be5805b8123656d56cba9b64e5d70561"
+          "content": "c1d9883a3819c138f9af383433e8282be60dd2144193a008e6d16e930a8bb93d"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/irreversible.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/ladder_state.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a58a40a96ccf33254d420e1125ec671b55192b2ec890a61498f320abcf5b1b10"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/ladder_state.py",
       "type": "file"
     },
     {
@@ -160,7 +215,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "7b282dd5c914824f0a25778688766e41df697b3b0989aaaf01a714a05e226416"
+          "content": "ea1d724dc04a1fe93dcd3359bbe434b4bcfb9797e6a0798dbdc2e60303c24327"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/pr_checkpoint.py",
@@ -171,7 +226,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "4a059ad82e8e1aaae44c7d32c9a2b31f774e44887ac04e688fa29291f6c18627"
+          "content": "a5264660e040367ebf2a49915b664f733118a0d39dc22ae2727fcba64108036d"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/session_budget.py",
@@ -182,7 +237,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "b65f219795459e96f5307da7bb6770ea0f2babbc04898e6a356b14bdb0894b1c"
+          "content": "663537ea854a38c35ee9646ce6ee9d9bfc1b406491589dfe10c267ad5ab2f820"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/verify.py",
@@ -193,7 +248,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a4136bf04304f4b2e6ee7323d4ab580b80068cf3be09ee6a529056f562fd5f6b"
+          "content": "36c4618e39bd717e0a380bb39a3236c0ecc87d9b5b9753f779e23e5562048c80"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/with_secrets.py",
@@ -204,7 +259,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "cb7febb747aec494c005ff06997a8b98130130c997326f1af80aabce2b5653df"
+          "content": "34dd35feeabdd598173d3dda8d93d927159ad5b47c98c3d84c5798755277306f"
         }
       ],
       "name": "plugins/feature-ladder/skills/skill-selector/scripts/select_skills.py",
@@ -229,7 +284,7 @@
       ],
       "name": "feature-ladder",
       "type": "application",
-      "version": "1.16.0"
+      "version": "1.17.0"
     },
     "tools": {
       "components": [

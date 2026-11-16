@@ -3,6 +3,7 @@
 Run from the repo root:  python3 -m unittest discover -s plugins/feature-ladder/tests
 """
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -187,11 +188,105 @@ class JevScorer(unittest.TestCase):
         self.assertEqual(seen[0]["model"], "typesafe/jev-router")
 
 
+class Anchors(unittest.TestCase):
+    """Which memories count as "touching these files"."""
+    UNRELATED = ["[pitfall] the Firestore composite index build fails on deploy",
+                 "[convention] components live in src/components",
+                 "[pitfall] a json body over the limit fails with 413; the main thread hangs"]
+
+    def relevant(self, paths, lines=None, action="Rename the settings page title"):
+        surf = conf.surface(mems(*(lines or self.UNRELATED)), action, paths)
+        return [i["text"] for i in surf["items"] if i["relevant"]]
+
+    def test_generic_file_names_and_extensions_do_not_make_a_memory_relevant(self):
+        for path in ("src/index.ts", "package.json", "src/main.ts", "a.ts"):
+            with self.subTest(path):
+                self.assertEqual(self.relevant([path]), [])
+
+    def test_the_path_alone_does_not_change_the_decision(self):
+        a = conf.decide("card", "Rename the settings page title", ["src/index.ts"], "M", memories=mems(*self.UNRELATED))
+        b = conf.decide("card", "Rename the settings page title", ["src/title.ts"], "M", memories=mems(*self.UNRELATED))
+        self.assertEqual((a["confidence"], a["decision"]), (b["confidence"], b["decision"]))
+
+    def test_the_file_its_path_and_a_distinctive_name_still_count(self):
+        lines = ["[pitfall] server/mapRoutes.ts writes must await the batch commit",
+                 "[pitfall] mapRoutes.ts fails when the owner is missing",
+                 "[convention] npx vitest run server/mapRoutes is the gate",
+                 "[pitfall] the routes folder has stale fixtures"]
+        hits = self.relevant(["server/mapRoutes.ts"], lines)
+        self.assertEqual(len(hits), 3, hits)
+        self.assertFalse(any("stale fixtures" in h for h in hits))
+
+    def test_a_file_name_is_matched_whole(self):
+        self.assertEqual(self.relevant(["src/a.ts"], ["[pitfall] data.ts fails on empty input"]), [])
+        self.assertEqual(len(self.relevant(["src/data.ts"], ["[pitfall] data.ts fails on empty input"])), 1)
+
+    def test_words_of_the_action_still_count(self):
+        self.assertEqual(len(self.relevant([], ["[pitfall] firebase deploy timed out twice"],
+                                           action="deploy hosting to firebase")), 1)
+
+
 class Cli(unittest.TestCase):
+    def setUp(self):
+        # A home of its own: no real ~/.claude/feature-ladder/providers.json (and so
+        # no real scorer key or paid request) can reach these runs.
+        self._home = tempfile.TemporaryDirectory()
+        self.addCleanup(self._home.cleanup)
+
     def run_cli(self, *args, cwd=None):
+        env = dict(os.environ, HOME=self._home.name, USERPROFILE=self._home.name)
+        for k in ("OPENROUTER_API_KEY", "FEATURE_LADDER_CONFIDENCE_THRESHOLD"):
+            env.pop(k, None)
         r = subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
-                           encoding="utf-8", timeout=60, cwd=cwd)
+                           encoding="utf-8", timeout=60, cwd=cwd or self._home.name, env=env)
         return r.returncode, r.stdout, r.stderr
+
+    def test_the_real_home_is_not_read(self):
+        (Path(self._home.name) / ".claude" / "feature-ladder").mkdir(parents=True)
+        (Path(self._home.name) / ".claude" / "feature-ladder" / "providers.json").write_text(
+            json.dumps({"confidence": {"scorer": "jev", "key_env": "FL_TEST_NO_SUCH_KEY"}}), encoding="utf-8")
+        code, out, err = self.run_cli("card", "--action", "add healthz", "--size", "S", "--memories",
+                                      self._lines("[convention] healthz passes green"))
+        self.assertEqual(code, 0, err)
+        self.assertIn("FL_TEST_NO_SUCH_KEY", " ".join(json.loads(out).get("notes", [])))
+
+    def _lines(self, *lines):
+        f = Path(self._home.name) / "mem.txt"
+        f.write_text("\n".join(lines), encoding="utf-8")
+        return str(f)
+
+    def test_a_missing_recall_file_is_no_memories_with_a_note(self):
+        code, out, err = self.run_cli("card", "--action", "Add export", "--paths", "src/x.py", "--size", "S",
+                                      "--memories", str(Path(self._home.name) / "runs" / "s" / "recall.json"))
+        self.assertEqual(code, 0, err)
+        r = json.loads(out)
+        self.assertEqual(r["surface"]["memories"], 0)
+        self.assertIn("recall.json", " ".join(r["notes"]))
+
+    def test_bad_numbers_are_an_error_message_not_a_traceback_or_a_silent_default(self):
+        for bad in (("--threshold",), ("--threshold", "high"), ("--threshold", "1.5"),
+                    ("--checks-passed", "two"), ("--checks-failed", "-1")):
+            with self.subTest(bad):
+                code, out, err = self.run_cli("card", "--action", "Add export", "--size", "S", *bad)
+                self.assertEqual(code, 1, out)
+                self.assertNotIn("Traceback", err)
+                self.assertIn(bad[0], err)
+
+    def test_action_tier_is_the_same_from_a_subfolder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
+            (root / ".feature-ladder").mkdir()
+            (root / ".feature-ladder" / "run.json").write_text(
+                json.dumps({"active": True, "base": "develop", "branch": "feature-ladder/x"}), encoding="utf-8")
+            (root / "src").mkdir()
+            tiers = []
+            for cwd in (root, root / "src"):
+                code, out, err = self.run_cli("action", "--action", "git push origin develop", cwd=str(cwd))
+                self.assertIn(code, (0, 5), err)
+                tiers.append(json.loads(out)["tier"])
+            self.assertEqual(tiers[0], tiers[1])
+            self.assertNotEqual(tiers[0], "none")
 
     def test_exit_codes_and_json(self):
         code, out, err = self.run_cli("card", "--action", "add healthz", "--paths", "server/routes.ts", "--size", "S")
