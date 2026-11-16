@@ -502,6 +502,20 @@ def read_intake(path):
     return intake
 
 
+def release_intake(path):
+    """Unmark a run's intake on abort so `intake.py find` can return it again."""
+    if not path or not Path(path).is_file():
+        return
+    intake = ladder_state.read_json(Path(path), {})
+    if not isinstance(intake, dict) or not intake.get("used"):
+        return
+    intake.pop("used", None)
+    try:
+        ladder_state.write_json(Path(path), intake)
+    except OSError:
+        pass
+
+
 # ------------------------------------------------------------------ commands --
 def cmd_start(root, a):
     slug = a.get("--slug") or "feature"
@@ -565,7 +579,8 @@ def cmd_start(root, a):
                       user_only=True, skipped=skipped):
             pre = sh(["git", "rev-parse", "--short", "HEAD"], root)[1]
     ok, why = pr_ready(root)
-    intake = read_intake(a.get("--intake"))
+    intake_path = a.get("--intake")
+    intake = read_intake(intake_path)
     environments = intake.get("environments") or {}
     if not environments:  # no intake: still learn the deployment targets from the repo
         try:
@@ -588,6 +603,8 @@ def cmd_start(root, a):
            "active": True, "started": now(), "pr_enabled": ok,
            "pr_disabled_reason": why or None, "pre_existing_commit": pre,
            "stash": stashed, "checkpoints": []}
+    if intake_path and intake_path is not True:
+        run["intake"] = str(Path(intake_path))
     for note in notes:
         warn(run, note)
     warn_skipped(run, skipped)
@@ -679,6 +696,7 @@ def cmd_finish(root, a):
 def cmd_abort(root, a):
     run = load(root)
     run["active"], run["aborted"] = False, now()
+    release_intake(run.get("intake"))
     out = {"aborted": True, "branch": run.get("branch"), "stash": run.get("stash")}
     if user_changes(root):
         out["on"] = current_branch(root)
