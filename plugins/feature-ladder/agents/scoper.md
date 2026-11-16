@@ -71,8 +71,8 @@ later. You estimate; the user confirms what is uncertain. You change no code.
    - `design_agreed`: true if the request plus your open decisions fully
      specify the approach for a T4/T5 task; otherwise false.
    Raise confidence to `high` wherever you actually verified it. The user is
-   only asked about fields that are uncertain **and** change the model, so
-   honest confidence saves them questions.
+   only asked about fields that are uncertain **and** change the model or
+   add or remove the design step, so honest confidence saves them questions.
 
 5. **List open decisions** in `open_decisions`: every choice a worker would
    otherwise have to guess and that would be costly to get wrong (behaviour,

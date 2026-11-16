@@ -312,8 +312,11 @@ Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
 the start of a conversation it downloads `route.py`, `intake.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
-`skill-rules.json`, `resolve_bank.py` and `memory_gate.py` from this repo,
-pinned to a release tag (currently `v1.16.0`), so the app and Claude Code
+`skill-rules.json`, `resolve_bank.py`, `memory_gate.py`, `codex_review.py`,
+`ladder_state.py` (the state helper the others import), `ledger.py` and
+`guard_irreversible.py` (the token ledger for external workers) and
+`worker-contract/SKILL.md` (the contract GLM workers get) from this repo,
+pinned to a release tag (currently `v1.17.0`), so the app and Claude Code
 always run identical logic. The app session needs code execution and network
 access to GitHub.
 
@@ -329,11 +332,12 @@ launches Claude Code:
 |---|---|---|
 | `HINDSIGHT_MCP_URL` | `https://api.hindsight.vectorize.io/mcp/` | MCP endpoint (`http://localhost:8888/mcp/` when self-hosted) |
 | `HINDSIGHT_API_KEY` | *(empty)* | Your `hsk_…` Cloud key, or the server's API key if you enabled auth |
-| `HINDSIGHT_BANK_ID` | `feature-ladder` | Fallback bank for folders that aren't git repos (per-repo banks are chosen automatically) |
+| `HINDSIGHT_BANK_ID` | `feature-ladder` | Fallback bank for folders that aren't git repos (per-repo banks are chosen automatically). Other Hindsight integrations read this variable too and may treat it as "the bank for everything": leave it unset unless you want that |
 
 To self-host with the cheapest-adequate model per operation:
-`cd plugins/feature-ladder/hindsight && cp hindsight.env.example hindsight.env`,
-fill in the keys, then `./start.sh` and `python3 roundtrip_test.py`.
+`cd plugins/feature-ladder/hindsight && cp hindsight.env.example hindsight.env`
+(the copy is git-ignored), fill in the keys, then `./start-hindsight.sh` and, to check the round trip
+(retain, then recall), `pwsh ./test-hindsight.ps1`.
 
 ---
 
@@ -699,8 +703,9 @@ repeatable and auditable.
    `skill-rules.json`.
 3. It returns at most `max_skills` skills (default 3) within a character
    budget of skill text: `max_chars_by_role` per router role (shipped
-   defaults: mechanic 0, implementer 8,000, senior implementer and domain
-   experts 30,000), else `max_chars` (default 20,000). Anything cut is
+   defaults: mechanic 0, evidence collector 12,000, implementer 20,000
+   (enough for the debugging and test-first skills together), senior
+   implementer and domain experts 30,000), else `max_chars` (default 20,000). Anything cut is
    reported, never silently included.
 4. `--inject --out .feature-ladder/cards/<task>-skills.md` writes those
    skills' text to a file only the worker reads, and prints the exact skill
@@ -757,14 +762,19 @@ python3 select_skills.py '{"role":"implementer","kind":"code","paths":["src/Form
 Every Hindsight call goes through a hook (`resolve_bank.py` plus
 `memory_gate.py`), with no model in the loop:
 
-- **The right bank:** one bank per repository, found or created
-  deterministically (a pinned id in `.feature-ladder/hindsight.json`, else
+- **The right bank:** one bank per repository, found deterministically (a
+  pinned id in `.feature-ladder/hindsight.json`, else
   `coding-agent::<owner>-<repo>`, `<owner>-<repo>`, `coding-agent::<project>`,
-  `<project>`); the hook adds the `bank_id` to every call.
+  `<project>`); the hook adds the `bank_id` to every call. A bank is created
+  only by the first memory write, so opening a session in a repository never
+  leaves an empty bank behind.
 - **Scoped reads:** `recall` only, tags forced to `project:<name>`, at most
-  1000 tokens, at most 3 recalls per feature (scout, coordinator, one worker
-  without a Memory line). `reflect`, knowledge pages and bank edits are
-  denied: `reflect` is a free-form summary by the server's model.
+  1000 tokens of fact text, Hindsight's `observation` copies of the stored
+  facts left out, at most 3 recalls per feature (scout, coordinator, one
+  worker without a Memory line). The session-start line prints the exact
+  arguments; a call that already carries them is not rewritten by the hook.
+  `reflect`, knowledge pages and bank edits are denied: `reflect` is a
+  free-form summary by the server's model.
 - **Read twice, written once:** the coordinator's recall is saved to the run
   folder and feeds `confidence.py` and the GLM card's `Memory:` line, so the
   same memories that go on the card also size it.
@@ -778,7 +788,13 @@ Every Hindsight call goes through a hook (`resolve_bank.py` plus
   `outcome` kind: what a feature did is in git.
 - **Written once, verbatim:** `/feature-ladder:wrap` runs
   `memory_gate.py flush`, which writes the queue straight to the bank over MCP.
-  No scribe agent, no rewording.
+  No scribe agent, no rewording: new banks are set to Hindsight's `verbatim`
+  extraction mode, so the server stores each fact as given (its default
+  rewrites them). For a bank made by an earlier version, run
+  `resolve_bank.py --configure` once in its repository. At most 12 memories
+  per session; lines over the cap stay queued for the next wrap. A fact is
+  marked as written only after the write happened, so a failed write can be
+  retried.
 
 ---
 
@@ -878,7 +894,7 @@ plugins/feature-ladder/
   .mcp.json                            Hindsight HTTP MCP server (env-driven)
   agents/                              14 agents (13 rungs + scoper)
   commands/                            feature, wrap, scope, route, skills, recall, codex-review, workers
-  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, confidence.py, with_secrets.py, verify.py, session_budget.py, external_worker.py
+  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, confidence.py, with_secrets.py, verify.py, session_budget.py, external_worker.py, ladder_state.py (one state folder, atomic writes, lock)
   skills/complexity-router/            route.py + intake.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/worker-contract/              the short contract every worker preloads instead of the full protocol
@@ -938,7 +954,8 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.16.0** | The orchestrator is your pick, asked up front once per session: Opus 5.5 xhigh or Fable 5.2 runs the coordinator (`--orchestrator fable\|opus` answers in advance; a hook denies a Fable coordinator you did not pick). `select_skills.py --scan` rescans every installed skill into a deterministic catalog with a coverage report; multi-line descriptions and plugin manifest names (`dak:`) are read correctly; the shipped rules were refreshed against the rescan (22 rules for skills that are gone removed, 3 retargeted, 20 added) |
+| **v1.17.0** | A review of every script, fixed test-first. **Sessions:** `/feature-ladder:wrap` loads again (its frontmatter was invalid YAML, and the guard test skipped values starting with `[`); `finish` and `abort` return to the base branch, so the second feature of a session lands on it instead of on the first feature's branch; `start` refuses over an active run; wrap reviews from `session_base_sha`. **Secrets:** the audit log redacts secret values before storing them, the deny rule's bypasses (`NAME_API_KEY=...`, quoted `.env`, `printenv NAME`) and false positives (`.env.example`, `--set-secrets=`) are closed, `hindsight.env` is ignored wherever it sits, and `git add -A` no longer sweeps `.env`/`.pem` files into a commit. **Environments:** a Firebase project like `backstage-prod` or `latest-app` is production, not non-production. **State:** one `ladder_state.py` gives every script and hook the same state folder (the main checkout, also from a linked worktree), atomic writes and a lock; an unreadable `session.json` denies spawns instead of meaning "no budget", parallel spawns cannot overspend, a retry with the same slug starts clean, a second window does not reset a running feature's budget, and agents from outside the ladder are not charged outside a run. **Memory:** a bank is created by the first memory write, not by opening a session, and stores facts verbatim (`resolve_bank.py --configure` for older banks); a write is recorded only after it happened; lines over the 12-per-session cap stay queued; recall leaves out Hindsight's `observation` copies and is not rewritten when it already carries the printed arguments. **Ledger:** usage is counted once per API message (it was 1.5-5x too high) and only for the run's own subagents. **Windows:** checks run in Git Bash, timeouts stop the whole process tree, output cannot crash on a cp1252 console, `.cmd` shims work, and the hook launcher starts Python once (a Bash-call hook went from about 650 ms to 350 ms). **Routing:** the implementer's skill budget fits the debugging and test-first skills together (20,000 characters); recommended intake options land in the router's own bucket; the design question is reachable; keyword matching sees plurals and derived forms; an intake is used up when a run starts from it and stale ones are skipped; a scan makes 6 git calls, not 18. **Other:** Codex review enforces its timeout and its guard sees deleted and renamed files; a failed external worker returns a failing exit code and gives its budget slot back; README and LICENSE copies are checked for equality; the fixture generators moved to `scripts/fixtures/` with `--check`; CI has a time limit and cancels superseded runs |
+| v1.16.0 | The orchestrator is your pick, asked up front once per session: Opus 5.5 xhigh or Fable 5.2 runs the coordinator (`--orchestrator fable\|opus` answers in advance; a hook denies a Fable coordinator you did not pick). `select_skills.py --scan` rescans every installed skill into a deterministic catalog with a coverage report; multi-line descriptions and plugin manifest names (`dak:`) are read correctly; the shipped rules were refreshed against the rescan (22 rules for skills that are gone removed, 3 retargeted, 20 added) |
 | v1.15.2 | The `orchestration-ladder` skill and the `/feature-ladder:feature` command have valid frontmatter again: both descriptions held an unquoted `review: pending`, which is invalid YAML, so a strict parser rejected the whole block and the skill was dropped; both are quoted, and `test_skill_frontmatter.py` now checks every skill, agent and command for the same mistake |
 | v1.15.1 | Windows CI: the research-brief round-trip test compares resolved paths, so an 8.3 short temp path (`RUNNER~1`) no longer fails it; README gains an At a glance section |
 | v1.15.0 | `--researcher` switch and `/feature-ladder:research`: a brief of what a feature wants from the codebase, qualitative per-agent cost labels (never a number) and what to expect; the Fable integrator has coding tools and returns an Evidence Packet; the Jev confidence scorer gets an indexed contract, lexicon-scale anchors, per-fact fallback and an injectable transport with recorded fixtures |

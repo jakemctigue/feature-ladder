@@ -15,14 +15,26 @@ call to this repository's bank and applies `scripts/memory_gate.py`.
 Each repository has its own bank, resolved deterministically at session
 start: a pinned id in `<repo>/.feature-ladder/hindsight.json` wins; otherwise
 the first existing bank among `coding-agent::<owner>-<repo>`,
-`<owner>-<repo>`, `coding-agent::<project>`, `<project>`; otherwise
-`coding-agent::<owner>-<repo>` is created. Linked worktrees share the main
-checkout's bank. Agents never pass `bank_id`, `list_banks` or `create_bank`.
+`<owner>-<repo>`, `coding-agent::<project>`, `<project>` (and the ids earlier
+versions used). `<owner>` is the remote's whole namespace (group and subgroup),
+so two repositories never share a bank by accident. If none exists, nothing is
+created yet: `coding-agent::<owner>-<repo>` is created by the first memory
+write, so opening a session in a repository never leaves an empty bank
+behind. Linked worktrees share the main checkout's bank. Agents never call
+`list_banks` or `create_bank`.
 
 ## Reads: one scoped recall
 
-- `recall` only. The hook forces `tags: ["project:<name>"]`, `tags_match:
-  "all"`, `max_tokens <= 1000` and `budget: low` unless given.
+- `recall` only. The hook forces `bank_id`, `tags: ["project:<name>"]`,
+  `tags_match: "all"`, `max_tokens <= 1000`, and (unless given) `budget: low`
+  and `types: ["world", "experience"]`: Hindsight's consolidated
+  `observation` copies restate the stored facts and would double the result.
+  `max_tokens` counts fact text only; the JSON around each fact is extra.
+- The session-start line prints these exact arguments. Pass them with the
+  query: a call that already matches is not rewritten, which matters in auto
+  permission mode, where a call the hook rewrites has to be sent twice.
+- Before the first memory is written there is no bank: recall is answered
+  "no memories yet" without a network call.
 - At most 3 recalls per feature run: the intake scout, the coordinator, and
   one worker whose card's `Memory:` line is `none`. More are denied.
 - The query names the feature area and its files. The coordinator pastes
@@ -42,8 +54,15 @@ checkout's bank. Agents never pass `bank_id`, `list_banks` or `create_bank`.
   coordinator queues the ones a future task could act on with
   `session_budget.py remember`, which checks each line on the spot.
 - `/feature-ladder:wrap` runs `memory_gate.py flush`: it re-checks the queue
-  and writes the survivors straight to the bank over MCP. No model reads,
-  summarises or rewords them.
+  and writes the survivors straight to the bank over MCP. No model on our side
+  reads, summarises or rewords them, and the bank is set to
+  `retain_extraction_mode: verbatim` so Hindsight stores the text as given
+  instead of rewriting it (its default, `concise`, rewords every fact).
+- At most 12 memories per session. Lines over the cap are reported as
+  `deferred` and stay in the queue for the next wrap; nothing is dropped.
+- A fact counts as retained only after the write happened (flush records it
+  after the call; for a hand-made `retain` the PostToolUse hook does). A write
+  that failed can be retried.
 
 A memory passes the gate only if it is:
 - `[kind] fact` with kind `decision`, `convention`, `pitfall`, `interface`
@@ -52,7 +71,8 @@ A memory passes the gate only if it is:
 - anchored: it names a path, identifier, command, flag or `token` in the repo;
 - not narration or a summary ("we implemented", "successfully", "this
   session", "overall", ...);
-- not already retained from this repo (`.feature-ladder/memory-ledger.jsonl`).
+- not already retained from this checkout (`.feature-ladder/memory-ledger.jsonl`
+  is local and git-ignored, so another clone does not see it).
 
 Stored with `context: feature-ladder`, tags `project:<name>`, `feature:<slug>`
 and the kind. Never secrets, tokens, credentials or personal data.
@@ -61,8 +81,11 @@ and the kind. Never secrets, tokens, credentials or personal data.
 
 `reflect`, knowledge pages, tag listing and bank edits are denied to agents:
 `reflect` is a free-form summary written by the server's own model.
-Server-side, Hindsight's fact extraction and consolidation run on Haiku
-(`hindsight/hindsight.env.example`); keep `retain_extraction_mode` at
-`concise`.
+New banks are created with `retain_extraction_mode: verbatim` and
+`enable_observations: false`. A bank made by an earlier version keeps the
+server default until you run
+`python3 scripts/resolve_bank.py --configure` in its repository. When
+self-hosting, `hindsight/hindsight.env.example` sets the same default for the
+whole server and runs Hindsight's remaining model calls on Haiku.
 
 Check a line by hand: `python3 scripts/memory_gate.py check "[pitfall] ..."`.

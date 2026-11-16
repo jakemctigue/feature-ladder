@@ -29,7 +29,7 @@ procedure and DESIGN.md headings as `domain-expert`, with these additions:
 - Use the card's `Memory:` lines; one narrow `recall` only if it says `none`
   (prior failed approaches in this repo are what memory is for).
 
-Memory: list what is durable under `Memory candidates:` in your packet (kind `decision`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `decision`). Do not call `retain`: the coordinator queues it and memory is written once, at the end of the session, by `memory_gate.py flush` at `/feature-ladder:wrap` (a script, no agent). End with `Retained: deferred - <n> candidates`.
 Include the key decision and why, rejected options with reasons, and
 invariants not documented in the repo.
 

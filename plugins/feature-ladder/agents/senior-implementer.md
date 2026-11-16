@@ -28,7 +28,7 @@ While coding:
   the repo already uses.
 - Prefer the repo's existing patterns over your preferences.
 
-Memory: list what is durable under `Memory candidates:` in your packet (kind `pitfall|convention|interface`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `pitfall|convention|interface`). Do not call `retain`: the coordinator queues it and memory is written once, at the end of the session, by `memory_gate.py flush` at `/feature-ladder:wrap` (a script, no agent). End with `Retained: deferred - <n> candidates`.
 A pitfall that cost a retry, a convention you had to discover, an interface
 you introduced.
 

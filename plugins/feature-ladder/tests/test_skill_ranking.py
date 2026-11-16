@@ -71,5 +71,44 @@ class SkillRanking(unittest.TestCase):
             self.assertEqual(a, b)
 
 
+SIZES = json.loads((PLUGIN / "tests" / "fixtures" / "skill_ranking" / "skill_sizes.json").read_text(encoding="utf-8"))["chars"]
+
+
+def installed_sizes():
+    """Body sizes of the rule skills installed on this machine (none on CI)."""
+    try:
+        inv = ss.inventory()
+        return {n: len(ss._frontmatter(inv[n])[1]) for n in ALL_SKILLS if n in inv}
+    except Exception:  # noqa: BLE001 - an unreadable local install must not fail the suite
+        return {}
+
+
+class RoleBudgets(unittest.TestCase):
+    """A role's budget must fit each skill a rule gives that role by name:
+    a budget below the skill's size silently drops it on every task."""
+
+    def setUp(self):
+        self.sizes = dict(SIZES, **installed_sizes())
+
+    def named_for(self, role):
+        return [r for r in RULES["rules"] if role in [x.lower() for x in r["when"].get("roles", [])]]
+
+    def test_every_rule_skill_has_a_recorded_size(self):
+        self.assertEqual(sorted(set(ALL_SKILLS) - set(SIZES)), [])
+
+    def test_each_role_budget_fits_every_skill_its_rules_name(self):
+        for role, cap in SETTINGS["max_chars_by_role"].items():
+            if cap <= 0:
+                continue  # roles that get no skill text on purpose
+            for r in self.named_for(role):
+                with self.subTest(role=role, rule=r["id"]):
+                    self.assertLessEqual(self.sizes[r["skill"]], cap,
+                                         f"{r['skill']} is {self.sizes[r['skill']]} chars; the {role} budget is {cap}")
+
+    def test_the_default_rung_gets_debugging_and_tdd_together(self):
+        need = self.sizes["superpowers:systematic-debugging"] + self.sizes["superpowers:test-driven-development"]
+        self.assertLessEqual(need, SETTINGS["max_chars_by_role"]["implementer"])
+
+
 if __name__ == "__main__":
     unittest.main()

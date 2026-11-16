@@ -46,13 +46,18 @@ delegated (driven by the `scoper` agent and `/feature-ladder:feature`):
 2. The scoper reads the code and corrects each field (value, confidence,
    evidence, optional range) and lists open decisions.
 3. `decide PROPOSAL --mode default|auto` - asks a field only if its
-   confidence is not high **and** flipping it changes the rung (one field at a
-   time, plus a joint check for several small guesses that add up). Open
+   confidence is not high **and** flipping it changes the rung or adds or
+   removes the design step (one field at a time, plus a joint check for
+   several small guesses that add up). Open
    decisions are always asked so the run never has to stop for them later.
    There is no outside-repo policy question: deploys and data steps the
    feature needs run and are logged `review: pending` (irreversible.py).
    `auto` asks nothing. `find "<request>"` returns a saved, confirmed intake
-   for the same request so it is not asked twice.
+   for the same request so it is not asked twice. `find` only looks: the
+   intake is used up when a run starts from it (`pr_checkpoint.py start
+   --intake`, or `find --mark` / `mark-used PATH` by hand). An intake whose
+   run finished, that is older than 7 days, or that was made on a commit no
+   longer in HEAD's history is not returned.
 4. `apply PROPOSAL ANSWERS` - writes the confirmed intake
    (`.feature-ladder/intake/<slug>.json`): values, the source of each (user or
    scout + confidence), answered decisions, and the route.

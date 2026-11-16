@@ -4,12 +4,15 @@ and carry nothing machine-specific.
 
 Run from the repo root:  python3 -m unittest discover -s plugins/feature-ladder/tests
 """
+import contextlib
+import io
 import json
-import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
@@ -32,9 +35,31 @@ class Evidence(unittest.TestCase):
     def test_generation_is_repeatable(self):
         self.assertEqual(g.build(), g.build())
 
-    def test_check_mode_exits_zero(self):
-        r = subprocess.run([sys.executable, str(GEN), "--check"], capture_output=True, text=True, timeout=120)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+    def check(self, out_dir=None):
+        """Exit code and output of `generate_evidence.py --check`, in process."""
+        buf = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            if out_dir is not None:
+                stack.enter_context(mock.patch.object(g, "OUT", Path(out_dir)))
+            stack.enter_context(contextlib.redirect_stdout(buf))
+            code = g.main(["--check"])
+        return code, buf.getvalue()
+
+    def test_check_mode_exits_zero_when_current(self):
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+
+    def test_check_mode_exits_one_and_names_the_stale_or_missing_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, text in g.build().items():
+                (Path(tmp) / name).write_bytes(text.encode("utf-8"))
+            (Path(tmp) / g.SBOM).write_text("{}\n", encoding="utf-8")
+            code, out = self.check(tmp)
+            self.assertEqual(code, 1)
+            self.assertIn(g.SBOM, out)
+            self.assertNotIn(g.SARIF, out)
+            (Path(tmp) / g.SARIF).unlink()
+            self.assertIn(g.SARIF, self.check(tmp)[1])
 
     def test_sbom_shape(self):
         sbom = json.loads(lf(REPO / "evidence" / g.SBOM))
@@ -92,6 +117,42 @@ class Evidence(unittest.TestCase):
             finally:
                 g.REPO = old
         self.assertEqual([r for r, _ in found], ["FL001", "FL002", "FL003", "FL004"])
+
+
+def git(cwd, *args):
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                   cwd=str(cwd), check=True, capture_output=True)
+
+
+class Sources(unittest.TestCase):
+    """What the SBOM lists: the plugin's scripts as git sees them, so a file
+    git ignores (a local scratch script, a virtualenv) cannot make --check fail."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        for rel in ("plugins/p/a.py", "plugins/p/new.py", "plugins/p/scratch/local.py", "plugins/p/gone.py",
+                    "plugins/p/tests/test_a.py", "plugins/p/caf\u00e9.py", "outside.py"):
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / rel).write_text("x = 1\n", encoding="utf-8")
+        patcher = mock.patch.object(g, "REPO", self.root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_outside_git_every_non_test_script_under_plugins_is_listed(self):
+        self.assertEqual(g.sources(), ["plugins/p/a.py", "plugins/p/caf\u00e9.py", "plugins/p/gone.py",
+                                       "plugins/p/new.py", "plugins/p/scratch/local.py"])
+
+    def test_in_git_ignored_and_deleted_files_are_left_out_and_new_files_are_kept(self):
+        (self.root / ".gitignore").write_text("scratch/\n", encoding="utf-8")
+        git(self.root, "init", "-q")
+        git(self.root, "add", ".gitignore", "plugins/p/a.py", "plugins/p/gone.py", "plugins/p/tests/test_a.py",
+            "plugins/p/caf\u00e9.py")
+        git(self.root, "commit", "-q", "-m", "init")
+        (self.root / "plugins/p/gone.py").unlink()  # deleted, not yet staged
+        # new.py is untracked but not ignored: it is about to be committed, so it belongs in the SBOM
+        self.assertEqual(g.sources(), ["plugins/p/a.py", "plugins/p/caf\u00e9.py", "plugins/p/new.py"])
 
 
 if __name__ == "__main__":

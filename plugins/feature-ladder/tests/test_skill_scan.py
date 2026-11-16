@@ -42,8 +42,11 @@ def make_home(tmp):
     (home / ".claude" / "plugins").mkdir(parents=True)
     (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
         {"plugins": {"data-agent-kit@claude-plugins-official": [{"installPath": str(plug)}]}}), encoding="utf-8")
+    # The work folder is a repository root: the selector's walk for project
+    # skills and rules stops here instead of climbing into the real profile
+    # the temp folder sits under.
     work = Path(tmp) / "work"
-    work.mkdir()
+    (work / ".git").mkdir(parents=True)
     return home, work
 
 

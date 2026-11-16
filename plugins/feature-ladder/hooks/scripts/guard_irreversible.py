@@ -22,13 +22,21 @@ sys.path.insert(0, str(HERE.parent.parent / "skills" / "orchestration-ladder" / 
 
 
 def find_run(cwd):
-    """run.json lives in the main checkout; linked worktrees must find it there too."""
+    """(root, run.json) of the run this folder belongs to, or (None, None).
+
+    run.json lives in the main checkout; linked worktrees must find it there
+    too. This runs before every Bash call, so the common case costs no
+    subprocess: only a linked worktree or a submodule (where .git is a file)
+    asks git where the main checkout is."""
     p = Path(cwd).resolve()
     for d in [p, *p.parents]:
         f = d / ".feature-ladder" / "run.json"
         if f.is_file():
             return d, f
-        if (d / ".git").exists():
+        dot_git = d / ".git"
+        if dot_git.is_dir():
+            return None, None  # the main checkout itself, and it has no run
+        if dot_git.exists():
             try:
                 r = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
                                    cwd=str(d), capture_output=True, text=True, timeout=10)
@@ -36,37 +44,42 @@ def find_run(cwd):
             except (OSError, subprocess.SubprocessError):
                 common = None
             if common and common.name == ".git":
-                f = common.parent / ".feature-ladder" / "run.json"
+                main = common.parent.resolve()
+                f = main / ".feature-ladder" / "run.json"
                 if f.is_file():
-                    return common.parent, f
+                    return main, f
             return None, None
     return None, None
 
 
 def main():
     try:
-        payload = json.loads(sys.stdin.read().lstrip("\ufeff"))
+        payload = json.loads(sys.stdin.read().lstrip("﻿"))
     except ValueError:
         return 0
-    if payload.get("tool_name") != "Bash":
+    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
         return 0
     cmd = str((payload.get("tool_input") or {}).get("command", ""))
     root, f = find_run(payload.get("cwd") or os.getcwd())
     if not cmd or not f:
         return 0
-    try:
-        run = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return 0
-    if not run.get("active"):
-        return 0
+    import ladder_state
+    run = ladder_state.read_json(f)
+    if not isinstance(run, dict) or not run.get("active"):
+        return 0  # no run, a finished run, or an unreadable file: nothing to audit
     from irreversible import gate
-    allowed, reason, changed = gate(cmd, run)
-    if changed:
-        try:
-            f.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
-        except OSError:
-            pass
+    # Classify and append under the lock, on a fresh read: two commands logged at
+    # the same moment (parallel workers) must both end up in the file.
+    with ladder_state.locked(root):
+        run = ladder_state.read_json(f)
+        if not isinstance(run, dict) or not run.get("active"):
+            return 0
+        allowed, reason, changed = gate(cmd, run)
+        if changed:
+            try:
+                ladder_state.write_json(f, run)
+            except OSError:
+                pass
     if not allowed:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                                  "permissionDecision": "deny",
@@ -75,4 +88,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:  # noqa: BLE001 - an audit log must never break a Bash call
+        sys.exit(0)

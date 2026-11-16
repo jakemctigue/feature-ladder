@@ -7,28 +7,7 @@
           "uri": "file:///"
         }
       },
-      "results": [
-        {
-          "level": "warning",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "plugins/feature-ladder/skills/orchestration-ladder/scripts/verify.py",
-                  "uriBaseId": "%SRCROOT%"
-                },
-                "region": {
-                  "startLine": 133
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "subprocess call with shell=True"
-          },
-          "ruleId": "FL001"
-        }
-      ],
+      "results": [],
       "tool": {
         "driver": {
           "informationUri": "https://github.com/jakemctigue/feature-ladder",

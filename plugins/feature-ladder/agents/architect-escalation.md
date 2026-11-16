@@ -31,7 +31,7 @@ Method:
    Mark which existing work is kept, reworked, or discarded.
 5. Hand back to the coordinator. You do not implement.
 
-Memory: list what is durable under `Memory candidates:` in your packet (kind `decision`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `decision`). Do not call `retain`: the coordinator queues it and memory is written once, at the end of the session, by `memory_gate.py flush` at `/feature-ladder:wrap` (a script, no agent). End with `Retained: deferred - <n> candidates`.
 Include the decision, the invariant it protects, and the rejected alternatives
 with reasons.
 

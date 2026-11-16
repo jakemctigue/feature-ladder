@@ -24,19 +24,22 @@ your task, return `blocked` with the output.
 
 **Secrets.** A command that needs an API key runs as
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`
-(names on the card's `Secrets:` line). Never print, echo, log, commit or quote
-a value; new code reads secrets the way the repo already does. A missing or
+(names on the card's `Secrets:` line). To put a secret into an argument, let
+a shell inside the wrapper expand it:
+`with_secrets.py --secret NAME -- bash -c '... $NAME ...'`. Never print, echo,
+log, commit or quote a value, and never type one on a command line; new code reads secrets the way the repo already does. A missing or
 unreadable secret is `blocked: secret NAME`; finish what does not depend on it.
 
 **Memory.** The card's `Memory:` lines are the recall; query Hindsight yourself
 only when that line is `none` and the area is unfamiliar (one narrow `recall`,
-tags `project:<name>`). Never call `retain` and never hand anything to
-`memory-scribe`: put 0-3 durable, new facts under `Memory candidates:`, one
+tags `project:<name>`). Never call `retain`: put 0-3 durable, new facts under
+`Memory candidates:`, one
 per line as `[kind] fact` (kind: `decision|convention|pitfall|interface|test-strategy`),
 naming the path, identifier or command it is about. Only what a future task
 in this repo would act on; never a summary of what you did.
 The coordinator queues them and memory is written once, at the end of the
-session (`/feature-ladder:wrap`). Never include secrets or personal data, or
+session, by `memory_gate.py flush` at `/feature-ladder:wrap` (a script, no
+agent). Never include secrets or personal data, or
 anything already in the repo's docs.
 
 **Atomic.** Do the change the card asks for and its tests, nothing more: no

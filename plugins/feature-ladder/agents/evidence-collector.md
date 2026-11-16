@@ -28,6 +28,6 @@ Given a question or topic from the Task Card:
 5. Keep it tight: the consumer is a model with a token budget. Quotes under 15
    words; otherwise paraphrase.
 
-Memory: list what is durable under `Memory candidates:` in your packet (kind `convention`). Do not call `retain` or hand anything to `memory-scribe`: the coordinator queues it and memory is written once, at the end of the session. End with `Retained: deferred - <n> candidates`.
+Memory: list what is durable under `Memory candidates:` in your packet (kind `convention`). Do not call `retain`: the coordinator queues it and memory is written once, at the end of the session, by `memory_gate.py flush` at `/feature-ladder:wrap` (a script, no agent). End with `Retained: deferred - <n> candidates`.
 Only a source that turned out to be authoritative for a question this project
 will ask again.

@@ -72,8 +72,12 @@ Sample: `timeout_cancelled.log`. `The operation was canceled` or
 
 Fix: find the last test that printed before the gap in timestamps; a test that
 waits on stdin, a subprocess or the network is the usual cause. Every
-subprocess in the tests should pass `timeout=`. A run cancelled by a newer push
-to the same PR looks identical and needs no fix.
+subprocess in the tests should pass `timeout=`. Each job is limited to 15
+minutes (`timeout-minutes` in `.github/workflows/tests.yml`; the suite takes
+about one), so a hung test ends there rather than at GitHub's six-hour default.
+A run cancelled by a newer push to the same branch or PR (the workflow's
+`concurrency` group cancels the run it supersedes) looks identical and needs
+no fix.
 
 ## unclassified
 

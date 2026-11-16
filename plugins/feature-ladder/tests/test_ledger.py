@@ -122,5 +122,89 @@ class Report(unittest.TestCase):
             self.assertIn("No ledger", out)
 
 
+def block_lines(msg_id, usage, n, model="claude-sonnet-5-5", ts=None):
+    """One API message as Claude Code writes it: one JSONL line per content block, same id, same usage."""
+    out = []
+    for i in range(n):
+        rec = {"message": {"role": "assistant", "id": msg_id, "model": model, "usage": usage,
+                           "content": [{"type": "text", "text": f"block {i}"}]}}
+        if ts:
+            rec["timestamp"] = ts
+        out.append(rec)
+    return out
+
+
+def write_lines(path, recs, ts=None):
+    first = {"message": {"role": "user", "content": CARD}}
+    if ts:
+        first["timestamp"] = ts
+    Path(path).write_text("\n".join(json.dumps(r) for r in [first, *recs]) + "\n", encoding="utf-8")
+
+
+class Accuracy(unittest.TestCase):
+    def entries(self, root, slug="demo"):
+        p = root / ".feature-ladder" / "runs" / slug / "usage.jsonl"
+        return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines()] if p.is_file() else []
+
+    def test_one_api_message_written_as_several_lines_is_counted_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_run(tmp)
+            t = root / "a.jsonl"
+            write_lines(t, block_lines("msg_1", {"input_tokens": 3, "output_tokens": 100, "cache_read_input_tokens": 500}, 3)
+                        + block_lines("msg_2", {"input_tokens": 2, "output_tokens": 40}, 2))
+            hook(root, {"agent_type": "feature-ladder:implementer", "agent_id": "a1",
+                        "agent_transcript_path": str(t), "cwd": str(root)})
+            e = self.entries(root)[0]
+            self.assertEqual((e["turns"], e["input"], e["output"], e["cache_read"]), (2, 5, 140, 500))
+
+    def test_a_subagent_from_after_the_run_is_not_added_to_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_run(tmp)
+            (root / ".feature-ladder" / "run.json").write_text(json.dumps(
+                {"slug": "demo", "active": False, "started": "2026-10-23T12:59:37+00:00",
+                 "finished": "2026-10-23T13:09:43+00:00"}), encoding="utf-8")
+            late = root / "late.jsonl"
+            write_lines(late, block_lines("m", {"output_tokens": 9}, 1, ts="2026-11-15T18:30:00.000Z"),
+                        ts="2026-11-15T18:29:00.000Z")
+            hook(root, {"agent_type": "general-purpose", "agent_id": "late", "agent_transcript_path": str(late),
+                        "cwd": str(root)})
+            self.assertEqual(self.entries(root), [])
+
+    def test_the_coordinator_stopping_just_after_finish_is_still_recorded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_run(tmp)
+            (root / ".feature-ladder" / "run.json").write_text(json.dumps(
+                {"slug": "demo", "active": False, "started": "2026-10-23T12:59:37+00:00",
+                 "finished": "2026-10-23T13:09:43+00:00"}), encoding="utf-8")
+            t = root / "coord.jsonl"
+            write_lines(t, block_lines("m", {"output_tokens": 9}, 1, ts="2026-10-23T13:05:00.000Z"),
+                        ts="2026-10-23T13:00:10.000Z")
+            hook(root, {"agent_type": "feature-ladder:coordinator", "agent_id": "c1", "agent_transcript_path": str(t),
+                        "cwd": str(root)})
+            self.assertEqual(len(self.entries(root)), 1)
+
+    def test_the_parent_sessions_transcript_is_never_summed_as_the_subagents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_run(tmp)
+            parent = root / "session.jsonl"
+            transcript(parent, [{"input_tokens": 100000, "output_tokens": 50000}])
+            hook(root, {"agent_type": "feature-ladder:implementer", "agent_id": "a1",
+                        "transcript_path": str(parent), "cwd": str(root)})
+            self.assertEqual(self.entries(root), [])
+
+    def test_an_unparsable_line_in_the_ledger_is_kept_and_does_not_stop_recording(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_run(tmp)
+            p = root / ".feature-ladder" / "runs" / "demo" / "usage.jsonl"
+            p.parent.mkdir(parents=True)
+            p.write_text("{broken\n", encoding="utf-8")
+            t = root / "a.jsonl"
+            transcript(t, [{"input_tokens": 1, "output_tokens": 2}])
+            hook(root, {"agent_type": "mechanic", "agent_id": "m1", "agent_transcript_path": str(t), "cwd": str(root)})
+            lines = p.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertEqual(lines[0], "{broken")
+
+
 if __name__ == "__main__":
     unittest.main()

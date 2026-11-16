@@ -24,6 +24,7 @@ Exit 0 on success, 1 on bad input or no match.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,7 @@ sys.path.insert(0, str(HERE))
 
 import intake  # noqa: E402
 import route as router  # noqa: E402
+from intake import _load, ladder_state, pop_opt  # noqa: E402  (shared with intake.py, not copied)
 
 LABELS = ["low token cost", "medium token cost", "high token cost"]
 MODEL_NAMES = {"haiku": "Haiku", "sonnet": "Sonnet", "opus": "Opus", "fable": "Fable"}
@@ -93,6 +95,9 @@ def cost_section(rows):
 
 
 def _bullets(items, empty):
+    """One "- item" line each. An item that already is a list line ("- x",
+    "* x", "1. x") keeps its text and loses its own marker."""
+    items = [re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", str(i)).strip() for i in items if i]
     items = [i for i in items if i]
     return [f"- {i}" for i in items] if items else [f"- {empty}"]
 
@@ -174,19 +179,19 @@ def make_brief(data):
 
 
 # ---------------------------------------------------------------- CLI side --
-def _load(path):
-    with open(path, encoding="utf-8-sig") as fh:
-        return json.load(fh)
-
-
 def _values(fields):
+    if not isinstance(fields or {}, dict):
+        raise ValueError('"fields" must be an object ({name: value or {value, confidence, evidence}})')
     return {k: (v.get("value") if isinstance(v, dict) else v) for k, v in (fields or {}).items()}
 
 
 def data_from(prop, conf, switches, evidence=None, external=None):
     prop, conf = prop or {}, conf or {}
     if conf:
-        fields, route, budget = conf.get("fields") or {}, conf.get("route"), conf.get("budget")
+        fields = _values(conf.get("fields"))
+        # An intake saved by hand or by an older version may lack the route or the budget.
+        route = conf.get("route") or router.route(fields)
+        budget = conf.get("budget") or intake.budget_for(route, fields)
         assumed = None
     else:
         fields = _values(prop.get("fields"))
@@ -207,7 +212,7 @@ def data_from(prop, conf, switches, evidence=None, external=None):
         "switches": switches, "assumed": assumed,
         "reviewer": bool((conf.get("codex") or {}).get("at_wrap")),
         "orchestrator": conf.get("orchestrator") or intake.session_budget.orchestrator(
-            intake.session_budget.find_root(prop.get("repo_root") or os.getcwd())),
+            intake.state_root(prop.get("repo_root") or conf.get("repo_root"))),
     }
     if external:
         data["external"] = {"name": external, "notes": evidence or ""}
@@ -218,9 +223,7 @@ def _skills(data):
     sel = HERE.parents[1] / "skill-selector" / "scripts" / "select_skills.py"
     r = data["route"]
     task = {"role": r["agent"], "kind": data["fields"].get("kind", "code"), "paths": data["candidate_files"][:8],
-            "text": data.get("request", ""),
-            "flags": {k: True for k in ("security", "persistence", "concurrency", "cross_system", "public_api",
-                                        "irreversible", "new_dependency") if data["fields"].get(k)}}
+            "text": data.get("request", ""), "flags": intake.skill_flags(data["fields"])}
     try:
         res = subprocess.run([sys.executable, str(sel), json.dumps(task)], capture_output=True, text=True,
                              encoding="utf-8", errors="replace", timeout=30)
@@ -230,8 +233,7 @@ def _skills(data):
 
 
 def find_brief(text, cwd):
-    root, _ = intake.repo_root(cwd)
-    d = root / ".feature-ladder" / "intake"
+    d = ladder_state.state_dir(intake.state_root(cwd)) / "intake"
     if not norm(text) or not d.is_dir():
         return None
     for f in sorted(d.glob("*-brief.md")):
@@ -249,12 +251,7 @@ def main(argv):
     cmd, rest = argv[0], list(argv[1:])
 
     def opt(name, default=None):
-        if name in rest:
-            i = rest.index(name)
-            val = rest[i + 1] if i + 1 < len(rest) else default
-            del rest[i:i + 2]
-            return val
-        return default
+        return pop_opt(rest, name, default)
 
     try:
         cwd = opt("--cwd", os.getcwd())
@@ -295,23 +292,20 @@ def main(argv):
                 data["skills"] = _skills(data)
             md = make_brief(data)
             if not out:
-                root = (prop or conf).get("repo_root") or cwd
+                root = intake.state_root((prop or conf).get("repo_root") or cwd)
                 intake._ensure_ignore(root)
-                out = str(Path(root) / ".feature-ladder" / "intake" / f"{intake.slugify(data['request'])}-brief.md")
-            Path(out).parent.mkdir(parents=True, exist_ok=True)
-            Path(out).write_text(md, encoding="utf-8", newline="\n")
+                out = str(ladder_state.state_dir(root) / "intake" / f"{intake.slugify(data['request'])}-brief.md")
+            ladder_state.write_text(out, md)  # atomic, LF on every platform and Python version
             sys.stdout.write(md)
             return 0
-    except (ValueError, KeyError, IndexError, OSError) as e:
-        print(f"brief {cmd}: {e}", file=sys.stderr)
+    except (ValueError, KeyError, IndexError, OSError, TypeError, AttributeError) as e:
+        kind = "" if isinstance(e, (ValueError, OSError)) else f"{type(e).__name__}: "
+        print(f"brief {cmd}: {kind}{e}", file=sys.stderr)
         return 1
     print(__doc__)
     return 1
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except AttributeError:
-        pass
+    ladder_state.utf8_stdio()
     sys.exit(main(sys.argv[1:]))

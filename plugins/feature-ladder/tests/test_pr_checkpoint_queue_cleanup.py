@@ -45,35 +45,41 @@ def make_run(entries, run_base, pr_enabled=True):
     return run
 
 
+REFUSAL = "GraphQL: Pull request is not mergeable: checks pending (mergePullRequest)"
+CONFLICT = "CONFLICT (content): Merge conflict in a.py"
+
+
 class GhFake:
-    """Answers gh/git for the queue scenarios; records every command."""
+    """Answers gh/git for the queue scenarios the way the real programs do: an exit
+    code, stdout and stderr, with a refusal's reason on STDERR. It stands in for the
+    process (pr_checkpoint._spawn), so the real sh() turns it into (code, text)."""
 
     def __init__(self, mode):
         self.mode, self.calls = mode, []
 
-    def __call__(self, args, cwd, check=True):
+    def __call__(self, args, cwd, env, limit):
         self.calls.append(list(args))
         url = args[3] if len(args) > 3 else ""
         if args[:3] == ["gh", "pr", "merge"]:
             auto = "--auto" in args
             if self.mode == "gh-refused":
-                return 1, "checks pending"
+                return 1, "", REFUSAL
             if self.mode == "gh-queued":
                 if url.endswith("/15") and not auto:
-                    return 1, "checks pending"
-                return 0, ""
-            return 0, ""  # gh-merges-retarget
+                    return 1, "", REFUSAL
+                return 0, "", ""
+            return 0, "", ""  # gh-merges-retarget
         if args[:3] == ["git", "rev-parse", "--abbrev-ref"]:
-            return 0, "main"
-        if args[:2] == ["git", "merge"] and self.mode == "local-merge-partial" \
+            return 0, "main\n", ""
+        if args[0] == "git" and "merge" in args and self.mode == "local-merge-partial" \
                 and "merge feature-ladder/e " in " ".join(args):
-            raise RuntimeError("conflict")
-        return 0, ""
+            return 1, "", CONFLICT
+        return 0, "", ""
 
 
 def run_stack(fake, entries, run_base, pr_enabled=True):
     run = make_run(entries, run_base, pr_enabled)
-    with mock.patch.object(pc, "sh", fake):
+    with mock.patch.object(pc, "_spawn", fake):
         results = pc.merge_stack(Path("."), run)
     return results, run
 
@@ -117,6 +123,8 @@ class Analogs(unittest.TestCase):
                 results, run = run_stack(fake, [dict(c["analog"]["entry"])], c["analog"]["run_base"])
                 e = c["analog"]["expect"]
                 self.assertTrue(results[0]["result"].startswith(e["merged_prefix"]))
+                self.assertIn("checks pending", results[0]["result"])  # the reason gh gave, from stderr
+                self.assertIn("checks pending", run["warnings"][0])
                 self.assertEqual(len(run["warnings"]), e["warnings"])
                 self.assertEqual(len(results), 1)  # stack stops at the refusal
                 if e["retarget_call"]:
@@ -170,8 +178,24 @@ class Analogs(unittest.TestCase):
         self.assertEqual(len(got), len(e["results"]))
         for g, want in zip(got, e["results"]):
             self.assertTrue(g.startswith(want))
+        self.assertIn("Merge conflict in a.py", got[-1])  # git's own reason, not an empty string
         self.assertEqual(len(run["warnings"]), e["warnings"])
         self.assertEqual(len(results), len(e["results"]))  # stack stops at the refusal
+
+    def test_a_refused_entry_is_tried_again_before_the_ones_behind_it(self):
+        entries = [{"branch": "feature-ladder/a-pt1", "base": "main", "pr": "https://github.com/o/r/pull/15"},
+                   {"branch": "feature-ladder/a", "base": "feature-ladder/a-pt1", "pr": "https://github.com/o/r/pull/16"}]
+        run = make_run(entries, "main")
+        with mock.patch.object(pc, "_spawn", GhFake("gh-refused")):
+            first = pc.merge_stack(Path("."), run)
+        self.assertEqual([r["branch"] for r in first], ["feature-ladder/a-pt1"])  # stopped at the refusal
+        fake = GhFake("gh-merges-retarget")
+        with mock.patch.object(pc, "_spawn", fake):  # the checks pass later; finish runs again
+            second = pc.merge_stack(Path("."), run)
+        self.assertEqual([(r["branch"], r["result"]) for r in second],
+                         [("feature-ladder/a-pt1", "merged"), ("feature-ladder/a", "merged")])
+        merges = [c[3] for c in fake.calls if c[:3] == ["gh", "pr", "merge"]]
+        self.assertEqual(merges, ["https://github.com/o/r/pull/15", "https://github.com/o/r/pull/16"])  # in stack order
 
 
 if __name__ == "__main__":

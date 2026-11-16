@@ -14,13 +14,15 @@ Generate the repo's security evidence, deterministically and with the stdlib onl
 
 Byte-deterministic: no timestamps, serial numbers or absolute paths; keys and
 entries are sorted; files are hashed after \\r\\n -> \\n so Windows and Linux
-agree. Scope is every non-test .py under plugins/. Nothing here runs during a
-feature run and nothing touches the network.
+agree. Scope is every non-test .py under plugins/ that git tracks or would add
+(ignored files are left out; outside a git checkout, every such file on disk).
+Nothing here runs during a feature run and nothing touches the network.
 """
 import ast
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -47,14 +49,37 @@ def read_text(path):
     return Path(path).read_bytes().decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
+def _git_files():
+    """Repo-relative paths under plugins/ that git tracks or would add (untracked
+    but not ignored), or None when REPO is not a git checkout or git is missing.
+    A file git ignores (a local scratch script, a virtualenv) is not part of the
+    plugin and must not make --check fail; a new script not yet committed is, so
+    regenerating before the commit gives the result CI will compute after it."""
+    if not (REPO / ".git").exists():
+        return None
+    try:
+        r = subprocess.run(["git", "-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others",
+                            "--exclude-standard", "--", "plugins"],
+                           cwd=str(REPO), capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return [f for f in r.stdout.decode("utf-8", errors="replace").split("\0") if f]
+
+
 def sources():
     """Non-test Python files under plugins/, as sorted repo-relative posix paths."""
-    found = []
-    for p in (REPO / "plugins").rglob("*.py"):
-        rel = p.relative_to(REPO)
-        if "__pycache__" in rel.parts or "tests" in rel.parts:
+    listed = _git_files()
+    if listed is None:
+        listed = [p.relative_to(REPO).as_posix() for p in (REPO / "plugins").rglob("*.py")]
+    found = set()
+    for rel in listed:
+        parts = Path(rel).parts
+        if not rel.endswith(".py") or "__pycache__" in parts or "tests" in parts:
             continue
-        found.append(rel.as_posix())
+        if (REPO / rel).is_file():  # a tracked file deleted from the working tree is gone
+            found.add(Path(rel).as_posix())
     return sorted(found)
 
 

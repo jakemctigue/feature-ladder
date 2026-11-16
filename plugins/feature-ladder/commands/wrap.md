@@ -1,6 +1,6 @@
 ---
 description: End a coding session - write the session's queued memories to Hindsight once (a script, no model), and only if you ask for them, run ONE review over everything the session built (Codex, adversarial tests, a Fable second opinion). Run it once after many features, never per feature. Usage - /feature-ladder:wrap [--review] [--adversarial] [--second-opinion] [--base <ref>]
-argument-hint: [--review] [--adversarial] [--second-opinion] [--base <ref>]
+argument-hint: "[--review] [--adversarial] [--second-opinion] [--base <ref>]"
 ---
 
 Wrap up this coding session with arguments: $ARGUMENTS
@@ -19,15 +19,21 @@ stop and say so: wrap runs after the session's features, not during one.
 
 ## 2. Review (only with `--review`, `--adversarial` or `--second-opinion`)
 
-The base is `--base` if given, otherwise the branch the session's first run
-started from (`base` in `.feature-ladder/run.json`), so the review covers
-every feature of the session in one pass.
+The base is `--base` if given, otherwise `session_base_sha` in
+`.feature-ladder/run.json`: the commit the session's first run started from,
+which `pr_checkpoint.py` carries from run to run, so the review covers every
+feature of the session in one pass. (`base` in that file is only the last
+run's base. If `session_base_sha` is missing, the run was started by an older
+version: use `base` and say the review covers the last feature only.)
 
 - `--review`: dispatch `feature-ladder:codex-reviewer` (model haiku, effort
   low) once with the command
-  `python3 "${CLAUDE_PLUGIN_ROOT}/skills/cross-model-review/scripts/codex_review.py" review --slug wrap-<date> --base <base>`.
-  One attempt; a timeout or exit 3 is reported as "Codex review skipped:
-  <reason>".
+  `python3 "${CLAUDE_PLUGIN_ROOT}/skills/cross-model-review/scripts/codex_review.py" review --slug wrap-<date> --base <base> --flags auto`.
+  `--flags auto` makes the script read the risk flags of this session's
+  intakes, so Codex runs at high effort when a feature touched security,
+  persistence, concurrency, a public API, another system or something
+  irreversible, and at medium otherwise. One attempt; a timeout or exit 3 is
+  reported as "Codex review skipped: <reason>".
 - `--adversarial`: afterwards, once more with `adversarial` in place of
   `review` (implies `--review`).
 - `--second-opinion`: send `feature-ladder:second-opinion` (fable/low) ONE

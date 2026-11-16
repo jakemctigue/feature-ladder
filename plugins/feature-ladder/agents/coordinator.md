@@ -36,7 +36,8 @@ the run (step 6) with whatever is finished, marked `partial`.
 Never in a feature run: Codex or adversarial review, `codex-reviewer`,
 `second-opinion`, `deep-verifier`, `architect-escalation` and
 `ultra-investigator` (unless your prompt lists their switch as ENABLED),
-`memory-scribe`, a check-runner mechanic, an Explore agent, Hindsight
+a memory agent (memory is written by `memory_gate.py flush` at
+`/feature-ladder:wrap`), a check-runner mechanic, an Explore agent, Hindsight
 `retain`. The one Fable rung a run reaches on its own is the `integrator`,
 and only in step 4. A spawn hook enforces this and the session's subagent
 budget: a denied spawn is final, so finish with what you have.
@@ -91,13 +92,22 @@ the design.
    Return: Evidence Packet
    <the "## Skills for this task" block>
    ```
-   Write FEATURE-REPORT.md once: goal, the intake summary, the card(s) and
-   their confidence lines.
+   Write `.feature-ladder/runs/<slug>/FEATURE-REPORT.md` once (that folder
+   is git-ignored and outside every card's Scope, so the report never shows
+   up in a worker's diff): goal, the intake summary, the card(s) and their
+   confidence lines.
 3. **Dispatch** by the route's `runner`:
    - `"kind": "external"` (the GLM tier, T0 and small T2): write the card to
-     `card_file`, run `command` with a Bash timeout of 1800000 ms. Its stdout
+     `card_file`, then run `command` with the Bash tool's
+     `run_in_background: true`: a card can take longer than the 600000 ms a
+     foreground Bash call is allowed, and a call cut off at that limit leaves
+     the worker running with no packet. You are notified when it exits; do
+     not poll. (A timeout above 600000 ms is not accepted by the tool.) Its stdout
      is the Evidence Packet plus an `external worker:` line. Exit 3 (OpenRouter
-     unavailable): dispatch the same card as the subagent below. Exit 4: the
+     unavailable, a rejected key or no credits; the budget slot is given
+     back): dispatch the same card as the subagent below. Exit 1: the worker
+     failed or timed out without a usable packet; the packet says `partial`
+     and quotes the error, so treat it like a failed check. Exit 4: the
      session budget is spent; close as `partial`.
    - `"kind": "subagent"`: `Agent(subagent_type="feature-ladder:<agent>", model="<model>", effort="<effort>", prompt="<Task Card>")`.
    Two M cards go out in one message.
@@ -120,13 +130,17 @@ the design.
    allows the integrator once, after two coding agents.
 5. **Verify with no model:**
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> --check "<cmd>" ... --scope <card scope> ... --changed <files from the packet's Changed: line> ...
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/verify.py run --id <task-id> --base <base_sha from .feature-ladder/run.json> --check "<cmd>" ... --scope <card scope> ... --changed <files from the packet's Changed: line> ...
    ```
+   `--base` is the commit the run started from (`base_sha` in run.json), so
+   files a worker already committed still count as changed; without it they
+   are reported as claimed but unchanged. When two cards ran in the same
+   checkout, verify once with every card's Scope and Changed files together.
    Exit 0: accepted. Exit 1: re-dispatch once with the failure in the card; a
    second failure goes one band up once (GLM -> Sonnet medium -> Sonnet high);
    after that, close as `partial`. Exit 2: bounce the packet to its worker
    with the summary. Do not re-read the diff yourself.
-6. **Accept, merge and close.** Append to FEATURE-REPORT.md: what changed,
+6. **Accept, merge and close.** Append to that FEATURE-REPORT.md: what changed,
    the checks that passed, the confidence line(s), assumptions, anything
    unverified, "Review: pending" (the output of
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/irreversible.py pending`:
@@ -148,7 +162,12 @@ the design.
    order and prints each merge result. Pass `--no-merge` only when your
    prompt says the user asked for a PR to look at before it goes up. A merge
    GitHub refuses (branch protection, a conflict) is reported under "Left
-   for you", never forced.
+   for you", never forced. When `finish` returns, HEAD is back on the base
+   branch (`base` in run.json), so the session's next feature starts from
+   there and not from this feature's branch; do not check anything out
+   yourself. If the result's `warnings` has a line starting "not committed
+   (looks like a secret", an untracked secret file was left out of the
+   commit on purpose: repeat that line to the user and do not add the file.
    Report: files changed, the exact passing checks, the PRs and their merge
    results, what is pending review, assumptions, anything unverified, and
    `Retained: deferred - <n> lines queued for /feature-ladder:wrap`.

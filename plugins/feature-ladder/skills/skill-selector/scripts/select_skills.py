@@ -48,6 +48,14 @@ Rules are merged from, in order (later wins on the same rule id):
   1. <plugin>/skills/skill-selector/skill-rules.json   (shipped defaults)
   2. ~/.claude/feature-ladder/skill-rules.json          (your personal rules)
   3. <repo>/.feature-ladder/skill-rules.json            (per-project rules)
+"Project" means the cwd and its parents up to the repository root (the folder
+holding .git), never the home folder or anything above it: a rules file or a
+.claude/skills folder there is personal, not this project's.
+
+A rule whose `when` or `unless` names a group that does not exist (a typo such
+as "keyword") is broken: it is never applied, and --list names it.
+
+Exit 0 on success, 2 on bad arguments or an unreadable task or rules file.
 """
 import fnmatch
 import hashlib
@@ -62,13 +70,43 @@ SKILL_DIR = HERE.parents[1]                 # .../skills/skill-selector
 PLUGIN_ROOT = HERE.parents[3]               # .../feature-ladder
 PLUGIN_NAME = "feature-ladder"
 GROUPS = ("roles", "kinds", "globs", "keywords", "all_keywords", "flags")
+HEAD_CHARS = 4096                           # a SKILL.md frontmatter normally ends well inside this
+
+sys.path.insert(0, str(HERE.parents[2] / "orchestration-ladder" / "scripts"))
+import ladder_state  # noqa: E402
+
+
+class UsageError(ValueError):
+    """Bad arguments or an unreadable task/rules file: printed, exit 2."""
 
 
 # ---------------------------------------------------------------- rules ----
-def _project_rules_file():
+def _project_dirs():
+    """The cwd and its parents up to the repository root (the folder holding
+    .git), nearest first. The home folder and everything above it are never
+    part of a project."""
+    home = Path.home().resolve()
+    out = []
     d = Path.cwd().resolve()
     for p in [d, *d.parents]:
+        if p == home:
+            break
+        out.append(p)
+        if (p / ".git").exists():
+            break
+    return out
+
+
+def _project_rules_file():
+    dirs = _project_dirs()
+    for p in dirs:
         f = p / ".feature-ladder" / "skill-rules.json"
+        if f.is_file():
+            return f
+    # A linked worktree keeps its .git as a file; the run state (and the rules
+    # beside it) live in the main checkout.
+    if dirs and (dirs[-1] / ".git").is_file():
+        f = ladder_state.state_dir(ladder_state.state_root(dirs[-1])) / "skill-rules.json"
         if f.is_file():
             return f
     return None
@@ -83,7 +121,12 @@ def load_rules():
     for f in sources:
         if not f or not Path(f).is_file():
             continue
-        data = json.loads(Path(f).read_text(encoding="utf-8-sig"))
+        try:
+            data = json.loads(Path(f).read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict):
+                raise ValueError("it must hold a JSON object")
+        except (OSError, ValueError) as e:
+            raise UsageError(f"cannot read the rules file {f}: {e}") from e
         used.append(str(f))
         for k in ("max_skills", "max_chars"):
             if k in data:
@@ -120,20 +163,45 @@ def _parse_meta(lines):
     return {k: v.strip().strip("'\"") for k, v in meta.items()}
 
 
-def _frontmatter(path):
-    try:
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return {}, ""
-    meta, body = {}, text
+def _split(text):
+    """(frontmatter lines or None, index of the first body line)."""
     if text.startswith("---"):
         parts = text.split("\n")
         for i in range(1, len(parts)):
             if parts[i].strip() == "---":
-                meta = _parse_meta(parts[1:i])
-                body = "\n".join(parts[i + 1:]).lstrip("\n")
-                break
-    return meta, body
+                return parts, i
+    return None, 0
+
+
+def _frontmatter(path):
+    """(meta, body) of a SKILL.md. A leading BOM is ignored."""
+    try:
+        text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return {}, ""
+    parts, end = _split(text)
+    if parts is None:
+        return {}, text
+    return _parse_meta(parts[1:end]), "\n".join(parts[end + 1:]).lstrip("\n")
+
+
+def _meta_only(path):
+    """The frontmatter of a SKILL.md, reading only the head of the file. The
+    inventory needs names, not bodies: the body of a skill is read only when
+    the skill is selected (or catalogued)."""
+    try:
+        with open(path, encoding="utf-8-sig", errors="replace") as fh:
+            head = fh.read(HEAD_CHARS)
+            if not head.startswith("---"):
+                return {}
+            parts, end = _split(head)
+            # The closing line counts only if a line follows it: a head cut
+            # mid-line could end in "---" by accident.
+            if parts is None or end >= len(parts) - 1:
+                parts, end = _split(head + fh.read())
+    except OSError:
+        return {}
+    return _parse_meta(parts[1:end]) if parts is not None else {}
 
 
 def _skill_files(root, depth=3):
@@ -173,26 +241,25 @@ def inventory_entries():
 
     home = Path.home() / ".claude"
     for f in _skill_files(home / "skills"):
-        meta, _ = _frontmatter(f)
-        n = meta.get("name") or f.parent.name
+        n = _meta_only(f).get("name") or f.parent.name
         synced = "synced" in f.relative_to(home / "skills").parts[:1]
         put(n, f, "account" if synced else "personal")
         if synced and ":" not in n:
             put(f"anthropic-skills:{n}", f, "account")   # how the Claude app lists synced account skills
 
-    d = Path.cwd().resolve()
-    for p in [d, *d.parents]:
+    for p in _project_dirs():   # never the home folder: its skills are the personal ones above
         for f in _skill_files(p / ".claude" / "skills"):
-            meta, _ = _frontmatter(f)
-            put(meta.get("name") or f.parent.name, f, "project")
+            put(_meta_only(f).get("name") or f.parent.name, f, "project")
 
-    def plugin_skills(plugin, root):
+    def plugin_skills(root, *plugins):
+        """One walk of the plugin's skills; each skill answers to every name given."""
+        plugins = [p for p in dict.fromkeys(plugins) if p]
         for f in _skill_files(Path(root) / "skills", depth=1):
-            meta, _ = _frontmatter(f)
-            n = meta.get("name") or f.parent.name
-            put(n if ":" in n else f"{plugin}:{n}", f, f"plugin:{plugin}")
+            n = _meta_only(f).get("name") or f.parent.name
+            for plugin in plugins:
+                put(n if ":" in n else f"{plugin}:{n}", f, f"plugin:{plugin}")
 
-    plugin_skills(PLUGIN_NAME, PLUGIN_ROOT)
+    plugin_skills(PLUGIN_ROOT, PLUGIN_NAME)
     ip = home / "plugins" / "installed_plugins.json"
     if ip.is_file():
         try:
@@ -204,9 +271,7 @@ def inventory_entries():
                 if path:
                     # Both names resolve: the marketplace key (data-agent-kit) and the
                     # manifest name Claude Code shows the skills under (dak).
-                    for pname in dict.fromkeys([key.split("@")[0], _plugin_name(path)]):
-                        if pname:
-                            plugin_skills(pname, path)
+                    plugin_skills(path, key.split("@")[0], _plugin_name(path))
         except (ValueError, OSError, AttributeError):
             pass
 
@@ -216,7 +281,7 @@ def inventory_entries():
         for manifest in sorted(synced.glob("*/*/.claude-plugin/plugin.json")):
             pname = _plugin_name(manifest.parent.parent)
             if pname:
-                plugin_skills(pname, manifest.parent.parent)
+                plugin_skills(manifest.parent.parent, pname)
     return out
 
 
@@ -336,8 +401,28 @@ def _cond(spec, task):
     return True, why
 
 
+def rule_problems(rule):
+    """Why a rule cannot be applied ([] when it can). A group the selector does
+    not know is a typo: applying the rule without it would either widen it
+    (`when`) or cancel it on every task (`unless`), so the rule is refused."""
+    out = []
+    when = rule.get("when")
+    if not rule.get("skill") or not isinstance(when, dict) or not any(when.get(g) for g in GROUPS):
+        out.append("needs 'skill' and at least one 'when' group")
+    for part in ("when", "unless"):
+        spec = rule.get(part)
+        if spec is None:
+            continue
+        if not isinstance(spec, dict):
+            out.append(f"'{part}' must be an object of groups")
+            continue
+        for g in sorted(k for k in spec if k not in GROUPS):
+            out.append(f"unknown group '{g}' in {part} (groups: {', '.join(GROUPS)})")
+    return out
+
+
 def _valid(rule):
-    return bool(rule.get("skill")) and any(rule.get("when", {}).get(g) for g in GROUPS)
+    return not rule_problems(rule)
 
 
 def budget(task, settings):
@@ -348,6 +433,9 @@ def budget(task, settings):
 
 
 def select(task, settings, rules, inv):
+    """`inv` is the inventory (name -> SKILL.md path) or a function returning
+    it. The function is called only when a skill can actually be given: not
+    when no rule matched, and not when the role's budget is 0."""
     max_chars = budget(task, settings)
     picked = {}  # skill -> (priority, order, reasons)
     for order, r in enumerate(rules):
@@ -370,6 +458,12 @@ def select(task, settings, rules, inv):
         picked.pop(n, None)
 
     ranked = sorted(picked.items(), key=lambda kv: (-kv[1][0], kv[1][1], kv[0]))
+    if not ranked or max_chars <= 0:
+        return {"skills": [], "unresolved": [], "total_chars": 0, "max_chars": max_chars, "settings": settings,
+                "dropped": [{"skill": name, "reason": f"over max_chars for this role (budget {max_chars})"}
+                            for name, _ in ranked]}
+    if callable(inv):
+        inv = inv()
     chosen, dropped, unresolved, total, groups, files = [], [], [], 0, set(), {}
     for name, (pri, _, why, group) in ranked:
         path = inv.get(name)
@@ -434,16 +528,19 @@ def write_out(result, out):
 
 
 def _ignore_in_feature_ladder(path):
+    """Keep a file written under a .feature-ladder folder out of git: the shared
+    runtime list (ladder_state.GITIGNORE), plus this file if the list misses it."""
     path = path.resolve()
     for d in path.parents:
         if d.name == ".feature-ladder":
+            ladder_state.ensure_gitignore(d.parent)
             try:
-                rel = path.relative_to(d).parts[0]
-                entry = rel + "/" if len(path.relative_to(d).parts) > 1 else rel
+                parts = path.relative_to(d).parts
+                entry = parts[0] + "/" if len(parts) > 1 else parts[0]
                 gi = d / ".gitignore"
                 lines = gi.read_text(encoding="utf-8").splitlines() if gi.is_file() else []
-                if entry not in lines:
-                    gi.write_text("\n".join(lines + [entry]) + "\n", encoding="utf-8")
+                if entry not in lines and not any(fnmatch.fnmatchcase(entry, line) for line in lines):
+                    ladder_state.write_text(gi, "\n".join(lines + [entry]) + "\n")
             except OSError:
                 pass
             return
@@ -457,23 +554,52 @@ def list_all(settings, rules, used, inv):
         print(f"  {n}")
     problems = []
     for i, r in enumerate(rules):
-        if not _valid(r):
-            problems.append(f"rule {r.get('id', i)}: needs 'skill' and at least one 'when' group")
-        elif r["skill"] not in inv:
+        broken = rule_problems(r)
+        problems += [f"rule {r.get('id', i)}: {p}" for p in broken]
+        if not broken and r["skill"] not in inv:
             problems.append(f"rule {r.get('id', i)}: skill '{r['skill']}' is not installed")
     print(f"Rule problems ({len(problems)}):")
     for p in problems:
         print(f"  {p}")
 
 
+def _task(args):
+    """The task object from the command line: '<json>' or --file PATH."""
+    if not args:
+        raise UsageError("no task given: pass '<task json>' or --file PATH (see --help)")
+    try:
+        if args[0] == "--file":
+            if len(args) < 2:
+                raise UsageError("--file needs a path")
+            task = json.loads(Path(args[1]).read_text(encoding="utf-8-sig"))
+        else:
+            task = json.loads(args[0])
+    except OSError as e:
+        raise UsageError(f"cannot read the task file: {e}") from e
+    except ValueError as e:
+        if isinstance(e, UsageError):
+            raise
+        raise UsageError(f"the task is not valid JSON: {e}") from e
+    if not isinstance(task, dict):
+        raise UsageError("the task must be a JSON object")
+    return task
+
+
 def main(argv):
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
         return 0
+    try:
+        return _main(argv)
+    except UsageError as e:
+        print(f"select_skills: {e}", file=sys.stderr)
+        return 2
+
+
+def _main(argv):
     settings, rules, used = load_rules()
-    inv = inventory()
     if argv[0] == "--list":
-        list_all(settings, rules, used, inv)
+        list_all(settings, rules, used, inventory())
         return 0
     if argv[0] == "--scan":
         rest = argv[1:]
@@ -495,11 +621,9 @@ def main(argv):
                 return 2
             continue
         args.append(a)
-    if args and args[0] == "--file":
-        task = json.loads(Path(args[1]).read_text(encoding="utf-8-sig"))
-    else:
-        task = json.loads(args[0])
-    result = select(task, settings, rules, inv)
+    # The inventory (a walk of every skills folder) is built only if a rule
+    # matched and the role may receive skill text.
+    result = select(_task(args), settings, rules, inventory)
     if out:
         sys.stdout.write(write_out(result, out))
     elif want_inject:
@@ -511,8 +635,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except AttributeError:
-        pass
+    ladder_state.utf8_stdio()
     sys.exit(main(sys.argv[1:]))

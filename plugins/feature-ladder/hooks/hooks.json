@@ -1,5 +1,5 @@
 {
-  "description": "feature-ladder: resolve this repository's Hindsight bank at session start (find existing or create) and start a new session subagent budget, route every Hindsight tool call to it, enforce the session subagent budget and the per-feature spawn rules (no reviews, scribes or Fable calls inside a run), record each subagent's token usage in the run's ledger, and block irreversible shell commands while a ladder run is active.",
+  "description": "feature-ladder: resolve this repository's Hindsight bank at session start (find existing or create) and start a new session subagent budget, route every Hindsight tool call to it and record a memory write only once it has happened, enforce the session subagent budget and the per-feature spawn rules (no reviews, scribes or Fable calls inside a run), record each subagent's token usage in the run's ledger, and block irreversible shell commands while a ladder run is active.",
   "hooks": {
     "SessionStart": [
       {
@@ -45,6 +45,18 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/session_budget.py\" --pretooluse",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__plugin_feature-ladder_hindsight__retain",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/resolve_bank.py\" --posttooluse",
             "timeout": 15
           }
         ]
