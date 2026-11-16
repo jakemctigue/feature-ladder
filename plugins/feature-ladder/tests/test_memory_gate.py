@@ -77,10 +77,12 @@ class HookGate(unittest.TestCase):
         self.run_active()
         ok, _, args = self.gate("recall", {"query": "maps workflow firestore", "max_tokens": 8000, "tags": ["x"]})
         self.assertTrue(ok)
+        memory_gate.commit_recall(self.root)
         self.assertEqual(args["tags"], ["project:bossforge"])
         self.assertEqual(args["max_tokens"], memory_gate.MAX_RECALL_TOKENS)
         for _ in range(memory_gate.RUN_RECALLS - 1):
             self.assertTrue(self.gate("recall", {"query": "q"})[0])
+            memory_gate.commit_recall(self.root)
         self.assertFalse(self.gate("recall", {"query": "q"})[0])
 
     def test_no_retain_during_a_run(self):
@@ -190,6 +192,7 @@ class GateIsRobust(unittest.TestCase):
         (self.root / ".feature-ladder" / "run.json").write_text(
             json.dumps({"active": True, "slug": "maps", "started": "t1"}), encoding="utf-8")
         memory_gate.gate("x__recall", {"query": "q"}, self.root, "p")
+        memory_gate.commit_recall(self.root)
         self.assertEqual(list(json.loads(state.read_text(encoding="utf-8"))["recalls"].values()), [1])
 
     def test_flush_reports_the_lines_it_left_for_the_next_wrap(self):

@@ -317,6 +317,7 @@ def live_recall(query, cwd):
         bank = resolved.get("bank_id")
         if bank:
             args["bank_id"] = bank
+        memory_gate.commit_recall(root)
         res = resolve_bank.Mcp().start().call("recall", args)
         return parse_memories(res), None
     except Exception as e:  # noqa: BLE001 - no memory is "unknown territory", not an error
