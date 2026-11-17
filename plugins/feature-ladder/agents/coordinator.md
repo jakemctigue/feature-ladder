@@ -97,15 +97,16 @@ the design.
    up in a worker's diff): goal, the intake summary, the card(s) and their
    confidence lines.
 3. **Dispatch** by the route's `runner`:
-   - `"kind": "external"` (the GLM tier, T0 and small T2): write the card to
+   - `"kind": "external"` (the GLM tier, T0 and small T2; with `--no-bs` the
+     Silk tier, which also takes implementer/medium cards up to score 14): write the card to
      `card_file`, then run `command` with the Bash tool's
      `run_in_background: true`: a card can take longer than the 600000 ms a
      foreground Bash call is allowed, and a call cut off at that limit leaves
      the worker running with no packet. You are notified when it exits; do
      not poll. (A timeout above 600000 ms is not accepted by the tool.) Its stdout
-     is the Evidence Packet plus an `external worker:` line. Exit 3 (OpenRouter
-     unavailable, a rejected key or no credits; the budget slot is given
-     back): dispatch the same card as the subagent below. Exit 1: the worker
+     is the Evidence Packet plus an `external worker:` line. Exit 3 (the provider
+     unavailable, a rejected key, no credits, or the model and its fallback
+     both busy; the budget slot is given back): dispatch the same card as the subagent below. Exit 1: the worker
      failed or timed out without a usable packet; the packet says `partial`
      and quotes the error, so treat it like a failed check. Exit 4: the
      session budget is spent; close as `partial`.

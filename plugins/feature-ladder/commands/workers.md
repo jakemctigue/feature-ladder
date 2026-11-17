@@ -22,10 +22,15 @@ synonym for `glm`. Then run the check below.
   ```
   (`python` on Windows). Add `--probe` if the user asked for it; it sends one
   one-token request to each configured model and reports the provider that
-  answered and the latency.
+  answered and the latency. Add `--no-bs` to check the Silk Compute setup that
+  `/feature-ladder:feature ... --no-bs` uses (its models, fallbacks, balance).
 
-Show the result as a short table: workers setting, preset, claude CLI found,
-key source (never the key), OpenRouter key valid / credits remaining, each
+`--no-bs` is a per-run switch on `/feature-ladder:feature`, not a setting
+here: nothing in `providers.json` turns Silk on. A `"silk"` block there may
+adjust it (for example `{"silk": {"models": {"mechanic": "<id>"}}}`).
+
+Show the result as a short table: provider, workers setting, preset, claude CLI found,
+key source (never the key), key valid / credits or balance remaining (`provider_key`), each
 model and its probe result. Exit 3 means something is missing; say what in
 one line (install the Claude CLI, put `OPENROUTER_API_KEY` in Google Secret
 Manager or the environment). Do not change any other setting.

@@ -345,7 +345,7 @@ To self-host with the cheapest-adequate model per operation:
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto] [--no-merge] [--orchestrator fable\|opus] [--researcher] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
+| `/feature-ladder:feature <request> [--auto] [--no-merge] [--orchestrator fable\|opus] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
 | `/feature-ladder:scope <request>` | Intake alone; the next `feature` with the same text reuses it without asking |
 | `/feature-ladder:research <request>` | A short research brief, no build and no questions: what the feature wants from this codebase, a qualitative cost label per agent (never a number) and what to expect |
 | `/feature-ladder:wrap [--review] [--adversarial] [--second-opinion]` | End of session: optional reviews over the whole session's diff, then the memory flush |
@@ -531,6 +531,32 @@ what was added are stored in `.feature-ladder/evidence/<id>-external.json`.
 Everything else (Sonnet medium by default, Opus, the coordinator) stays on
 Claude. External workers count against the session budget like any other.
 Usage lands in the ledger with what OpenRouter actually charged.
+
+### `--no-bs`: Silk Compute, per run
+
+`/feature-ladder:feature <request> --no-bs` moves the cheap tier, for that run
+only, to [Silk Compute](https://silkcompute.com/docs/claude-code): an
+Anthropic-compatible endpoint serving abliterated open-weight models, billed to
+your Silk balance. Nothing saved turns it on; without the switch every card
+routes exactly as above. Each tier gets a model capable of it, chosen from
+Silk's model guide and the Vals AI scores in its Hy4 post (Terminal-Bench 4.0:
+Kimi 63.6, Hy4 39.4, GLM-5.3 38.9, DeepSeek 31.8):
+
+| Card | Router score | Model | If it is busy |
+|---|---|---|---|
+| mechanic (T0) | 0-3 | DeepSeek V4.1 Flash 1017 Fast | GLM-5.3 Flash |
+| implementer, small T2 | 4-6 | DeepSeek V4.1 Flash 1017 | Hy4 |
+| implementer/medium, intermediate T2 | 7-14 | Kimi K3.1 Pro | Hy4 |
+| implementer/high (T3) and up | 15+ | stays on Claude | |
+
+GLM-5.3 has no slot: Hy4 scores the same, costs less and also reads images.
+The fallback runs only when the first model turned the card away before doing
+any work (Silk's 429 `concurrent_request_limit` / `rate_limited`, 503
+`under_capacity`); when both are busy the card runs on its Claude rung. The key
+is `SILK_API_KEY` from the environment, the repo's `.env` (git-ignored), or
+Google Secret Manager; `/feature-ladder:workers check --no-bs --probe` shows
+the balance and probes every model. Cost per card is the drop in Silk's
+`/v1/balance`. A `"silk"` block in `providers.json` can change a tier's model.
 
 The child process is Claude Code itself, so OpenRouter's documented Claude
 Code integration applies ([their cookbook](https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration.md)).

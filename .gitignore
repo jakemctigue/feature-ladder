@@ -10,3 +10,6 @@ FEATURE-REPORT.md
 
 # local Boost hook metadata (per machine)
 .boost/
+
+# local API keys (SILK_API_KEY for --no-bs, ...)
+.env
