@@ -6,11 +6,13 @@ and what to expect, written next to the intake as
 .feature-ladder/intake/<slug>-brief.md.
 
   build  [--proposal P.json] [--intake I.json] [--switches a,b] [--evidence FILE]
-         [--external NAME] [--cwd DIR] [--out FILE] [--no-skills]
+         [--external NAME] [--cwd DIR] [--out FILE] [--no-skills] [--no-bs]
          Builds the brief from the scoper's proposal and/or a confirmed intake,
          writes it and prints it. With only a proposal, the router runs on the
          proposal's values with ambiguity=1 and blast_radius=1 assumed. No
-         confirmed intake is created.
+         confirmed intake is created. With --no-bs the cheap-tier labels say
+         which Silk Compute model external_worker.py really runs under a
+         --no-bs run (a per-run flag, never a saved setting).
   find   "<request>" [--cwd DIR]
          Prints the path of the saved brief whose request text matches (same
          normalisation as intake.py find), then the matching proposal path if
@@ -41,6 +43,24 @@ MODEL_NAMES = {"haiku": "Haiku", "sonnet": "Sonnet", "opus": "Opus", "fable": "F
 CLAUDE, OPENROUTER = "Claude plan", "OpenRouter credits"
 ASSUMED = {"ambiguity": 1, "blast_radius": 1}
 
+# --no-bs: a run started with --no-bs moves the cheap tiers to Silk Compute
+# (external_worker.py, SILK). One small table here; the ids are asserted equal
+# to that SILK table by test_research_brief.py. The flag is per run only --
+# never read from or written to a saved setting or environment variable. The
+# cost table must stay digit-free, so its rung text gets a version-less name.
+SILK_MODELS = {
+    "mechanic": "deepseek-v4.1-flash-1017-fast-uncensored",
+    "implementer": "deepseek-v4.1-flash-1017-uncensored",
+    "implementer-mid": "kimi-k3.1-pro-uncensored",
+}
+SILK_REACH = 14    # implementer/medium cards up to this score run on Silk
+SILK_MID_FROM = 7  # implementer cards from this score get the mid tier
+SILK_LABELS = {  # model id -> (What-to-expect label, digit-free cost-table rung)
+    "deepseek-v4.1-flash-1017-fast-uncensored": ("DeepSeek V4.1 Flash Fast (Silk)", "DeepSeek Flash Fast (Silk)"),
+    "deepseek-v4.1-flash-1017-uncensored": ("DeepSeek V4.1 Flash (Silk)", "DeepSeek Flash (Silk)"),
+    "kimi-k3.1-pro-uncensored": ("Kimi K3.1 Pro (Silk)", "Kimi Pro (Silk)"),
+}
+
 
 def norm(text):
     return " ".join(str(text or "").split())
@@ -62,7 +82,33 @@ def orchestrator_rung(orchestrator=None):
     return f"{MODEL_NAMES.get(o.get('model'), 'Opus')} {o.get('effort') or 'xhigh'}"
 
 
-def cost_rows(route, budget, reviewer=False, evidence=False, orchestrator=None):
+def silk_model(route, no_bs=False):
+    """The Silk Compute model that runs this card under --no-bs, or None.
+    Trusts the runner model the intake attached (external_worker.model_for's
+    pick) when there is one; else this file's table: mechanic, implementer up
+    to the GLM band and the intermediate band up to SILK_REACH (the same tiers
+    external_worker.takes moves). implementer/high and every rung above keep
+    their Claude rung."""
+    if not no_bs:
+        return None
+    runner = (route.get("runner") or {}).get("model")
+    if runner:
+        return runner
+    agent, effort = route.get("agent"), route.get("effort")
+    s = route.get("score")
+    if agent == "mechanic":
+        return SILK_MODELS["mechanic"]
+    if agent == "implementer" and effort != "high":
+        if s is None:
+            return SILK_MODELS["implementer"]  # external_worker.model_for does the same
+        if s < SILK_MID_FROM:
+            return SILK_MODELS["implementer"]
+        if s <= SILK_REACH:
+            return SILK_MODELS["implementer-mid"]
+    return None
+
+
+def cost_rows(route, budget, reviewer=False, evidence=False, orchestrator=None, no_bs=False):
     """[(agent, rung text, label, billing)] for the predicted plan. No numbers."""
     size = route.get("size", "S")
     glm = route.get("provider") == "glm"
@@ -76,7 +122,11 @@ def cost_rows(route, budget, reviewer=False, evidence=False, orchestrator=None):
     rank = _rank(model, effort, glm)
     if size == "L":
         rank = min(2, rank + 1)
-    rung = "GLM Flash" if glm else f"{MODEL_NAMES.get(model, str(model).title())} {effort}"
+    silk = silk_model(route, no_bs)
+    if silk:
+        rung = SILK_LABELS.get(silk, ("", "Silk Compute"))[1]
+    else:
+        rung = "GLM Flash" if glm else f"{MODEL_NAMES.get(model, str(model).title())} {effort}"
     rows.append((f"worker ({route.get('agent')})", rung, LABELS[rank], OPENROUTER if glm else CLAUDE))
     if int((budget or {}).get("workers", 1) or 1) > 1:
         rows.append(("integrator (only if two or more agents write code)", "Fable medium", LABELS[2], CLAUDE))
@@ -109,7 +159,8 @@ def _top_modules(files):
 def make_brief(data):
     """data: request, fields{name: value}, route, budget, candidate_files, test_command,
     secrets{names}, environments, open_decisions, decisions, switches, skills,
-    external{name, notes}, reviewer, assumed, orchestrator{model, effort}. Returns markdown."""
+    external{name, notes}, reviewer, assumed, orchestrator{model, effort},
+    no_bs (labels the cheap tiers with their Silk Compute models). Returns markdown."""
     fields = data.get("fields") or {}
     route = data.get("route") or router.route(fields)
     budget = data.get("budget") or intake.budget_for(route, fields)
@@ -157,11 +208,16 @@ def make_brief(data):
         if external.get("notes"):
             lines += _bullets(str(external["notes"]).strip().splitlines()[:8], "")
     lines.append("")
+    no_bs = bool(data.get("no_bs"))
+    silk = silk_model(route, no_bs)
     lines.append(cost_section(cost_rows(route, budget, bool(data.get("reviewer")), bool(external),
-                                        data.get("orchestrator"))))
+                                        data.get("orchestrator"), no_bs)))
     model = MODEL_NAMES.get(route.get("model"), route.get("model"))
-    rung = (f"GLM Flash worker (falls back to {model} {route.get('effort')} if the GLM tier is off)"
-            if route.get("provider") == "glm" else f"{model} {route.get('effort')} ({route.get('agent')})")
+    if silk:
+        rung = SILK_LABELS.get(silk, (f"{silk} (Silk)", ""))[0]
+    else:
+        rung = (f"GLM Flash worker (falls back to {model} {route.get('effort')} if the GLM tier is off)"
+                if route.get("provider") == "glm" else f"{model} {route.get('effort')} ({route.get('agent')})")
     test_cmd = data.get("test_command")
     lines += ["", "## What to expect", "",
               f"- Predicted rung: {rung}; size {route.get('size')}",
@@ -185,7 +241,7 @@ def _values(fields):
     return {k: (v.get("value") if isinstance(v, dict) else v) for k, v in (fields or {}).items()}
 
 
-def data_from(prop, conf, switches, evidence=None, external=None):
+def data_from(prop, conf, switches, evidence=None, external=None, no_bs=False):
     prop, conf = prop or {}, conf or {}
     if conf:
         fields = _values(conf.get("fields"))
@@ -213,6 +269,7 @@ def data_from(prop, conf, switches, evidence=None, external=None):
         "reviewer": bool((conf.get("codex") or {}).get("at_wrap")),
         "orchestrator": conf.get("orchestrator") or intake.session_budget.orchestrator(
             intake.state_root(prop.get("repo_root") or conf.get("repo_root"))),
+        "no_bs": bool(no_bs),
     }
     if external:
         data["external"] = {"name": external, "notes": evidence or ""}
@@ -279,12 +336,13 @@ def main(argv):
             sw = [s.strip().lstrip("-").replace("-", "_") for s in (opt("--switches", "") or "").split(",") if s.strip()]
             ev, ext = opt("--evidence"), opt("--external")
             skip_skills = "--no-skills" in rest
+            no_bs = "--no-bs" in rest  # per run only; never a saved setting or environment variable
             if not pp and not ip:
                 print("brief build needs --proposal and/or --intake", file=sys.stderr)
                 return 1
             evidence = Path(ev).read_text(encoding="utf-8", errors="replace") if ev else None
             prop, conf = (_load(pp) if pp else None), (_load(ip) if ip else None)
-            data = data_from(prop, conf, sw, evidence, ext)
+            data = data_from(prop, conf, sw, evidence, ext, no_bs)
             if not data.get("request"):
                 print("brief build: no request text in the proposal or intake", file=sys.stderr)
                 return 1

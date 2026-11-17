@@ -28,6 +28,12 @@ synonym for `glm`. Then run the check below.
 `--no-bs` is a per-run switch on `/feature-ladder:feature`, not a setting
 here: nothing in `providers.json` turns Silk on. A `"silk"` block there may
 adjust it (for example `{"silk": {"models": {"mechanic": "<id>"}}}`).
+`FEATURE_LADDER_NO_BS=1` in the environment does the same for one hand-started
+`external_worker.py run` / `check` (or a test) that has no active run; it is a
+manual aid, never written to a setting, and the feature command ignores it as a
+switch. The Silk key is looked up in the `SILK_API_KEY` environment variable,
+then `<repo>/.env` (git-ignored), then `~/.claude/feature-ladder/.env`, then
+Google Secret Manager.
 
 Show the result as a short table: provider, workers setting, preset, claude CLI found,
 key source (never the key), key valid / credits or balance remaining (`provider_key`), each

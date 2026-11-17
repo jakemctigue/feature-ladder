@@ -13,9 +13,11 @@ from pathlib import Path
 PLUGIN = Path(__file__).resolve().parents[1]
 ROUTER = PLUGIN / "skills" / "complexity-router" / "scripts"
 sys.path.insert(0, str(ROUTER))
+sys.path.insert(0, str(PLUGIN / "skills" / "orchestration-ladder" / "scripts"))
 
 import brief  # noqa: E402
 import route as router  # noqa: E402
+import external_worker  # noqa: E402
 
 REQUEST = "add  retry to the   upload client"
 
@@ -90,6 +92,54 @@ class Labels(unittest.TestCase):
         self.assertNotIn("integrator", one)
         self.assertNotIn("reviewer", one)
         self.assertNotIn("evidence", one)
+
+
+class SilkLabels(unittest.TestCase):
+    """--no-bs labels: what the external worker really runs (external_worker.SILK)."""
+
+    def test_brief_table_ids_match_external_worker_silk(self):
+        self.assertEqual(brief.SILK_MODELS,
+                         {t: external_worker.SILK["models"][t] for t in brief.SILK_MODELS})
+        self.assertEqual(brief.SILK_REACH, external_worker.SILK["reach"])
+        self.assertEqual(brief.SILK_MID_FROM, external_worker.SILK["mid_from"])
+
+    def test_no_bs_labels_by_tier(self):
+        mechanic = router.route(fields(files=1, loc=20))   # score 3, T0, provider glm
+        small = router.route(fields())                     # score 5, small T2, glm
+        mid = router.route(fields(persistence=True))       # score 7, intermediate band
+        high = router.route(fields(files=9, loc=400, modules=3, persistence=True, security=True))  # T3
+        self.assertEqual(brief.silk_model(mechanic, True), "deepseek-v4.1-flash-1017-fast-uncensored")
+        self.assertEqual(brief.silk_model(small, True), "deepseek-v4.1-flash-1017-uncensored")
+        self.assertEqual(brief.silk_model(mid, True), "kimi-k3.1-pro-uncensored")
+        self.assertIsNone(brief.silk_model(high, True))    # implementer/high keeps its Claude rung
+        self.assertIsNone(brief.silk_model(mid, False))    # without --no-bs nothing changes
+
+    def test_no_bs_uses_the_runner_model_the_intake_attached(self):
+        r = router.route(fields())
+        r["runner"] = {"kind": "external", "model": external_worker.SILK["models"]["implementer-mid"]}
+        self.assertEqual(brief.silk_model(r, True), "kimi-k3.1-pro-uncensored")
+        md = brief.make_brief(data(route=r, no_bs=True))
+        self.assertIn("Predicted rung: Kimi K3.1 Pro (Silk);", md)
+
+    def test_no_bs_changes_only_the_tier_labels(self):
+        r = router.route(fields(persistence=True))
+        plain = brief.make_brief(data(route=r)).splitlines()
+        silk = brief.make_brief(data(route=r, no_bs=True)).splitlines()
+        self.assertEqual(len(plain), len(silk))
+        changed = [(a, b) for a, b in zip(plain, silk) if a != b]
+        self.assertEqual(changed, [
+            ("| worker (implementer) | Sonnet medium | medium token cost | Claude plan |",
+             "| worker (implementer) | Kimi Pro (Silk) | medium token cost | Claude plan |"),
+            ("- Predicted rung: Sonnet medium (implementer); size S",
+             "- Predicted rung: Kimi K3.1 Pro (Silk); size S"),
+        ])
+
+    def test_no_bs_cost_section_stays_digit_free(self):
+        for f in (fields(files=1, loc=20), fields(), fields(persistence=True)):
+            md = brief.make_brief(data(fields=f, route=router.route(f), no_bs=True))
+            cost = sections(md)["2"]
+            self.assertIsNone(re.search(r"\d", cost), cost)
+            self.assertRegex(cost, r"(low|medium|high) token cost")
 
 
 class Brief(unittest.TestCase):
@@ -211,6 +261,15 @@ class Cli(unittest.TestCase):
         r = self.run_cli("build", "--proposal", str(bad), "--no-skills")
         self.assertEqual(r.returncode, 1)
         self.assertNotIn("Traceback", r.stderr)
+
+    def test_build_no_bs_labels_the_silk_tier(self):
+        r = self.run_cli("build", "--proposal", str(self.pp), "--no-skills", "--no-bs")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Predicted rung: DeepSeek V4.1 Flash (Silk);", r.stdout)  # fields() scores 5, glm
+        self.assertIn("DeepSeek Flash (Silk)", r.stdout)
+        plain = self.run_cli("build", "--proposal", str(self.pp), "--no-skills")
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.assertNotIn("Silk", plain.stdout)
 
 
 if __name__ == "__main__":

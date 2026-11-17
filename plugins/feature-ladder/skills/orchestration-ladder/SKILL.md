@@ -123,13 +123,18 @@ cheap tier to `typesafe/jev-router`; `claude` turns it off. Configuration:
 **`--no-bs` (Silk Compute).** Only a run started with `--no-bs` (the switch
 lands in `run.json`) moves the cheap tier to Silk Compute
 (`https://api.silkcompute.com`, key `SILK_API_KEY` from the environment, the
-repo's `.env` or Secret Manager), and only to models capable of each tier:
+repo's `.env`, `~/.claude/feature-ladder/.env` or Secret Manager), and only to models capable of each tier:
 mechanic -> DeepSeek V4.1 Flash 1017 Fast; implementer score <= 6 -> DeepSeek
 V4.1 Flash 1017; implementer/medium score 7-14 (the intermediate band, which
-`external_worker.takes` adds) -> Kimi K3.1 Pro. T3 and up stay on Claude. A
-model busy before doing any work (429/503) hands the card to its fallback once
-(Hy4, or GLM-5.3 Flash for the mechanic tier); both busy is exit 3 and the card
-runs on its Claude rung. Cost is the drop in `GET /v1/balance`.
+`external_worker.takes` adds) -> Kimi K3.1 Pro. T3 and up stay on Claude
+(`--rung implementer-high` has no Silk model: exit 3). A 429
+`concurrent_request_limit` is account-wide, so it first waits (5, 10, 15 s, or
+Retry-After up to 15 s) and retries the same model; a model still busy, or busy
+with 503 `under_capacity` / 429 `rate_limited`, before doing any work hands the
+card to its fallback once (Hy4, or GLM-5.3 Flash for the mechanic tier); both
+busy is exit 3 and the card runs on its Claude rung. A model that already
+answered (output tokens) is never retried. Cost is the approximate drop in
+`GET /v1/balance` (cards share one balance; unknown if it was topped up).
 
 ## Changes outside the repo: an audit log, not a gate
 

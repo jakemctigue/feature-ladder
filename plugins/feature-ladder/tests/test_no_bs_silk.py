@@ -7,7 +7,9 @@
   band (score 7-14); T3 and up stay on Claude.
 - The key comes from SILK_API_KEY, else the repo's .env; cost from /v1/balance.
 - A model that is busy before doing any work hands the card to its fallback once;
-  both busy means exit 3, so the card runs on its Claude rung.
+  both busy means exit 3, so the card runs on its Claude rung. An account-wide
+  concurrent_request_limit first retries the same model after a short wait.
+- T3 and up (implementer-high) have no Silk model; the cost is never negative.
 
 Run from the repo root:  python3 -m unittest discover -s plugins/feature-ladder/tests
 """
@@ -38,6 +40,7 @@ HY4 = "hy4-uncensored"
 CARD = "TASK T1: wire the map name\nScope: a.py\nDone when: pytest\n"
 GOOD = json.dumps({"type": "result", "num_turns": 3, "usage": {},
                    "result": "TASK T1 - done\nChanged: a.py\nRetained: none - n/a"})
+LIMIT = (1, "", 'API Error: 429 {"type":"error","error":{"type":"concurrent_request_limit","message":"8 in flight"}}')
 BUSY = (1, "", 'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"The model is busy right now."}}')
 
 
@@ -194,7 +197,11 @@ class Key(Temp):
 
 
 class Run(Temp):
-    def drive(self, children, args=None):
+    def setUp(self):
+        super().setUp()
+        self.waits = []
+
+    def drive(self, children, args=None, usage=None, key="k"):
         root = self.repo(switches=["no_bs"])
         card = root / "card.md"
         card.write_text(CARD, encoding="utf-8")
@@ -207,8 +214,9 @@ class Run(Temp):
 
         out = io.StringIO()
         with mock.patch.object(ew, "claude_bin", return_value="claude"), \
-                mock.patch.object(ew, "get_key", return_value=("k", "test")), \
-                mock.patch.object(ew, "usage_usd", return_value=None), \
+                mock.patch.object(ew, "get_key", return_value=(key, "test")), \
+                mock.patch.object(ew, "usage_usd", side_effect=usage or [None, None]), \
+                mock.patch.object(ew, "_sleep", side_effect=self.waits.append), \
                 mock.patch.object(ew, "_spawn", side_effect=fake_spawn, create=True), \
                 mock.patch.object(session_budget, "check", return_value=(True, "")), \
                 mock.patch.object(session_budget, "status", return_value={"left": 2, "max": 4}), \
@@ -243,6 +251,105 @@ class Run(Temp):
     def test_a_pinned_model_gets_no_fallback(self):
         code, seen, _, _ = self.drive([BUSY], {"--score": "9", "--model": KIMI})
         self.assertEqual((code, seen), (3, [KIMI]))
+
+    def test_a_concurrent_limit_retries_the_same_model_before_the_fallback(self):
+        code, seen, rec, _ = self.drive([LIMIT, LIMIT, (0, GOOD, "")], {"--score": "9"})
+        self.assertEqual((code, seen, self.waits), (0, [KIMI, KIMI, KIMI], [5, 10]))
+        self.assertEqual((rec["model"], rec["busy_models"]), (KIMI, []))
+
+    def test_a_still_busy_model_then_goes_down_the_chain_within_a_minute(self):
+        code, seen, rec, _ = self.drive([LIMIT] * 4 + [(0, GOOD, "")], {"--score": "9"})
+        self.assertEqual(seen, [KIMI] * 4 + [HY4])
+        self.assertEqual((code, rec["busy_models"]), (0, [KIMI]))
+        self.assertEqual(self.waits, [5, 10, 15])
+        self.assertLess(sum(self.waits), 60)
+
+    def test_retry_after_is_honoured_up_to_a_cap(self):
+        hint = (1, "", "API Error: 429 concurrent_request_limit retry-after: 7")
+        long = (1, "", "API Error: 429 concurrent_request_limit Retry-After: 300")
+        self.drive([hint, long, (0, GOOD, "")], {"--score": "9"})
+        self.assertEqual(self.waits, [7, ew.MAX_WAIT])
+
+    def test_under_capacity_falls_back_at_once(self):
+        cap = (1, "", 'API Error: 503 {"error":{"type":"under_capacity"}}')
+        code, seen, _, _ = self.drive([cap, (0, GOOD, "")], {"--score": "9"})
+        self.assertEqual((code, seen, self.waits), (0, [KIMI, HY4], []))
+
+    def test_a_plain_rate_limit_falls_back_at_once(self):
+        code, seen, _, _ = self.drive([BUSY, (0, GOOD, "")], {"--score": "9"})
+        self.assertEqual((code, seen, self.waits), (0, [KIMI, HY4], []))
+
+    def test_a_pinned_model_still_retries_a_concurrent_limit(self):
+        code, seen, _, _ = self.drive([LIMIT, (0, GOOD, "")], {"--score": "9", "--model": KIMI})
+        self.assertEqual((code, seen, self.waits), (0, [KIMI, KIMI], [5]))
+
+    def test_output_tokens_mean_work_was_done_so_nothing_is_retried(self):
+        worked = (1, json.dumps({"type": "result", "is_error": True, "num_turns": 1,
+                                 "usage": {"output_tokens": 40},
+                                 "result": "API Error: 429 concurrent_request_limit"}), "")
+        code, seen, _, _ = self.drive([worked], {"--score": "9"})
+        self.assertEqual((code, seen, self.waits), (1, [KIMI], []))
+
+    def test_implementer_high_has_no_silk_model_and_exits_3(self):
+        cfg = ew.load_config(str(self.repo(switches=["no_bs"])))
+        self.assertIsNone(ew.model_for(cfg, "implementer", "high", score=16))
+        self.assertNotIn("implementer-high", cfg["openrouter"]["models"])
+        out = io.StringIO()
+        root = self.repo(switches=["no_bs"])
+        card = root / "card.md"
+        card.write_text(CARD, encoding="utf-8")
+        with mock.patch.object(ew, "claude_bin", return_value="claude"), \
+                mock.patch.object(ew, "get_key", return_value=("k", "test")), \
+                mock.patch.object(ew, "_spawn", side_effect=AssertionError("must not spawn"), create=True), \
+                contextlib.redirect_stdout(out):
+            code = ew.run({"--card": str(card), "--id": "T1", "--cwd": str(root), "--rung": "implementer-high"})
+        self.assertEqual(code, 3)
+        self.assertIn("blocked", out.getvalue())
+
+    def test_openrouter_keeps_its_implementer_high_model(self):
+        cfg = ew.load_config(str(self.repo()))
+        self.assertEqual(ew.model_for(cfg, "implementer", "high"), "z-ai/glm-5.3")
+
+    def test_a_topped_up_balance_never_reports_a_negative_cost(self):
+        _, _, rec, out = self.drive([(0, GOOD, "")], {"--score": "9"}, usage=[-5.0, -25.0])  # balance 5 -> 25
+        self.assertIsNone(rec["openrouter_cost_usd"])
+        self.assertIn("cost unknown", out)
+
+    def test_a_balance_drop_is_printed_as_approximate(self):
+        _, _, rec, out = self.drive([(0, GOOD, "")], {"--score": "9"}, usage=[-20.0, -19.5])
+        self.assertEqual(rec["openrouter_cost_usd"], 0.5)
+        self.assertIn("about $0.5000", out)
+        self.assertIn("approximate", out)
+
+    def test_a_failed_balance_read_reports_unknown(self):
+        _, _, rec, out = self.drive([(0, GOOD, "")], {"--score": "9"}, usage=[-20.0, None])
+        self.assertIsNone(rec["openrouter_cost_usd"])
+        self.assertIn("cost unknown", out)
+
+    def test_the_key_never_reaches_the_packet_or_the_evidence_file(self):
+        key = "sk-silk-secret-1234567890"
+        leaky = (0, json.dumps({"type": "result", "num_turns": 3, "usage": {},
+                                "result": f"TASK T1 - done\nClaims: env says {key}\nRetained: none - n/a"}),
+                 f"warning {key}")
+        _, _, rec, out = self.drive([leaky], {"--score": "9"}, key=key)
+        self.assertNotIn(key, out)
+        self.assertNotIn(key, json.dumps(rec))
+
+
+class Docs(Temp):
+    def test_env_override_is_documented_as_a_manual_aid(self):
+        workers = (PLUGIN / "commands" / "workers.md").read_text(encoding="utf-8")
+        self.assertIn("FEATURE_LADDER_NO_BS", workers)
+
+    def test_dotenv_order_is_repo_then_home(self):
+        root = self.repo(switches=["no_bs"])
+        (root / ".env").write_text("SILK_API_KEY=sk-repo\n", encoding="utf-8")
+        home_env = Path.home() / ".claude" / "feature-ladder"
+        home_env.mkdir(parents=True)
+        (home_env / ".env").write_text("SILK_API_KEY=sk-home\n", encoding="utf-8")
+        self.assertEqual(ew.dotenv_value("SILK_API_KEY", str(root))[0], "sk-repo")
+        (root / ".env").unlink()
+        self.assertEqual(ew.dotenv_value("SILK_API_KEY", str(root))[0], "sk-home")
 
 
 if __name__ == "__main__":

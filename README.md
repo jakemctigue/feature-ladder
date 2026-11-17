@@ -551,12 +551,15 @@ Kimi 63.6, Hy4 39.4, GLM-5.3 38.9, DeepSeek 31.8):
 
 GLM-5.3 has no slot: Hy4 scores the same, costs less and also reads images.
 The fallback runs only when the first model turned the card away before doing
-any work (Silk's 429 `concurrent_request_limit` / `rate_limited`, 503
-`under_capacity`); when both are busy the card runs on its Claude rung. The key
-is `SILK_API_KEY` from the environment, the repo's `.env` (git-ignored), or
-Google Secret Manager; `/feature-ladder:workers check --no-bs --probe` shows
-the balance and probes every model. Cost per card is the drop in Silk's
-`/v1/balance`. A `"silk"` block in `providers.json` can change a tier's model.
+any work (Silk's 429 `rate_limited`, 503 `under_capacity`, or a 429
+`concurrent_request_limit` still there after waiting 5, 10 and 15 s: that limit
+covers the whole account, so the same model is retried first); when both are
+busy the card runs on its Claude rung. The key is `SILK_API_KEY` from the
+environment, the repo's `.env` (git-ignored), `~/.claude/feature-ladder/.env`, or
+Google Secret Manager, in that order; `/feature-ladder:workers check --no-bs --probe` shows
+the balance and probes every model. Cost per card is the approximate drop in Silk's
+`/v1/balance` (cards running together share one balance; a top-up mid-run makes
+it unknown). A `"silk"` block in `providers.json` can change a tier's model.
 
 The child process is Claude Code itself, so OpenRouter's documented Claude
 Code integration applies ([their cookbook](https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration.md)).

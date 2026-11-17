@@ -39,7 +39,9 @@ plan limit alone. Opus rungs and the Fable coordinator stay on Anthropic.
       everything it started are killed and a "partial" packet is printed.
 
       --score is the router's score; with --no-bs it picks the tier's model
-      (score 7 and up is the intermediate band, Kimi K3.1 Pro).
+      (score 7 and up is the intermediate band, Kimi K3.1 Pro). With --no-bs
+      `--rung implementer-high` has no Silk model (T3 and up stay on Claude):
+      exit 3, run the card as a subagent.
 
   external_worker.py config [--no-bs]
       Prints the merged configuration (never the key).
@@ -50,7 +52,9 @@ Configuration, merged in this order (later wins):
   built-in defaults
   ~/.claude/feature-ladder/providers.json
   <repo>/.feature-ladder/providers.json
-  --no-bs on the active run (run.json switches) or FEATURE_LADDER_NO_BS=1:
+  --no-bs on the active run (run.json switches), or FEATURE_LADDER_NO_BS=1 as
+      a manual-run aid (a hand-started `run`/`check` with no run.json, or a test;
+      set it per command, nothing here ever saves it):
       the cheap tier moves to Silk Compute (SILK below, adjusted by a "silk"
       block in providers.json). Never a saved default: only runs started with
       /feature-ladder:feature ... --no-bs use it.
@@ -58,6 +62,7 @@ Configuration, merged in this order (later wins):
 
 The key: the key_env variable, else that name in <repo>/.env, else in
 ~/.claude/feature-ladder/.env, else the key_secret in Google Secret Manager.
+Whatever the child printed is shown and saved with the key masked ("***").
 
   {
     "workers": "auto",                           # default: GLM-tier cards run here when the
@@ -136,7 +141,9 @@ PRESETS = {
 #   implementer/medium, 7-14      Kimi K3.1 Pro                  the strongest; the intermediate band
 #   implementer/high, T3 and up   stay on Claude (the router's rung)
 # "fallbacks" take a card whose model was busy (429/503) before it did any work;
-# if that one is busy too, the card runs on its Claude rung. GLM-5.3 has no slot:
+# if that one is busy too, the card runs on its Claude rung. A 429
+# concurrent_request_limit is account-wide (8 per account), so it first waits and
+# retries the SAME model (BUSY_WAITS) before the fallback. GLM-5.3 has no slot:
 # Hy4 scores the same, costs less and also reads images (GLM-5.3 is text only).
 SILK = {
     "name": "Silk Compute",
@@ -154,7 +161,7 @@ SILK = {
         "mechanic": "deepseek-v4.1-flash-1017-fast-uncensored",
         "implementer": "deepseek-v4.1-flash-1017-uncensored",
         "implementer-mid": "kimi-k3.1-pro-uncensored",
-        "implementer-high": "kimi-k3.1-pro-uncensored",  # only for an explicit --rung implementer-high
+        # no "implementer-high": T3 and up stay on Claude (model_for returns None)
     },
     "fallbacks": {
         "deepseek-v4.1-flash-1017-fast-uncensored": "glm-5.3-flash-uncensored",
@@ -177,6 +184,20 @@ UNAVAILABLE = re.compile(r"\b(401|402|403)\b|no auth credentials|invalid (x-)?ap
 # the model's fallback, or to its Claude rung.
 BUSY = re.compile(r"\b(429|503|529)\b|under[_ ]capacity|concurrent[_ ]request[_ ]limit|rate[_ ]limit|"
                   r"model is busy|overloaded", re.I)
+# Account-wide: another model would hit the same limit, so wait and retry the same one first.
+CONCURRENT = re.compile(r"concurrent[_ ]request[_ ]limit", re.I)
+RETRY_AFTER = re.compile(r"retry[-_ ]after\D{0,4}(\d+)", re.I)
+BUSY_WAITS = (5, 10, 15)  # seconds before each same-model retry: 30 s in all at most
+MAX_WAIT = 15             # a Retry-After hint is honoured up to this many seconds
+
+
+def _sleep(seconds):
+    time.sleep(seconds)  # patched in tests
+
+
+def redact(text, key):
+    """`text` with the key masked: the child can read its own environment."""
+    return str(text or "").replace(key, "***") if key and len(key) >= 8 else str(text or "")
 
 
 def now():
@@ -255,6 +276,8 @@ def model_for(cfg, rung, effort=None, override=None, score=None):
         key = "implementer-high"
     elif rung == "implementer" and "implementer-mid" in models and s is not None and s >= int(p.get("mid_from") or 7):
         key = "implementer-mid"
+    if key == "implementer-high" and key not in models and cfg.get("no_bs"):
+        return None  # Silk has no model for T3 and up: they stay on Claude
     return models.get(key) or models.get("implementer")
 
 
@@ -589,8 +612,23 @@ def busy_before_work(child_exit, stdout, stderr):
         turns = int(res.get("num_turns") or 0)
     except (TypeError, ValueError):
         turns = 0
+    try:
+        out_tokens = int((res.get("usage") or {}).get("output_tokens") or 0)
+    except (TypeError, ValueError, AttributeError):
+        out_tokens = 0
     failed = child_exit != 0 or bool(res.get("is_error"))
-    return failed and turns <= 1 and bool(BUSY.search(f"{said}\n{stderr}"))
+    # Output tokens mean the model answered, maybe with an edit: never retry that elsewhere.
+    return failed and turns <= 1 and out_tokens == 0 and bool(BUSY.search(f"{said}\n{stderr}"))
+
+
+def retry_wait(stdout, stderr, n):
+    """Seconds to wait before same-model retry number n (0-based) after a 429
+    concurrent_request_limit, or None: not that error, or the tries are used up."""
+    text = f"{stdout}\n{stderr}"
+    if n >= len(BUSY_WAITS) or not CONCURRENT.search(text):
+        return None
+    m = RETRY_AFTER.search(text)
+    return min(int(m.group(1)), MAX_WAIT) if m else BUSY_WAITS[n]
 
 
 def parse_result(stdout):
@@ -700,6 +738,11 @@ def run(args):
         print(f"external_worker: no {pname} key ({source})", file=sys.stderr)
         return 3
     model = model_for(cfg, rung, effort, args.get("--model"), args.get("--score"))
+    if not model:
+        print(f"TASK {task_id} - blocked\nChanged: none\nChecks run: none\n"
+              f"Claims: {pname} has no model for {rung}{'-high' if effort else ''} cards: run it on its Claude rung\n"
+              "Risks: none\nMemory candidates: none\nRetained: none - unavailable")
+        return 3
     try:
         timeout = _int_arg(args, "--timeout", cfg["openrouter"]["timeout"])
         max_turns = _int_arg(args, "--max-turns", cfg["openrouter"]["max_turns"])
@@ -749,10 +792,20 @@ def run(args):
             pass
         for i, m in enumerate(attempts):
             used = m
-            try:
-                child_exit, stdout, stderr = _spawn(cmd, cwd, child_env(cfg, key, m), card, timeout)
-            except OSError as e:
-                child_exit, stdout, stderr = 127, "", f"could not start {exe}: {e}"
+            tries = 0
+            while True:
+                try:
+                    child_exit, stdout, stderr = _spawn(cmd, cwd, child_env(cfg, key, m), card, timeout)
+                except OSError as e:
+                    child_exit, stdout, stderr = 127, "", f"could not start {exe}: {e}"
+                stdout, stderr = redact(stdout, key), redact(stderr, key)
+                if not busy_before_work(child_exit, stdout, stderr):
+                    break
+                wait = retry_wait(stdout, stderr, tries)
+                if wait is None:
+                    break
+                tries += 1
+                _sleep(wait)  # account-wide limit: the same model, a moment later
             if not busy_before_work(child_exit, stdout, stderr):
                 break
             busy_models.append(m)
@@ -794,6 +847,8 @@ def run(args):
         packet += "\nRetained: none - external worker did not report"
     usage_after = usage_usd(cfg, key)
     charged = (round(usage_after - usage_before, 4) if usage_before is not None and usage_after is not None else None)
+    if charged is not None and charged < 0:
+        charged = None  # the balance was topped up meanwhile: the cost is unknown, never negative
     if charged is not None and (shared or _others_ran(root, safe, t0, timeout + 120)):
         result["openrouter_cost_shared"] = True
     result["openrouter_cost_usd"] = charged  # what OpenRouter billed; total_cost_usd is Claude Code's Anthropic-price guess
@@ -821,7 +876,10 @@ def run(args):
     u = result.get("usage") or {}
     toks = int(u.get("input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0)
     if charged is None:
-        cost_txt = "cost not available"
+        cost_txt = "cost unknown"
+    elif cfg["openrouter"].get("meter") == "balance":
+        cost_txt = (f"{pname} balance dropped about ${charged:.4f} (approximate: every card on the account "
+                    "shares one balance)")
     elif result.get("openrouter_cost_shared"):
         cost_txt = f"{pname} charged ${charged:.4f} on this key meanwhile (other external cards ran too: their spend is in it)"
     else:

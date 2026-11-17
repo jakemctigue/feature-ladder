@@ -56,7 +56,9 @@ Otherwise dispatch nothing else.
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/brief.py" build --proposal .feature-ladder/intake/<slug>-proposal.json [--external "<name>" --evidence .feature-ladder/intake/<slug>-evidence.md]
 ```
-It writes `.feature-ladder/intake/<slug>-brief.md` and prints it. Show the brief
+It writes `.feature-ladder/intake/<slug>-brief.md` and prints it. Pass `--no-bs`
+before `build`'s other flags when the run has it, so the brief labels the cheap
+tiers with the Silk Compute models the runner will use. Show the brief
 as printed, then add this line: "To build it, run `/feature-ladder:feature
 <the same request>` (add `--researcher` to see the brief first); the saved
 brief and proposal are reused, and the Ask step is yours."
