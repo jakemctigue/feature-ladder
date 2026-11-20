@@ -209,16 +209,16 @@ secrets the feature reads (names only). A command that needs one is run as
 which fetches the value with the user's gcloud sign-in and masks it in the
 output. Never print, echo, log, commit or quote a secret value.
 
-**The GLM tier.** When the route's `provider` is `glm` and `runner.kind` is
-`external` (the Claude CLI and an OpenRouter key are present on this
-machine), write the Task Card to `runner.card_file` and run `runner.command`
+**The GLM tier.** When the route's `runner.kind` is `external` (the route's
+`provider` is `glm` and the Claude CLI and an OpenRouter key are present on
+this machine, or a `--no-bs` card below, whatever its `provider`), write the Task Card to `runner.card_file` and run `runner.command`
 in the shell instead of starting a subagent: it launches a child `claude -p`
 on GLM 5.3 Flash through OpenRouter (key from Google Secret Manager or
 `OPENROUTER_API_KEY`), checks the session budget itself, and prints the
 Evidence Packet. Exit 3: OpenRouter unavailable, start the routed Claude
 subagent instead. Exit 4: the session budget is spent. Otherwise
 (`runner.kind` `subagent`) start the routed Claude subagent; the runner's
-`note` says why GLM was not used. `{"openrouter": {"preset": "jev"}}` in
+`note` says why the cheap tier was not used. `{"openrouter": {"preset": "jev"}}` in
 `~/.claude/feature-ladder/providers.json` sends these cards to
 `typesafe/jev-router` instead.
 
@@ -234,7 +234,8 @@ of section 2, and build each of that feature's cards with
 `python3 .feature-ladder/v1.18.0/complexity-router/scripts/intake.py card --no-bs '<task json>'`.
 This app has no hooks and often no `run.json`, so the flag is what carries the
 switch: the route's `runner` names the Silk model and its `command` already
-ends in `--no-bs`. Run that command as printed, exactly like a GLM card. A
+ends in `--no-bs`. Run that command as printed, exactly like a GLM card, also
+for a 7-14 card whose `provider` still says `claude` (`runner.kind` decides). A
 model that is busy before doing any work hands the card to its fallback once
 (Hy4, or GLM-5.3 Flash for mechanic cards). Exit 3 (no key, or the model and
 its fallback both busy): start the routed Claude subagent instead. The key is

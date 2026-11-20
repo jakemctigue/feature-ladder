@@ -409,6 +409,12 @@ class Docs(Temp):
         self.assertIn("check --no-bs", app)
         self.assertNotIn("export FEATURE_LADDER_NO_BS", app)  # per card, never for the session
 
+    def test_the_app_dispatches_by_runner_kind_not_provider(self):
+        # A --no-bs card scoring 7-14 keeps provider "claude" but runs external on Kimi.
+        app = (PLUGIN.parents[1] / "claude-app" / "model-ladder-router" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertNotIn("When the route's `provider` is `glm` and `runner.kind`", app)
+        self.assertIn("When the route's `runner.kind` is `external`", app)
+
     def test_dotenv_order_is_repo_then_home(self):
         root = self.repo(switches=["no_bs"])
         (root / ".env").write_text("SILK_API_KEY=sk-repo\n", encoding="utf-8")

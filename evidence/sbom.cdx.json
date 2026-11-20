@@ -105,7 +105,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "80ab507ef5893b9c9598f1e821fb87f4e1e4047ddfb5c4f2657ae9e1cd8e0f9f"
+          "content": "798ef3c0a57d05d3848ba922377ca074316980d2016139ff627feeb4800536a2"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/brief.py",

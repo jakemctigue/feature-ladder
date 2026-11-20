@@ -10,9 +10,11 @@ and what to expect, written next to the intake as
          Builds the brief from the scoper's proposal and/or a confirmed intake,
          writes it and prints it. With only a proposal, the router runs on the
          proposal's values with ambiguity=1 and blast_radius=1 assumed. No
-         confirmed intake is created. With --no-bs the cheap-tier labels say
-         which Silk Compute model external_worker.py really runs under a
-         --no-bs run (a per-run flag, never a saved setting).
+         confirmed intake is created. With --no-bs (or no-bs among
+         --switches, or no_bs in the confirmed intake's switches) the
+         cheap-tier labels say which Silk Compute model external_worker.py
+         really runs under a --no-bs run (a per-run switch, never a saved
+         setting).
   find   "<request>" [--cwd DIR]
          Prints the path of the saved brief whose request text matches (same
          normalisation as intake.py find), then the matching proposal path if
@@ -243,6 +245,7 @@ def _values(fields):
 
 def data_from(prop, conf, switches, evidence=None, external=None, no_bs=False):
     prop, conf = prop or {}, conf or {}
+    no_bs = no_bs or "no_bs" in (conf.get("switches") or [])  # the confirmed run asked for Silk
     if conf:
         fields = _values(conf.get("fields"))
         # An intake saved by hand or by an older version may lack the route or the budget.
@@ -336,7 +339,9 @@ def main(argv):
             sw = [s.strip().lstrip("-").replace("-", "_") for s in (opt("--switches", "") or "").split(",") if s.strip()]
             ev, ext = opt("--evidence"), opt("--external")
             skip_skills = "--no-skills" in rest
-            no_bs = "--no-bs" in rest  # per run only; never a saved setting or environment variable
+            # Per run only (the flag, this run's --switches, or this run's confirmed
+            # intake); never a saved setting or environment variable.
+            no_bs = "--no-bs" in rest or "no_bs" in sw
             if not pp and not ip:
                 print("brief build needs --proposal and/or --intake", file=sys.stderr)
                 return 1

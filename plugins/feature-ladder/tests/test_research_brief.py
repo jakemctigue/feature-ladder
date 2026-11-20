@@ -271,6 +271,23 @@ class Cli(unittest.TestCase):
         self.assertEqual(plain.returncode, 0, plain.stderr)
         self.assertNotIn("Silk", plain.stdout)
 
+    def test_build_no_bs_among_the_switches_labels_the_silk_tier(self):
+        # /feature-ladder:feature ... --researcher --no-bs passes it in --switches (step 3b).
+        r = self.run_cli("build", "--proposal", str(self.pp), "--no-skills", "--switches", "researcher,no-bs")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Predicted rung: DeepSeek V4.1 Flash (Silk);", r.stdout)
+
+    def test_a_confirmed_no_bs_intake_labels_the_silk_tier(self):
+        prop = json.loads(self.pp.read_text(encoding="utf-8"))
+        conf = dict(prop, fields={k: (v.get("value") if isinstance(v, dict) else v)
+                                  for k, v in (prop.get("fields") or {}).items()},
+                    switches=["no_bs"])
+        ip = self.root / "intake.json"
+        ip.write_text(json.dumps(conf), encoding="utf-8")
+        r = self.run_cli("build", "--proposal", str(self.pp), "--intake", str(ip), "--no-skills")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("(Silk)", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
