@@ -9,6 +9,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN / "skills" / "orchestration-ladder" / "scripts"))
@@ -72,6 +73,32 @@ class JsonState(unittest.TestCase):
         ladder_state.write_json(p, {"a": [1, 2]})
         self.assertEqual(json.loads(p.read_text(encoding="utf-8")), {"a": [1, 2]})
         self.assertEqual([f.name for f in p.parent.iterdir()], ["s.json"])
+
+    def test_a_read_during_a_windows_replace_is_retried_not_missing(self):
+        f = Path(self.tmp.name) / "run.json"
+        ladder_state.write_json(f, {"active": True})
+        real = Path.read_text
+        calls = []
+
+        def flaky(path, *a, **kw):
+            calls.append(path)
+            if len(calls) < 3:
+                raise PermissionError(13, "The process cannot access the file")
+            return real(path, *a, **kw)
+
+        with mock.patch.object(ladder_state, "WINDOWS", True), \
+                mock.patch.object(ladder_state.time, "sleep"), \
+                mock.patch.object(Path, "read_text", flaky):
+            self.assertEqual(ladder_state.read_json(f), {"active": True})
+        self.assertEqual(len(calls), 3)
+
+    def test_a_lasting_permission_error_still_reads_as_the_default(self):
+        f = Path(self.tmp.name) / "run.json"
+        ladder_state.write_json(f, {"active": True})
+        with mock.patch.object(ladder_state, "WINDOWS", True), \
+                mock.patch.object(ladder_state.time, "sleep"), \
+                mock.patch.object(Path, "read_text", side_effect=PermissionError(13, "denied")):
+            self.assertEqual(ladder_state.read_json(f, default="d"), "d")
 
     def test_bom_is_tolerated(self):
         p = self.dir / "s.json"
