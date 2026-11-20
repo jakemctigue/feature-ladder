@@ -39,13 +39,16 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           runs on; the answers' "orchestrator": "fable" | "opus" (the
           --orchestrator switch) does the same for this run without asking.
 
-  card    '<task json>'
+  card    [--no-bs] '<task json>'
           Route one task AND select its skills in one call. The JSON takes
           the router fields plus "id" (task id), "paths" (files in scope),
           "text" (goal and description), optional "add"/"exclude" skill names.
           Prints the route JSON, a blank line, then the short "## Skills for
           this task" block to paste into the Task Card; the skill text itself
           goes to .feature-ladder/cards/<id>-skills.md for the worker to read.
+          --no-bs routes the cheap tier to Silk Compute for this card even with
+          no active run.json (the Claude app); the runner command it prints
+          then carries --no-bs too, so the worker runs on the same model.
 
   find    "<request>" [--cwd DIR] [--mark]
           Prints the path of a confirmed, not-yet-used intake for exactly this
@@ -1011,12 +1014,15 @@ def skill_flags(task):
     return {k: True for k in FLAG_NAMES if router._flag(task.get(k))}
 
 
-def runner_command(worker_script, card_file, tid, agent, score=None):
+def runner_command(worker_script, card_file, tid, agent, score=None, no_bs=False):
     """The external-worker command, on the interpreter that is running now
     (`python3` is missing or a Store stub on stock Windows). The score picks the
-    tier's model under --no-bs (the intermediate band goes to Kimi K3.1 Pro)."""
+    tier's model under --no-bs (the intermediate band goes to Kimi K3.1 Pro);
+    no_bs puts --no-bs on the command, so the worker does not depend on a
+    run.json to stay on Silk Compute (the Claude app often has none)."""
     cmd = f'"{sys.executable}" "{worker_script}" run --card "{card_file}" --id {tid} --rung {agent}'
-    return cmd + (f" --score {int(score)}" if isinstance(score, (int, float)) else "")
+    cmd += f" --score {int(score)}" if isinstance(score, (int, float)) else ""
+    return cmd + (" --no-bs" if no_bs else "")
 
 
 def _load(path):
@@ -1066,6 +1072,8 @@ def main(argv):
         if cmd == "card":
             # Route one task and pick its skills in a single call: prints the
             # router result, then the ready-to-paste skills block.
+            no_bs = "--no-bs" in rest  # per card; never saved (the app has no run.json to carry it)
+            rest = [a for a in rest if a != "--no-bs"]
             task = json.loads(" ".join(rest))
             if not isinstance(task, dict):
                 raise ValueError("the task must be a JSON object")
@@ -1082,7 +1090,7 @@ def main(argv):
             # also takes the intermediate T2 band (Kimi K3.1 Pro).
             try:
                 import external_worker as ew
-                cfg = ew.load_config(str(root))
+                cfg = ew.load_config(str(root), no_bs=True if no_bs else None)
                 takes = ew.takes(cfg, r)
                 tier = "Silk Compute (--no-bs)" if cfg.get("no_bs") else "GLM tier"
                 ready, why = ew.available(cfg, str(root)) if takes else (False, "")
@@ -1092,7 +1100,7 @@ def main(argv):
                                    "model": ew.model_for(cfg, r["agent"], r.get("effort"), score=r.get("score")),
                                    "card_file": str(card_file),
                                    "command": runner_command(ew.HERE / "external_worker.py", card_file, tid,
-                                                             r["agent"], r.get("score"))}
+                                                             r["agent"], r.get("score"), bool(cfg.get("no_bs")))}
                     fb = ew.fallback_for(cfg, r["runner"]["model"])
                     if fb:
                         r["runner"]["fallback"] = fb

@@ -160,6 +160,61 @@ class Tiers(Temp):
         cmd = intake.runner_command(Path("x") / "external_worker.py", Path("c") / "T1.md", "T1", "implementer", 9)
         self.assertTrue(cmd.endswith("--rung implementer --score 9"), cmd)
 
+    def test_runner_command_carries_no_bs_when_asked(self):
+        cmd = intake.runner_command(Path("x") / "external_worker.py", Path("c") / "T1.md", "T1", "implementer", 9,
+                                    no_bs=True)
+        self.assertTrue(cmd.endswith("--rung implementer --score 9 --no-bs"), cmd)
+
+
+class AppCard(Temp):
+    """The Claude app module: no hooks and often no run.json, so --no-bs rides on
+    `intake.py card --no-bs` and on the runner command that card prints."""
+    TASK = {"id": "T1", "kind": "code", "files": 6, "loc": 400, "modules": 2, "public_api": True,
+            "paths": ["a.py"], "text": "wire the map name"}  # implementer/medium, score 7
+
+    def card(self, root, *flags):
+        out = io.StringIO()
+        cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            with mock.patch.object(ew, "claude_bin", return_value="claude"), \
+                    mock.patch.dict(os.environ, {"SILK_API_KEY": "sk-test-key"}), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                code = intake.main(["card", *flags, json.dumps(self.TASK)])
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(code, 0)
+        return json.loads(out.getvalue().partition("\n\n")[0])
+
+    def bare_repo(self):
+        root = self.tmpdir()
+        (root / ".git").mkdir()
+        return root
+
+    def test_card_no_bs_routes_to_silk_without_a_run_file(self):
+        r = self.card(self.bare_repo(), "--no-bs")
+        self.assertEqual((r["agent"], r["effort"], r["score"]), ("implementer", "medium", 7))
+        runner = r["runner"]
+        self.assertEqual((runner["kind"], runner["provider"], runner["model"]), ("external", "silk", KIMI))
+        self.assertEqual(runner["fallback"], HY4)
+        self.assertTrue(runner["command"].endswith("--score 7 --no-bs"), runner["command"])
+
+    def test_card_without_the_flag_stays_off_silk(self):
+        r = self.card(self.bare_repo())
+        self.assertNotEqual(r["runner"].get("provider"), "silk")
+        self.assertNotIn("--no-bs", r["runner"].get("command", ""))
+
+    def test_a_no_bs_run_file_puts_the_flag_on_the_command_too(self):
+        r = self.card(self.repo(switches=["no_bs"]))
+        self.assertEqual(r["runner"]["model"], KIMI)
+        self.assertTrue(r["runner"]["command"].endswith("--no-bs"), r["runner"]["command"])
+
+    def test_run_accepts_no_bs(self):
+        args = ew.parse(["--card", "c.md", "--id", "T1", "--no-bs", "--score", "7"])
+        self.assertIs(args["--no-bs"], True)
+        self.assertEqual(args["--score"], "7")
+        self.assertFalse(set(args) - ew.RUN_FLAGS)
+
 
 class Intake(Temp):
     def test_apply_keeps_the_no_bs_switch_for_the_run(self):
@@ -201,8 +256,8 @@ class Run(Temp):
         super().setUp()
         self.waits = []
 
-    def drive(self, children, args=None, usage=None, key="k"):
-        root = self.repo(switches=["no_bs"])
+    def drive(self, children, args=None, usage=None, key="k", switches=("no_bs",)):
+        root = self.repo(switches=list(switches))
         card = root / "card.md"
         card.write_text(CARD, encoding="utf-8")
         seen = []
@@ -231,6 +286,11 @@ class Run(Temp):
         self.assertEqual((code, seen), (0, [KIMI]))
         self.assertEqual((rec["model"], rec["provider"], rec["no_bs"]), (KIMI, "Silk Compute", True))
         self.assertIn(f"{KIMI} via Silk Compute", out)
+
+    def test_the_run_flag_moves_a_card_to_silk_without_a_run_switch(self):
+        code, seen, rec, _ = self.drive([(0, GOOD, "")], {"--score": "9", "--no-bs": True}, switches=())
+        self.assertEqual((code, seen), (0, [KIMI]))
+        self.assertEqual((rec["provider"], rec["no_bs"]), ("Silk Compute", True))
 
     def test_a_busy_model_hands_the_card_to_its_fallback(self):
         code, seen, rec, out = self.drive([BUSY, (0, GOOD, "")], {"--score": "9"})
@@ -340,6 +400,14 @@ class Docs(Temp):
     def test_env_override_is_documented_as_a_manual_aid(self):
         workers = (PLUGIN / "commands" / "workers.md").read_text(encoding="utf-8")
         self.assertIn("FEATURE_LADDER_NO_BS", workers)
+
+    def test_the_claude_app_module_has_the_switch(self):
+        app = (PLUGIN.parents[1] / "claude-app" / "model-ladder-router" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("intake.py card --no-bs", app)
+        self.assertIn('"switches": ["no_bs"]', app)
+        self.assertIn("SILK_API_KEY", app)
+        self.assertIn("check --no-bs", app)
+        self.assertNotIn("export FEATURE_LADDER_NO_BS", app)  # per card, never for the session
 
     def test_dotenv_order_is_repo_then_home(self):
         root = self.repo(switches=["no_bs"])

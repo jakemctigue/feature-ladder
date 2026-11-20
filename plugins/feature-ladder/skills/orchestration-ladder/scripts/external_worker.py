@@ -16,6 +16,7 @@ plan limit alone. Opus rungs and the Fable coordinator stay on Anthropic.
 
   external_worker.py run --card FILE --id T1 [--rung implementer|implementer-high|mechanic]
                          [--model ID] [--cwd DIR] [--timeout S] [--max-turns N] [--score N]
+                         [--no-bs]
       Runs the card. A card without a Memory: line gets one from the feature's
       saved recall.json (the file confidence.py scores), and every card gets a
       Bounds: line (turns, time, session budget) and the output contract inline.
@@ -43,6 +44,9 @@ plan limit alone. Opus rungs and the Fable coordinator stay on Anthropic.
       `--rung implementer-high` has no Silk model (T3 and up stay on Claude):
       exit 3, run the card as a subagent.
 
+      --no-bs runs this card on Silk Compute without an active run.json (the
+      Claude app, where `intake.py card --no-bs` prints it on the command).
+
   external_worker.py config [--no-bs]
       Prints the merged configuration (never the key).
 
@@ -52,12 +56,14 @@ Configuration, merged in this order (later wins):
   built-in defaults
   ~/.claude/feature-ladder/providers.json
   <repo>/.feature-ladder/providers.json
-  --no-bs on the active run (run.json switches), or FEATURE_LADDER_NO_BS=1 as
+  --no-bs on the active run (run.json switches), --no-bs on this `run` /
+      `check` / `config` command, or FEATURE_LADDER_NO_BS=1 as
       a manual-run aid (a hand-started `run`/`check` with no run.json, or a test;
       set it per command, nothing here ever saves it):
       the cheap tier moves to Silk Compute (SILK below, adjusted by a "silk"
       block in providers.json). Never a saved default: only runs started with
-      /feature-ladder:feature ... --no-bs use it.
+      /feature-ladder:feature ... --no-bs, and Claude app features the user
+      asked to run with --no-bs, use it.
   env FEATURE_LADDER_WORKERS=openrouter|claude, FEATURE_LADDER_WORKER_MODEL=<id>
 
 The key: the key_env variable, else that name in <repo>/.env, else in
@@ -716,7 +722,7 @@ def _int_arg(args, name, default):
 
 def run(args):
     cwd = args.get("--cwd") or os.getcwd()
-    cfg = load_config(cwd)
+    cfg = load_config(cwd, no_bs=True if args.get("--no-bs") else None)
     card_path = args.get("--card")
     task_id = args.get("--id") or "task"
     rung = (args.get("--rung") or "implementer").lower()
@@ -914,7 +920,7 @@ def check(args):
     return 0 if ok else 3
 
 
-RUN_FLAGS = {"--card", "--id", "--rung", "--model", "--cwd", "--timeout", "--max-turns", "--score"}
+RUN_FLAGS = {"--card", "--id", "--rung", "--model", "--cwd", "--timeout", "--max-turns", "--score", "--no-bs"}
 
 
 def parse(argv):
