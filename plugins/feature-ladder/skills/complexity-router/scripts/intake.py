@@ -39,13 +39,16 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           runs on; the answers' "orchestrator": "fable" | "opus" (the
           --orchestrator switch) does the same for this run without asking.
 
-  card    '<task json>'
+  card    [--no-bs] '<task json>'
           Route one task AND select its skills in one call. The JSON takes
           the router fields plus "id" (task id), "paths" (files in scope),
           "text" (goal and description), optional "add"/"exclude" skill names.
           Prints the route JSON, a blank line, then the short "## Skills for
           this task" block to paste into the Task Card; the skill text itself
           goes to .feature-ladder/cards/<id>-skills.md for the worker to read.
+          --no-bs routes the cheap tier to Silk Compute for this card even with
+          no active run.json (the Claude app); the runner command it prints
+          then carries --no-bs too, so the worker runs on the same model.
 
   find    "<request>" [--cwd DIR] [--mark]
           Prints the path of a confirmed, not-yet-used intake for exactly this
@@ -887,7 +890,7 @@ def apply(prop, answers):
     if agents_left is None:
         agents_left = session_status(prop.get("repo_root")).get("left")
     switches = sorted({str(x).strip().lstrip("-").replace("-", "_") for x in answers.get("switches") or []}
-                      & {"second_opinion", "escalate", "ultra"})
+                      & {"second_opinion", "escalate", "ultra", "no_bs"})
     # The --orchestrator switch wins for this run; then the up-front answer;
     # then what the session already holds; then Opus xhigh. Never Fable unasked.
     orch_pick = answers.get("orchestrator")
@@ -1011,10 +1014,15 @@ def skill_flags(task):
     return {k: True for k in FLAG_NAMES if router._flag(task.get(k))}
 
 
-def runner_command(worker_script, card_file, tid, agent):
+def runner_command(worker_script, card_file, tid, agent, score=None, no_bs=False):
     """The external-worker command, on the interpreter that is running now
-    (`python3` is missing or a Store stub on stock Windows)."""
-    return f'"{sys.executable}" "{worker_script}" run --card "{card_file}" --id {tid} --rung {agent}'
+    (`python3` is missing or a Store stub on stock Windows). The score picks the
+    tier's model under --no-bs (the intermediate band goes to Kimi K3.1 Pro);
+    no_bs puts --no-bs on the command, so the worker does not depend on a
+    run.json to stay on Silk Compute (the Claude app often has none)."""
+    cmd = f'"{sys.executable}" "{worker_script}" run --card "{card_file}" --id {tid} --rung {agent}'
+    cmd += f" --score {int(score)}" if isinstance(score, (int, float)) else ""
+    return cmd + (" --no-bs" if no_bs else "")
 
 
 def _load(path):
@@ -1064,6 +1072,8 @@ def main(argv):
         if cmd == "card":
             # Route one task and pick its skills in a single call: prints the
             # router result, then the ready-to-paste skills block.
+            no_bs = "--no-bs" in rest  # per card; never saved (the app has no run.json to carry it)
+            rest = [a for a in rest if a != "--no-bs"]
             task = json.loads(" ".join(rest))
             if not isinstance(task, dict):
                 raise ValueError("the task must be a JSON object")
@@ -1076,21 +1086,29 @@ def main(argv):
             # The GLM tier: T0 and small T2 run on GLM 5.3 Flash through
             # OpenRouter whenever it is set up (workers "auto", the default, or
             # "openrouter"); otherwise on the Claude rung the router named.
+            # A run started with --no-bs moves the tier to Silk Compute, which
+            # also takes the intermediate T2 band (Kimi K3.1 Pro).
             try:
                 import external_worker as ew
-                cfg = ew.load_config(str(root))
-                ready, why = ew.available(cfg) if r.get("provider") == "glm" else (False, "")
-                if r.get("provider") == "glm" and cfg.get("workers") in ("auto", "openrouter") and ready:
+                cfg = ew.load_config(str(root), no_bs=True if no_bs else None)
+                takes = ew.takes(cfg, r)
+                tier = "Silk Compute (--no-bs)" if cfg.get("no_bs") else "GLM tier"
+                ready, why = ew.available(cfg, str(root)) if takes else (False, "")
+                if takes and cfg.get("workers") in ("auto", "openrouter") and ready:
                     card_file = root / ".feature-ladder" / "cards" / f"{tid}.md"
-                    r["runner"] = {"kind": "external", "provider": "openrouter",
-                                   "model": ew.model_for(cfg, r["agent"], r.get("effort")),
+                    r["runner"] = {"kind": "external", "provider": cfg["openrouter"].get("slug") or "openrouter",
+                                   "model": ew.model_for(cfg, r["agent"], r.get("effort"), score=r.get("score")),
                                    "card_file": str(card_file),
-                                   "command": runner_command(ew.HERE / "external_worker.py", card_file, tid, r["agent"])}
+                                   "command": runner_command(ew.HERE / "external_worker.py", card_file, tid,
+                                                             r["agent"], r.get("score"), bool(cfg.get("no_bs")))}
+                    fb = ew.fallback_for(cfg, r["runner"]["model"])
+                    if fb:
+                        r["runner"]["fallback"] = fb
                 else:
                     r["runner"] = {"kind": "subagent"}
-                    if r.get("provider") == "glm":
-                        r["runner"]["note"] = ("GLM tier off: workers=claude" if cfg.get("workers") == "claude"
-                                               else f"GLM tier unavailable: {why}")[:160]
+                    if takes:
+                        r["runner"]["note"] = (f"{tier} off: workers=claude" if cfg.get("workers") == "claude"
+                                               else f"{tier} unavailable: {why}")[:160]
             except Exception as e:  # noqa: BLE001 - routing must never fail because of this
                 r["runner"] = {"kind": "subagent", "note": f"external worker config ignored: {e}"[:160]}
             print(json.dumps(r, indent=2))

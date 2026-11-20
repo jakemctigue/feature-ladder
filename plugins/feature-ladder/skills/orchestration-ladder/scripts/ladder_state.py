@@ -89,10 +89,26 @@ def state_dir(root):
     return Path(root) / DIR
 
 
+WINDOWS = os.name == "nt"
+
+
+def _read_text(path):
+    # Windows refuses to open a file for the moment another process is swapping it
+    # in with os.replace (PermissionError). That is not "missing": retry briefly,
+    # or a hook reading run.json while a parallel hook writes it drops its entry.
+    for attempt in range(20):
+        try:
+            return path.read_text(encoding="utf-8-sig")
+        except PermissionError:
+            if not WINDOWS or attempt == 19:
+                raise
+            time.sleep(0.02)
+
+
 def read_json(path, default=None, strict=False):
     path = Path(path)
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        text = _read_text(path)
     except OSError:
         return default
     try:

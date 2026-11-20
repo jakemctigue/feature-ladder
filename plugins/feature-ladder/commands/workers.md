@@ -22,10 +22,21 @@ synonym for `glm`. Then run the check below.
   ```
   (`python` on Windows). Add `--probe` if the user asked for it; it sends one
   one-token request to each configured model and reports the provider that
-  answered and the latency.
+  answered and the latency. Add `--no-bs` to check the Silk Compute setup that
+  `/feature-ladder:feature ... --no-bs` uses (its models, fallbacks, balance).
 
-Show the result as a short table: workers setting, preset, claude CLI found,
-key source (never the key), OpenRouter key valid / credits remaining, each
+`--no-bs` is a per-run switch on `/feature-ladder:feature`, not a setting
+here: nothing in `providers.json` turns Silk on. A `"silk"` block there may
+adjust it (for example `{"silk": {"models": {"mechanic": "<id>"}}}`).
+`FEATURE_LADDER_NO_BS=1` in the environment does the same for one hand-started
+`external_worker.py run` / `check` (or a test) that has no active run; it is a
+manual aid, never written to a setting, and the feature command ignores it as a
+switch. The Silk key is looked up in the `SILK_API_KEY` environment variable,
+then `<repo>/.env` (git-ignored), then `~/.claude/feature-ladder/.env`, then
+Google Secret Manager.
+
+Show the result as a short table: provider, workers setting, preset, claude CLI found,
+key source (never the key), key valid / credits or balance remaining (`provider_key`), each
 model and its probe result. Exit 3 means something is missing; say what in
 one line (install the Claude CLI, put `OPENROUTER_API_KEY` in Google Secret
 Manager or the environment). Do not change any other setting.

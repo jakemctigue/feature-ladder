@@ -10,3 +10,5 @@ memory-ledger.jsonl
 cards/
 evidence/
 runs/
+*.lock
+*.tmp

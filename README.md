@@ -61,7 +61,9 @@ ladder:** the router never returns it. The 🟧 `integrator` runs only when two
 or more different coding agents wrote code for one feature; `second-opinion`,
 `deep-verifier`, `architect-escalation` and `ultra-investigator` need
 `--second-opinion`, `--escalate` or `--ultra`. ⬜ `codex-reviewer` runs once
-per session at `wrap --review`.
+per session at `wrap --review`. `--no-bs` moves the 🟩 rungs, and T2 up to
+score 14, to Silk Compute for one run (DeepSeek V4.1 Flash, Kimi K3.1 Pro), in
+Claude Code and the Claude app alike.
 
 ### Routing bands, to scale
 
@@ -164,7 +166,7 @@ refused entry stops the merge and is reported. Nothing is forced.
 | `select_skills.py` | At most 3 skills per worker, within a per-role budget; `--scan` rescans what is installed |
 | `confidence.py` | Recall sentiment surface → proceed or reshard |
 | `session_budget.py` | S / M / L subagent budget, charged per spawn; the session's orchestrator |
-| `external_worker.py` | GLM or Jev cards through OpenRouter |
+| `external_worker.py` | GLM or Jev cards through OpenRouter; Silk Compute with `--no-bs` |
 | `verify.py` | Re-runs Done-when checks, flags out-of-scope files |
 | `pr_checkpoint.py` | Branches, checkpoint PRs, labelled merge |
 | `irreversible.py` | Outside-repo audit tiers |
@@ -316,9 +318,12 @@ the start of a conversation it downloads `route.py`, `intake.py`,
 `ladder_state.py` (the state helper the others import), `ledger.py` and
 `guard_irreversible.py` (the token ledger for external workers) and
 `worker-contract/SKILL.md` (the contract GLM workers get) from this repo,
-pinned to a release tag (currently `v1.17.0`), so the app and Claude Code
+pinned to a release tag (currently `v1.18.0`), so the app and Claude Code
 always run identical logic. The app session needs code execution and network
-access to GitHub.
+access to GitHub. `--no-bs` works there too: put it on a feature request and
+that feature's cards are built with `intake.py card --no-bs`, so the cheap tier
+runs on Silk Compute exactly as in Claude Code (see
+[`--no-bs`](#--no-bs-silk-compute-per-run)).
 
 ### Hindsight (memory)
 
@@ -345,7 +350,7 @@ To self-host with the cheapest-adequate model per operation:
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto] [--no-merge] [--orchestrator fable\|opus] [--researcher] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
+| `/feature-ladder:feature <request> [--auto] [--no-merge] [--orchestrator fable\|opus] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
 | `/feature-ladder:scope <request>` | Intake alone; the next `feature` with the same text reuses it without asking |
 | `/feature-ladder:research <request>` | A short research brief, no build and no questions: what the feature wants from this codebase, a qualitative cost label per agent (never a number) and what to expect |
 | `/feature-ladder:wrap [--review] [--adversarial] [--second-opinion]` | End of session: optional reviews over the whole session's diff, then the memory flush |
@@ -531,6 +536,35 @@ what was added are stored in `.feature-ladder/evidence/<id>-external.json`.
 Everything else (Sonnet medium by default, Opus, the coordinator) stays on
 Claude. External workers count against the session budget like any other.
 Usage lands in the ledger with what OpenRouter actually charged.
+
+### `--no-bs`: Silk Compute, per run
+
+`/feature-ladder:feature <request> --no-bs` moves the cheap tier, for that run
+only, to [Silk Compute](https://silkcompute.com/docs/claude-code): an
+Anthropic-compatible endpoint serving abliterated open-weight models, billed to
+your Silk balance. Nothing saved turns it on; without the switch every card
+routes exactly as above. Each tier gets a model capable of it, chosen from
+Silk's model guide and the Vals AI scores in its Hy4 post (Terminal-Bench 4.0:
+Kimi 63.6, Hy4 39.4, GLM-5.3 38.9, DeepSeek 31.8):
+
+| Card | Router score | Model | If it is busy |
+|---|---|---|---|
+| mechanic (T0) | 0-3 | DeepSeek V4.1 Flash 1017 Fast | GLM-5.3 Flash |
+| implementer, small T2 | 4-6 | DeepSeek V4.1 Flash 1017 | Hy4 |
+| implementer/medium, intermediate T2 | 7-14 | Kimi K3.1 Pro | Hy4 |
+| implementer/high (T3) and up | 15+ | stays on Claude | |
+
+GLM-5.3 has no slot: Hy4 scores the same, costs less and also reads images.
+The fallback runs only when the first model turned the card away before doing
+any work (Silk's 429 `rate_limited`, 503 `under_capacity`, or a 429
+`concurrent_request_limit` still there after waiting 5, 10 and 15 s: that limit
+covers the whole account, so the same model is retried first); when both are
+busy the card runs on its Claude rung. The key is `SILK_API_KEY` from the
+environment, the repo's `.env` (git-ignored), `~/.claude/feature-ladder/.env`, or
+Google Secret Manager, in that order; `/feature-ladder:workers check --no-bs --probe` shows
+the balance and probes every model. Cost per card is the approximate drop in Silk's
+`/v1/balance` (cards running together share one balance; a top-up mid-run makes
+it unknown). A `"silk"` block in `providers.json` can change a tier's model.
 
 The child process is Claude Code itself, so OpenRouter's documented Claude
 Code integration applies ([their cookbook](https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration.md)).
@@ -954,7 +988,8 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.17.0** | A review of every script, fixed test-first. **Sessions:** `/feature-ladder:wrap` loads again (its frontmatter was invalid YAML, and the guard test skipped values starting with `[`); `finish` and `abort` return to the base branch, so the second feature of a session lands on it instead of on the first feature's branch; `start` refuses over an active run; wrap reviews from `session_base_sha`. **Secrets:** the audit log redacts secret values before storing them, the deny rule's bypasses (`NAME_API_KEY=...`, quoted `.env`, `printenv NAME`) and false positives (`.env.example`, `--set-secrets=`) are closed, `hindsight.env` is ignored wherever it sits, and `git add -A` no longer sweeps `.env`/`.pem` files into a commit. **Environments:** a Firebase project like `backstage-prod` or `latest-app` is production, not non-production. **State:** one `ladder_state.py` gives every script and hook the same state folder (the main checkout, also from a linked worktree), atomic writes and a lock; an unreadable `session.json` denies spawns instead of meaning "no budget", parallel spawns cannot overspend, a retry with the same slug starts clean, a second window does not reset a running feature's budget, and agents from outside the ladder are not charged outside a run. **Memory:** a bank is created by the first memory write, not by opening a session, and stores facts verbatim (`resolve_bank.py --configure` for older banks); a write is recorded only after it happened; lines over the 12-per-session cap stay queued; recall leaves out Hindsight's `observation` copies and is not rewritten when it already carries the printed arguments. **Ledger:** usage is counted once per API message (it was 1.5-5x too high) and only for the run's own subagents. **Windows:** checks run in Git Bash, timeouts stop the whole process tree, output cannot crash on a cp1252 console, `.cmd` shims work, and the hook launcher starts Python once (a Bash-call hook went from about 650 ms to 350 ms). **Routing:** the implementer's skill budget fits the debugging and test-first skills together (20,000 characters); recommended intake options land in the router's own bucket; the design question is reachable; keyword matching sees plurals and derived forms; an intake is used up when a run starts from it and stale ones are skipped; a scan makes 6 git calls, not 18. **Other:** Codex review enforces its timeout and its guard sees deleted and renamed files; a failed external worker returns a failing exit code and gives its budget slot back; README and LICENSE copies are checked for equality; the fixture generators moved to `scripts/fixtures/` with `--check`; CI has a time limit and cancels superseded runs |
+| **v1.18.0** | `--no-bs`: for one run, the cheap tier runs on [Silk Compute](https://silkcompute.com/docs/claude-code)'s open-weight models, each on a tier it can handle (DeepSeek V4.1 Flash 1017 Fast for mechanic cards, DeepSeek V4.1 Flash 1017 for implementer cards up to score 6, Kimi K3.1 Pro for implementer/medium 7-14; T3 and up stay on Claude), with a busy-model fallback, the key from `SILK_API_KEY`, a `.env` or Secret Manager, and cost from the Silk balance. Never a saved setting. The Claude app skill has the switch too: `intake.py card --no-bs` routes the card and prints a runner command that carries `--no-bs`, and `external_worker.py run --no-bs` runs it on Silk without a `run.json`. The research brief labels the Silk models with `brief.py build --no-bs` |
+| v1.17.0 | A review of every script, fixed test-first. **Sessions:** `/feature-ladder:wrap` loads again (its frontmatter was invalid YAML, and the guard test skipped values starting with `[`); `finish` and `abort` return to the base branch, so the second feature of a session lands on it instead of on the first feature's branch; `start` refuses over an active run; wrap reviews from `session_base_sha`. **Secrets:** the audit log redacts secret values before storing them, the deny rule's bypasses (`NAME_API_KEY=...`, quoted `.env`, `printenv NAME`) and false positives (`.env.example`, `--set-secrets=`) are closed, `hindsight.env` is ignored wherever it sits, and `git add -A` no longer sweeps `.env`/`.pem` files into a commit. **Environments:** a Firebase project like `backstage-prod` or `latest-app` is production, not non-production. **State:** one `ladder_state.py` gives every script and hook the same state folder (the main checkout, also from a linked worktree), atomic writes and a lock; an unreadable `session.json` denies spawns instead of meaning "no budget", parallel spawns cannot overspend, a retry with the same slug starts clean, a second window does not reset a running feature's budget, and agents from outside the ladder are not charged outside a run. **Memory:** a bank is created by the first memory write, not by opening a session, and stores facts verbatim (`resolve_bank.py --configure` for older banks); a write is recorded only after it happened; lines over the 12-per-session cap stay queued; recall leaves out Hindsight's `observation` copies and is not rewritten when it already carries the printed arguments. **Ledger:** usage is counted once per API message (it was 1.5-5x too high) and only for the run's own subagents. **Windows:** checks run in Git Bash, timeouts stop the whole process tree, output cannot crash on a cp1252 console, `.cmd` shims work, and the hook launcher starts Python once (a Bash-call hook went from about 650 ms to 350 ms). **Routing:** the implementer's skill budget fits the debugging and test-first skills together (20,000 characters); recommended intake options land in the router's own bucket; the design question is reachable; keyword matching sees plurals and derived forms; an intake is used up when a run starts from it and stale ones are skipped; a scan makes 6 git calls, not 18. **Other:** Codex review enforces its timeout and its guard sees deleted and renamed files; a failed external worker returns a failing exit code and gives its budget slot back; README and LICENSE copies are checked for equality; the fixture generators moved to `scripts/fixtures/` with `--check`; CI has a time limit and cancels superseded runs |
 | v1.16.0 | The orchestrator is your pick, asked up front once per session: Opus 5.5 xhigh or Fable 5.2 runs the coordinator (`--orchestrator fable\|opus` answers in advance; a hook denies a Fable coordinator you did not pick). `select_skills.py --scan` rescans every installed skill into a deterministic catalog with a coverage report; multi-line descriptions and plugin manifest names (`dak:`) are read correctly; the shipped rules were refreshed against the rescan (22 rules for skills that are gone removed, 3 retargeted, 20 added) |
 | v1.15.2 | The `orchestration-ladder` skill and the `/feature-ladder:feature` command have valid frontmatter again: both descriptions held an unquoted `review: pending`, which is invalid YAML, so a strict parser rejected the whole block and the skill was dropped; both are quoted, and `test_skill_frontmatter.py` now checks every skill, agent and command for the same mistake |
 | v1.15.1 | Windows CI: the research-brief round-trip test compares resolved paths, so an 8.3 short temp path (`RUNNER~1`) no longer fails it; README gains an At a glance section |
