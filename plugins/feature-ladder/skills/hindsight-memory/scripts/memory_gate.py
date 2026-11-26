@@ -179,6 +179,30 @@ def _save_state(path, st):
         pass
 
 
+def _recall_key(run):
+    if run is None:
+        return None
+    return f"{run.get('slug')}@{run.get('started')}"
+
+
+def commit_recall(root):
+    """Count one recall against the active feature run after the gate (and any
+    bank routing) has let the call through."""
+    key = _recall_key(_active_run(root))
+    if not key:
+        return
+    with ladder_state.locked(root, "memory-gate"):
+        sp, st = _state(root)
+        recalls = st.get("recalls") if isinstance(st.get("recalls"), dict) else {}
+        used = _int(recalls.get(key), 0)
+        if used >= RUN_RECALLS:
+            return
+        new = {key: used + 1}
+        if new != recalls:
+            st["recalls"] = new
+            _save_state(sp, st)
+
+
 def _int(value, default):
     try:
         return int(value)
@@ -208,7 +232,7 @@ def gate(tool, args, root, project):
     tag = f"project:{project}"
     run = _active_run(root)
     if short == "recall":
-        key = f"{run.get('slug')}@{run.get('started')}" if run is not None else None
+        key = _recall_key(run)
         # Only the active run is counted. Outside a run nothing is written unless an
         # old run's counters are still on disk (they are dropped then), so a recall
         # in a repository that never ran the ladder leaves no file behind.
@@ -220,9 +244,8 @@ def gate(tool, args, root, project):
                 if key and used >= RUN_RECALLS:
                     return False, (f"feature-ladder: {RUN_RECALLS} recalls per feature are used; the Task Card's "
                                    "Memory line is the recall. Carry on from the card."), args
-                new = {key: used + 1} if key else {}
-                if new != recalls:
-                    st["recalls"] = new
+                if not key and recalls:
+                    st["recalls"] = {}
                     _save_state(sp, st)
         args["tags"] = [tag]
         args["tags_match"] = "all"

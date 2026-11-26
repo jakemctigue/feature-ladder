@@ -29,6 +29,11 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Compile every script
         run: python -m compileall -q plugins
+      - name: Build the Rust audit hook (test_guard_rs compares it with the Python one)
+        shell: bash
+        run: |
+          cargo test --release --locked --manifest-path plugins/feature-ladder/hooks/guard-rs/Cargo.toml
+          bash plugins/feature-ladder/hooks/scripts/build_guard.sh
       - name: Run tests
         run: python -m unittest discover -v -s plugins/feature-ladder/tests
       - name: Check security evidence is current

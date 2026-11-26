@@ -393,6 +393,8 @@ def pretooluse():
                          "the first write at /feature-ladder:wrap). Carry on without recall.")
         if r and r.get("bank_id"):
             tin2["bank_id"] = r["bank_id"]
+    if short == "recall":
+        memory_gate.commit_recall(root)
     if tin2 != tin:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                                  "updatedInput": tin2}}))
