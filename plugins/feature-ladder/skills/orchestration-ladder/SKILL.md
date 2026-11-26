@@ -59,6 +59,12 @@ the coordinator. `--orchestrator fable|opus` answers it for one run without
 asking; with no answer it is Opus xhigh. The spawn hook denies a coordinator
 on Fable the user did not pick.
 
+**Brainstorm** (`--brainstorm` only): before the intake, the scout settles
+every application and architecture detail of the whole app, the user answers
+one round of questions, and `brainstorm.py` queues the features in build
+order. Each feature then runs as below, in `--auto` mode, with its `App:`
+context on the card. No agent is added beyond the scout.
+
 **Session**: asked once per coding session, stored in
 `.feature-ladder/session.json`: Small 2 subagents, Medium 4, Large 8. The
 scout and the coordinator are not counted; every other subagent and every
