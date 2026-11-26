@@ -142,6 +142,21 @@ class SelectRelevant(unittest.TestCase):
             self.assertIn("settings.local.json", texts)
             self.assertEqual(dropped["stale"], 1)
 
+    def test_a_memory_about_a_dot_folder_that_exists_is_not_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "ci.yml").write_text("x", encoding="utf-8")
+            git(root, "init", "-q")
+            git(root, "add", "-A")
+            git(root, "commit", "-q", "-m", "i")
+            lines = ["[pitfall] `.github/workflows/ci.yml` needs the deploy token; the preview step is skipped without it.",
+                     "[pitfall] `./.github/workflows/gone.yml` needs the deploy token for the preview step.",
+                     "[pitfall] .claude/hooks/gone.sh breaks the deploy preview token lookup."]
+            kept, dropped = conf.select_relevant(mems(*lines), "deploy preview token", [], root=root)
+            self.assertEqual([m["text"] for m in kept], [lines[0].split("] ", 1)[1]])
+            self.assertEqual(dropped["stale"], 2)
+
     def test_unrelated_memories_do_not_move_the_confidence(self):
         far = ["[pitfall] the Firestore composite index build fails on deploy and times out"]
         with_far = conf.decide("card", "rename the settings page title", ["src/title.ts"], "M", memories=mems(*far))

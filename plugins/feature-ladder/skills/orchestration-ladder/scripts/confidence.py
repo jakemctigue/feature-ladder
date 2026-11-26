@@ -416,14 +416,16 @@ def stale(text, root, tracked):
     names no such path, or one path that still exists, is never stale."""
     if tracked is None:
         return False
-    named = [m.group(1).strip(".").replace("\\", "/").lower() for m in FILE_TOKEN.finditer(str(text))]
+    named = [m.group(1).rstrip(".").replace("\\", "/").lower() for m in FILE_TOKEN.finditer(str(text))]
     named = [n for n in named if not n.startswith(("http", "www."))]
     if not named:
         return False
     for n in named:
-        n = n.lstrip("./")
-        if (Path(root) / n).exists() or any(t == n or t.endswith("/" + n) for t in tracked):
-            return False
+        while n.startswith(("./", "../")):   # a relative prefix, never the dot of `.github/` or `.claude/`
+            n = n.split("/", 1)[1]
+        for cand in {n, n.lstrip(".")}:
+            if cand and ((Path(root) / cand).exists() or any(t == cand or t.endswith("/" + cand) for t in tracked)):
+                return False
     return True
 
 
@@ -442,7 +444,7 @@ ARCH_RE = re.compile(r"`arch:([a-z0-9_]+)`")
 ARCH_CAP = 4
 ARCH_ALWAYS = {"stack", "structure", "testing"}
 ARCH_WORDS = {
-    "platform": ("web", "mobile", "desktop", "cli", "ios", "android", "browser"),
+    "platform": ("web", "mobile", "desktop", "cli", "ios", "android", "browser", "phone", "offline", "pwa", "install"),
     "frontend": ("ui", "page", "screen", "component", "form", "button", "view", "style", "css", "layout", "front",
                  "client", "modal", "dashboard", "navigat"),
     "backend": ("api", "endpoint", "route", "server", "handler", "service", "rest", "graphql", "rpc", "function",
@@ -461,10 +463,11 @@ ARCH_WORDS = {
     "performance": ("perf", "fast", "slow", "cache", "scale", "load", "latency", "pagina"),
     "security_privacy": ("secur", "privacy", "valid", "sanitiz", "rate", "encrypt", "gdpr", "pii"),
     "dependencies": ("librar", "depend", "package", "install", "sdk"),
-    "rollout": ("flag", "rollout", "migrat", "rollback", "launch"),
+    "rollout": ("flag", "rollout", "migrat", "rollback", "launch", "deploy", "preview", "release", "ship", "promot"),
     "entities": ("data", "model", "schema", "entity", "record", "table", "collection", "field", "crud", "list",
                  "create", "edit", "delete", "save"),
-    "roles": ("role", "permission", "admin", "access", "owner", "member", "team", "share", "private", "visib"),
+    "roles": ("role", "permission", "admin", "access", "owner", "member", "team", "share", "private", "visib",
+              "invite", "join", "remov"),
 }
 
 
