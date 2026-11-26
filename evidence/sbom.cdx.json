@@ -101,6 +101,17 @@
       "type": "file"
     },
     {
+      "bom-ref": "file:plugins/feature-ladder/skills/complexity-router/scripts/brainstorm.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "31c5a7fd22e80b0ebe3c6109ac8d3eafbf1d106a2d2f96b6145912c8a59a357a"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/complexity-router/scripts/brainstorm.py",
+      "type": "file"
+    },
+    {
       "bom-ref": "file:plugins/feature-ladder/skills/complexity-router/scripts/brief.py",
       "hashes": [
         {
@@ -116,7 +127,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "feb8848b08fc3f65d8c14676f4a44e8d6b82c3de5295cd9b89a639b3c93c46d2"
+          "content": "15c5273922d3201855772175340d7a8eba9bd7f6af9f3c0799837288683e7614"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/intake.py",
@@ -204,7 +215,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "8918888282521b140b19de5e902704b7c4bca880e1e9849a57629259cbc44fb2"
+          "content": "38629133132156cb251307d6e665537602349fce1201d218d116cc262f8b875a"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/ladder_state.py",
@@ -284,7 +295,7 @@
       ],
       "name": "feature-ladder",
       "type": "application",
-      "version": "1.18.0"
+      "version": "1.19.0"
     },
     "tools": {
       "components": [

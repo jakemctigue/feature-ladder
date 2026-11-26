@@ -40,6 +40,10 @@ flowchart LR
     G -. "end of session" .-> W["/feature-ladder:wrap<br/>memory flush, ledger,<br/>reviews if asked"]
 ```
 
+For a whole app, `--brainstorm` puts one step in front: every application and
+architecture detail is settled in one round of questions, the app is split
+into features in build order, and each feature then takes the run above.
+
 ### The ladder
 
 🟩 GLM 5.3 Flash (OpenRouter) · 🟢 Haiku · 🟦 Sonnet 5.5 · 🟪 Opus 5.5 · 🟧 Fable 5.2 · ⬜ Codex
@@ -326,14 +330,14 @@ it.
 ### Claude app
 
 Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
-the start of a conversation it downloads `route.py`, `intake.py`,
+the start of a conversation it downloads `route.py`, `intake.py`, `brainstorm.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
 `skill-rules.json`, `resolve_bank.py`, `memory_gate.py`, `codex_review.py`,
 `ladder_state.py` (the state helper the others import), `ledger.py` and
 `guard_irreversible.py` (the token ledger for external workers) and
 `worker-contract/SKILL.md` (the contract GLM workers get) from this repo,
-pinned to a release tag (currently `v1.18.0`), so the app and Claude Code
+pinned to a release tag (currently `v1.19.0`), so the app and Claude Code
 always run identical logic. The app session needs code execution and network
 access to GitHub. `--no-bs` works there too: put it on a feature request and
 that feature's cards are built with `intake.py card --no-bs`, so the cheap tier
@@ -365,7 +369,7 @@ To self-host with the cheapest-adequate model per operation:
 
 | Command | What it does |
 |---|---|
-| `/feature-ladder:feature <request> [--auto] [--no-merge] [--orchestrator fable\|opus] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR |
+| `/feature-ladder:feature <request> [--auto] [--no-merge] [--orchestrator fable\|opus] [--brainstorm] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]` | Intake, questions, then one atomic run to a merged PR. With `--brainstorm`: the whole app is settled first, then built feature by feature |
 | `/feature-ladder:scope <request>` | Intake alone; the next `feature` with the same text reuses it without asking |
 | `/feature-ladder:research <request>` | A short research brief, no build and no questions: what the feature wants from this codebase, a qualitative cost label per agent (never a number) and what to expect |
 | `/feature-ladder:wrap [--review] [--adversarial] [--second-opinion]` | End of session: optional reviews over the whole session's diff, then the memory flush |
@@ -378,9 +382,31 @@ To self-host with the cheapest-adequate model per operation:
 Switches on `feature`: `--auto` asks nothing and takes the scout's values and
 the recommended options; `--no-merge` leaves the PR stack open;
 `--orchestrator fable|opus` picks the coordinator's model for this run
-without asking; `--second-opinion` allows one Fable answer to one sharp question;
+without asking; `--brainstorm` settles the whole app before any feature is
+scoped (below); `--second-opinion` allows one Fable answer to one sharp question;
 `--escalate` allows the Fable debugging rungs; `--ultra` also allows the
 ultra-investigator. Reviews are not feature switches: they belong to `wrap`.
+
+**Brainstorm.** `--brainstorm` on `feature` is for a whole app, or a large
+piece of one. Before anything is narrowed into features, the scout fills an
+app sheet of 30 details, 12 about the application (purpose, users, workflows,
+screens, data model, permissions, integrations, notifications, content, edge
+cases, what is out of scope, what success looks like) and 18 about the
+architecture (platform, stack, frontend, backend, data store, sign-in,
+hosting, secrets, background work, files, monitoring, testing, CI, scale,
+security, layout, libraries, rollout), plus any the app needs that the sheet
+lacks. `brainstorm.py scan` settles what the repo's manifests and files
+already settle, with no model. Then you are asked once, in batches of four:
+every detail that is not certain (not only the ones that would change the
+model), the two session questions, and what to build afterwards (every
+feature, the first only, or plan only). Your answers become
+`.feature-ladder/brainstorm/<slug>.md` and a feature queue in build order; a
+feature whose details you changed is rewritten, and one whose details you
+all marked not needed is dropped. Each feature then runs as a normal atomic
+feature without asking again, and its cards carry only the details that
+feature covers. The session subagent budget still stops the queue; the same
+request with `--brainstorm` again continues it. It adds no agent beyond the
+Sonnet scout: no Opus, no Fable.
 
 **Researcher.** `/feature-ladder:research` (or `--researcher` on `feature`) reuses
 the intake scan, the scout's proposal, the router and the skill selector, and
@@ -920,6 +946,7 @@ here is stdlib Python; nothing calls a model.
 | Deterministic routing (`route.py`) | ✅ | ✅ same script |
 | Deterministic skill selection (`select_skills.py`) | ✅ | ✅ same script, same rules |
 | Intake (ask once, up front) | ✅ scoper agent + question cards | ✅ same script; questions asked in chat |
+| Brainstorm (`--brainstorm`: the whole app settled before features) | ✅ scoper in brainstorm mode + `brainstorm.py` | ✅ same script; the conversation is the scout |
 | Confidence surface (recall -> sentiment -> proceed / reshard) | ✅ `confidence.py` | ✅ same script |
 | Session subagent budget | ✅ enforced by a spawn hook | ✅ `session_budget.py charge` before each subagent |
 | GLM tier through OpenRouter | ✅ | ✅ when the Claude CLI and a key are on that machine |
@@ -944,7 +971,7 @@ plugins/feature-ladder/
   agents/                              14 agents (13 rungs + scoper)
   commands/                            feature, wrap, scope, route, skills, recall, codex-review, workers
   skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, confidence.py, with_secrets.py, verify.py, session_budget.py, external_worker.py, ladder_state.py (one state folder, atomic writes, lock)
-  skills/complexity-router/            route.py + intake.py
+  skills/complexity-router/            route.py + intake.py + brief.py + brainstorm.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/worker-contract/              the short contract every worker preloads instead of the full protocol
   skills/hindsight-memory/             memory rules + resolve_bank.py + memory_gate.py
@@ -1003,7 +1030,8 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.18.0** | `--no-bs`: for one run, the cheap tier runs on [Silk Compute](https://silkcompute.com/docs/claude-code)'s open-weight models, each on a tier it can handle (DeepSeek V4.1 Flash 1017 Fast for mechanic cards, DeepSeek V4.1 Flash 1017 for implementer cards up to score 6, Kimi K3.1 Pro for implementer/medium 7-14; T3 and up stay on Claude), with a busy-model fallback, the key from `SILK_API_KEY`, a `.env` or Secret Manager, and cost from the Silk balance. Never a saved setting. The Claude app skill has the switch too: `intake.py card --no-bs` routes the card and prints a runner command that carries `--no-bs`, and `external_worker.py run --no-bs` runs it on Silk without a `run.json`. The research brief labels the Silk models with `brief.py build --no-bs` |
+| **v1.19.0** | `--brainstorm` on `feature` and in the app skill: every application and architecture detail of the whole app (30 on the sheet, plus any the scout adds) is settled at the very front in one round of questions, then the app is split into a feature queue in build order and each feature runs as a normal atomic run with only its own details on its cards. `brainstorm.py` (scan, decide, apply, features, next, done, context) costs no model tokens; the phase adds no agent beyond the Sonnet scout, and the session subagent budget still stops the queue. Also: a recall the hook later refuses no longer uses up one of the run's three (`memory_gate.commit_recall`), and `abort` frees the run's saved intake for reuse. Optional Rust build of the outside-repo audit hook (`hooks/guard-rs`, `build_guard.sh`): same decisions and `run.json` bytes as the Python hook, about 185 ms down to 60 ms per Bash call on Windows, and it hands every call back to Python once the Python reference changes |
+| v1.18.0 | `--no-bs`: for one run, the cheap tier runs on [Silk Compute](https://silkcompute.com/docs/claude-code)'s open-weight models, each on a tier it can handle (DeepSeek V4.1 Flash 1017 Fast for mechanic cards, DeepSeek V4.1 Flash 1017 for implementer cards up to score 6, Kimi K3.1 Pro for implementer/medium 7-14; T3 and up stay on Claude), with a busy-model fallback, the key from `SILK_API_KEY`, a `.env` or Secret Manager, and cost from the Silk balance. Never a saved setting. The Claude app skill has the switch too: `intake.py card --no-bs` routes the card and prints a runner command that carries `--no-bs`, and `external_worker.py run --no-bs` runs it on Silk without a `run.json`. The research brief labels the Silk models with `brief.py build --no-bs` |
 | v1.17.0 | A review of every script, fixed test-first. **Sessions:** `/feature-ladder:wrap` loads again (its frontmatter was invalid YAML, and the guard test skipped values starting with `[`); `finish` and `abort` return to the base branch, so the second feature of a session lands on it instead of on the first feature's branch; `start` refuses over an active run; wrap reviews from `session_base_sha`. **Secrets:** the audit log redacts secret values before storing them, the deny rule's bypasses (`NAME_API_KEY=...`, quoted `.env`, `printenv NAME`) and false positives (`.env.example`, `--set-secrets=`) are closed, `hindsight.env` is ignored wherever it sits, and `git add -A` no longer sweeps `.env`/`.pem` files into a commit. **Environments:** a Firebase project like `backstage-prod` or `latest-app` is production, not non-production. **State:** one `ladder_state.py` gives every script and hook the same state folder (the main checkout, also from a linked worktree), atomic writes and a lock; an unreadable `session.json` denies spawns instead of meaning "no budget", parallel spawns cannot overspend, a retry with the same slug starts clean, a second window does not reset a running feature's budget, and agents from outside the ladder are not charged outside a run. **Memory:** a bank is created by the first memory write, not by opening a session, and stores facts verbatim (`resolve_bank.py --configure` for older banks); a write is recorded only after it happened; lines over the 12-per-session cap stay queued; recall leaves out Hindsight's `observation` copies and is not rewritten when it already carries the printed arguments. **Ledger:** usage is counted once per API message (it was 1.5-5x too high) and only for the run's own subagents. **Windows:** checks run in Git Bash, timeouts stop the whole process tree, output cannot crash on a cp1252 console, `.cmd` shims work, and the hook launcher starts Python once (a Bash-call hook went from about 650 ms to 350 ms). **Routing:** the implementer's skill budget fits the debugging and test-first skills together (20,000 characters); recommended intake options land in the router's own bucket; the design question is reachable; keyword matching sees plurals and derived forms; an intake is used up when a run starts from it and stale ones are skipped; a scan makes 6 git calls, not 18. **Other:** Codex review enforces its timeout and its guard sees deleted and renamed files; a failed external worker returns a failing exit code and gives its budget slot back; README and LICENSE copies are checked for equality; the fixture generators moved to `scripts/fixtures/` with `--check`; CI has a time limit and cancels superseded runs |
 | v1.16.0 | The orchestrator is your pick, asked up front once per session: Opus 5.5 xhigh or Fable 5.2 runs the coordinator (`--orchestrator fable\|opus` answers in advance; a hook denies a Fable coordinator you did not pick). `select_skills.py --scan` rescans every installed skill into a deterministic catalog with a coverage report; multi-line descriptions and plugin manifest names (`dak:`) are read correctly; the shipped rules were refreshed against the rescan (22 rules for skills that are gone removed, 3 retargeted, 20 added) |
 | v1.15.2 | The `orchestration-ladder` skill and the `/feature-ladder:feature` command have valid frontmatter again: both descriptions held an unquoted `review: pending`, which is invalid YAML, so a strict parser rejected the whole block and the skill was dropped; both are quoted, and `test_skill_frontmatter.py` now checks every skill, agent and command for the same mistake |
