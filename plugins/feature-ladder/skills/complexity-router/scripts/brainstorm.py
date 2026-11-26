@@ -291,7 +291,8 @@ MAX_CONTEXT = 1800   # characters of the whole card block
 GUIDE = """\
 BRAINSTORM GUIDE - follow exactly. You settle the whole app before anything is
 scoped or built: you estimate, the user confirms. Change no code.
-(`python` if `python3` is missing. SCRIPT = {script})
+(`python` if `python3` is missing. SCRIPT = {script}
+ RECALL = {recall})
 
 1. Scan. From the repo root:
      python3 "SCRIPT" scan --save "<the request>"
@@ -300,11 +301,19 @@ scoped or built: you estimate, the user confirms. Change no code.
    (status "detected"), and saves it as .feature-ladder/brainstorm/<slug>-scan.json.
    Evidence that starts with "read:" names the files to read for that detail.
 
-2. Read. The request first; then README, the manifests, the entry points and
+2. Recall. What this repository's memory already decided:
+     python3 "RECALL" --query "<the request>" --out .feature-ladder/brainstorm/<slug>-recall.json
+   (no model; it keeps only the facts that bear on the request). Each fact on
+   its "memory" line is evidence: a recorded decision, convention or interface
+   settles its detail with confidence "high" and evidence "memory: [kind] ...";
+   a pitfall goes into the evidence of the detail it affects. "Memory: none"
+   means there is nothing to use; go on.
+
+3. Read. The request first; then README, the manifests, the entry points and
    the "read:" files. At most ~20 files. For a new, empty project read nothing
    and propose.
 
-3. Settle EVERY detail. Write the file the scan named as "sheet_file"
+4. Settle EVERY detail. Write the file the scan named as "sheet_file"
    (.feature-ladder/brainstorm/<slug>-sheet.json, the scan's own slug) as
      {{"request": "<the request>", "dimensions": {{"<id>": {{...}}}}, "features": [...]}}
    with only the details you settled or corrected (a detected detail you agree
@@ -322,7 +331,7 @@ scoped or built: you estimate, the user confirms. Change no code.
    A detail the sheet lacks: add it under a new id with "group"
    ("application" or "architecture"), "header" (<= 12 chars) and "question".
 
-4. Draft "features": the app split into the smallest features that can each be
+5. Draft "features": the app split into the smallest features that can each be
    built and tested on their own, in build order, foundation first. Each:
      {{"id": "kebab-id", "title": "...", "request": "<the whole request one
        ladder run gets: what to build, where, and what done looks like>",
@@ -330,13 +339,13 @@ scoped or built: you estimate, the user confirms. Change no code.
    One concern per feature: a request that needs "and" twice is two features.
    Every detail that needs code is covered by at least one feature.
 
-5. Run:
+6. Run:
      python3 "SCRIPT" decide <sheet_file> --mode <the Decide mode from your prompt: default | auto>
 
-6. Return the sheet path, then the decide output verbatim, then
+7. Return the sheet path, then the decide output verbatim, then
    `Retained: none - brainstorm only`.
 
-REVISE (only when asked to, after `apply`; skip steps 1-6). Read the confirmed
+REVISE (only when asked to, after `apply`; skip steps 1-7). Read the confirmed
 app sheet (.json) named in your prompt. Rewrite the "request", "covers" and
 "depends_on" of every feature marked "revise": true so it matches the
 confirmed details (the user changed the ones listed under "changed"), and fix
@@ -1021,7 +1030,8 @@ def main(argv):
     try:
         cwd = opt("--cwd", os.getcwd())
         if cmd == "guide":
-            sys.stdout.write(GUIDE.format(script=Path(__file__).resolve()))
+            here = Path(__file__).resolve()
+            sys.stdout.write(GUIDE.format(script=here, recall=here.parents[2] / "hindsight-memory" / "scripts" / "recall.py"))
             return 0
         if cmd == "scan":
             save_it = flag("--save")

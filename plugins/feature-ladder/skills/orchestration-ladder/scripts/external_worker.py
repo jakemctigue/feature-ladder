@@ -179,8 +179,11 @@ EXTERNAL_RUNGS = {"mechanic", "implementer"}  # never senior-implementer, expert
 # intake.py card sends a card here when takes() says so: the router's provider
 # "glm" (T0 and implementer/medium with score <= route.GLM_MAX_SCORE), and with
 # --no-bs also implementer/medium up to SILK["reach"].
-TOOLS = "Bash,Read,Edit,Write,MultiEdit,Glob,Grep,mcp__plugin_feature-ladder_hindsight__retain,mcp__plugin_feature-ladder_hindsight__recall"
-DISALLOWED = "Agent,Task,Skill,WebSearch,WebFetch,NotebookEdit"
+# No Hindsight tools: the card's Memory: line is the filtered recall (a retain
+# would be denied during a run anyway, and a second recall only spends turns).
+TOOLS = "Bash,Read,Edit,Write,MultiEdit,Glob,Grep"
+DISALLOWED = ("Agent,Task,Skill,WebSearch,WebFetch,NotebookEdit,"
+              "mcp__plugin_feature-ladder_hindsight__recall,mcp__plugin_feature-ladder_hindsight__retain")
 # The child's own words when OpenRouter turned the request away: nothing ran, so the
 # card should fall back to a subagent (exit 3) instead of being reported as an error.
 UNAVAILABLE = re.compile(r"\b(401|402|403)\b|no auth credentials|invalid (x-)?api[- ]key|unauthori[sz]ed|"
@@ -496,22 +499,22 @@ def recall_file(root):
     return None
 
 
-def memory_line(root, scope):
-    """(snippets, relevant) from the saved recall: memories that touch the card's
-    scope first, at most MEMORY_SNIPPETS, verbatim as '[kind] fact'."""
+def memory_line(root, scope, title=""):
+    """(snippets, relevant) from the saved recall: only the memories that bear on
+    the card (they name a Scope file or two distinctive words of its title; not
+    stale, not duplicated), at most MEMORY_SNIPPETS, verbatim as '[kind] fact'.
+    A memory about another part of the repository is never added as filler."""
     f = recall_file(root)
     if not f:
         return [], 0
     try:
         import confidence
         mems = confidence.parse_memories(f.read_text(encoding="utf-8-sig"))
-        anch = confidence.anchors("", [p.strip() for p in re.split(r"[,\s]+", scope or "") if p.strip()])
+        paths = [p.strip() for p in re.split(r"[,\s]+", scope or "") if p.strip()]
+        picked, _ = confidence.select_relevant(mems, title, paths, root=root, cap=MEMORY_SNIPPETS)
     except Exception:  # noqa: BLE001 - a bad recall file is "no memory", never a failed card
         return [], 0
-
-    rel = [m for m in mems if confidence.touching(m["text"], anch)]
-    picked = (rel + [m for m in mems if m not in rel])[:MEMORY_SNIPPETS]
-    return [f"[{m['kind']}] {m['text'][:160]}" for m in picked], len(rel)
+    return [f"[{m['kind']}] {m['text']}" for m in picked], len(picked)
 
 
 def prepare_card(card, root, task_id, max_turns, timeout, budget=None):
@@ -522,8 +525,9 @@ def prepare_card(card, root, task_id, max_turns, timeout, budget=None):
     added = []
     mem = _card_line(card, "Memory")
     if mem is None or not mem or mem.lower() in ("none", "n/a", "-"):
-        snippets, relevant = memory_line(root, _card_line(card, "Scope"))
-        if snippets and (mem is None or not mem or relevant):
+        title = re.sub(r"^TASK\s+\S+:\s*", "", (card.splitlines() or [""])[0])
+        snippets, relevant = memory_line(root, _card_line(card, "Scope"), title)
+        if snippets:
             text = "Memory: " + " | ".join(snippets)
             card = re.sub(r"^Memory:.*$", lambda _: text, card, count=1, flags=re.M) if mem is not None else card + "\n" + text
             added.append("memory")

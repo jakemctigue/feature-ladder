@@ -30,9 +30,9 @@ a shell inside the wrapper expand it:
 log, commit or quote a value, and never type one on a command line; new code reads secrets the way the repo already does. A missing or
 unreadable secret is `blocked: secret NAME`; finish what does not depend on it.
 
-**Memory.** The card's `Memory:` lines are the recall; query Hindsight yourself
-only when that line is `none` and the area is unfamiliar (one narrow `recall`,
-tags `project:<name>`). Never call `retain`: put 0-3 durable, new facts under
+**Memory.** The card's `Memory:` line is the recall, already filtered to the
+facts that bear on this card; `Memory: none (...)` means nothing relevant is
+stored. Do not query Hindsight yourself. Never call `retain`: put 0-3 durable, new facts under
 `Memory candidates:`, one
 per line as `[kind] fact` (kind: `decision|convention|pitfall|interface|test-strategy`),
 naming the path, identifier or command it is about. Only what a future task

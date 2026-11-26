@@ -1,6 +1,6 @@
 ---
 name: hindsight-memory
-description: How feature-ladder uses the Hindsight MCP server (vectorize-io/hindsight) - one scoped recall per feature, memory written once per session through a deterministic gate, per-repository banks. Reference for the rules the hooks enforce.
+description: How feature-ladder uses Hindsight (vectorize-io/hindsight) in every mode - one scripted recall per feature that keeps only the facts bearing on the work, memory written through a deterministic gate when a session ends, per-repository banks. Reference for the rules the scripts and hooks enforce.
 ---
 
 # Hindsight memory, tightly controlled
@@ -23,43 +23,71 @@ write, so opening a session in a repository never leaves an empty bank
 behind. Linked worktrees share the main checkout's bank. Agents never call
 `list_banks` or `create_bank`.
 
-## Reads: one scoped recall
+## Where the key comes from
 
-- `recall` only. The hook forces `bank_id`, `tags: ["project:<name>"]`,
-  `tags_match: "all"`, `max_tokens <= 1000`, and (unless given) `budget: low`
-  and `types: ["world", "experience"]`: Hindsight's consolidated
-  `observation` copies restate the stored facts and would double the result.
-  `max_tokens` counts fact text only; the JSON around each fact is extra.
-- The session-start line prints these exact arguments. Pass them with the
-  query: a call that already matches is not rewritten, which matters in auto
-  permission mode, where a call the hook rewrites has to be sent twice.
-- Before the first memory is written there is no bank: recall is answered
-  "no memories yet" without a network call.
-- At most 3 recalls per feature run: the intake scout, the coordinator, and
-  one worker whose card's `Memory:` line is `none`. More are denied.
-- The query names the feature area and its files. The coordinator pastes
-  only the snippets that bear on the card into `Memory:`; workers do not
-  re-query.
-- The coordinator saves its recall verbatim to
-  `.feature-ladder/runs/<slug>/recall.json` and hands it to
-  `orchestration-ladder/scripts/confidence.py --memories`, which scores each
-  memory's sentiment and relevance into the confidence surface that decides
-  card size (see the orchestration-ladder skill). `confidence.py --live`
-  can recall on its own, through the same gate and counted the same way.
+`HINDSIGHT_API_KEY` (and `HINDSIGHT_MCP_URL`, `HINDSIGHT_BANK_ID`) are read
+from the environment, then `<repo>/.env`, then `~/.claude/feature-ladder/.env`,
+then (Windows) the user's saved environment variables. Without a key the
+session-start line says plainly that memory is OFF and why; nothing fails
+silently.
 
-## Writes: once per session, through the gate
+## Reads: one scripted recall, only relevant facts
 
-- No `retain` during a feature run; the hook denies it.
+Every mode (feature runs, `--brainstorm`, `--researcher`, `--no-bs`,
+`/feature-ladder:research`, `/feature-ladder:recall`, the Claude app) reads
+memory through one script, with no model:
+
+```
+python3 scripts/recall.py --query "<request or card title>" --paths <files> [--reuse FILE] [--out FILE]
+```
+
+- It recalls this repository's bank with `tags: ["project:<repo>",
+  "project:<folder>"]`, `tags_match: "any_strict"`, `max_tokens <= 1000`,
+  `budget: low`, `types: ["world", "experience"]`. `any_strict` matters:
+  with `all` or `any` Hindsight also returns every untagged memory in the
+  bank. The repo tag is what every clone shares; the folder tag finds
+  memories earlier versions wrote. Writes carry the repo tag.
+- It saves the raw result (default `.feature-ladder/runs/<slug>/recall.json`
+  during a run) for `confidence.py`, and prints `memory`: the `Memory:` line
+  to paste, verbatim. No model reads the raw recall.
+- Only facts that bear on the work survive (`confidence.select_relevant`,
+  shared with `confidence.py` and `external_worker.py`): a fact must name one
+  of the paths (or a distinctive file stem) or two distinctive words of the
+  query; duplicates go; a fact whose named repository paths no longer exist
+  is stale and goes; the rest are ranked by file hits, word hits and recency
+  and capped at 5. `Memory: none (...)` says why nothing is left, and is a
+  real answer: workers do not re-query.
+- The scout recalls once and saves to `.feature-ladder/intake/<slug>-recall.json`;
+  the coordinator passes it as `--reuse`, so a feature makes one network
+  recall. A reshard filters the same file per shard.
+- When the script cannot reach Hindsight it prints `mcp_fallback`: the exact
+  arguments for one MCP `recall`; save that result and run `recall.py --from`.
+  The PreToolUse hook forces the same arguments on any direct MCP recall.
+- Before the first memory is written there is no bank: recall answers
+  "no memories yet" without a network call. A cached "no bank yet" is
+  re-checked at session start, so a bank another clone created is found.
+- At most 3 recalls per feature run are counted; more are denied.
+- `confidence.py` scores only the relevant memories into the confidence
+  surface; a pitfall about another part of the repository no longer makes a
+  card look risky.
+
+## Writes: through the gate, whenever a session ends
+
+- No `retain` during a feature run; the hook denies it, also on any other
+  Hindsight MCP server the user has.
 - Workers put facts under `Memory candidates:` as `[kind] fact`; the
   coordinator queues the ones a future task could act on with
   `session_budget.py remember`, which checks each line on the spot.
-- `/feature-ladder:wrap` runs `memory_gate.py flush`: it re-checks the queue
-  and writes the survivors straight to the bank over MCP. No model on our side
-  reads, summarises or rewords them, and the bank is set to
-  `retain_extraction_mode: verbatim` so Hindsight stores the text as given
-  instead of rewriting it (its default, `concise`, rewords every fact).
-- At most 12 memories per session. Lines over the cap are reported as
-  `deferred` and stay in the queue for the next wrap; nothing is dropped.
+- `memory_gate.py flush` re-checks the queue and writes the survivors
+  straight to the bank over MCP. No model reads, summarises or rewords them,
+  and the bank is set to `retain_extraction_mode: verbatim`.
+- It runs unattended from the SessionStart and SessionEnd hooks
+  (`flush --background`: detached, never during an active run, never from a
+  GLM child, not again for 10 minutes after a failure), so a session that
+  ends without `/feature-ladder:wrap` still stores its memory. Wrap runs it
+  in the foreground and shows what was written.
+- At most 12 memories per flush. Lines over the cap are reported as
+  `deferred` and stay in the queue; nothing is dropped.
 - A fact counts as retained only after the write happened (flush records it
   after the call; for a hand-made `retain` the PostToolUse hook does). A write
   that failed can be retried.
@@ -74,12 +102,14 @@ A memory passes the gate only if it is:
 - not already retained from this checkout (`.feature-ladder/memory-ledger.jsonl`
   is local and git-ignored, so another clone does not see it).
 
-Stored with `context: feature-ladder`, tags `project:<name>`, `feature:<slug>`
+Stored with `context: feature-ladder`, tags `project:<repo>`, `feature:session`
 and the kind. Never secrets, tokens, credentials or personal data.
 
 ## Everything else is off
 
-`reflect`, knowledge pages, tag listing and bank edits are denied to agents:
+On the plugin's own server, `reflect`, knowledge pages, tag listing and bank
+edits are denied to agents (another Hindsight server of the user's is left
+alone outside a run):
 `reflect` is a free-form summary written by the server's own model.
 New banks are created with `retain_extraction_mode: verbatim` and
 `enable_observations: false`. A bank made by an earlier version keeps the

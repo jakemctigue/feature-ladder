@@ -26,8 +26,9 @@ procedure and DESIGN.md headings as `domain-expert`, with these additions:
 - Cite sources for non-obvious claims (spec, RFC, library docs, or the file:line
   in this repo). Use `evidence-collector`-style rigor: a claim without a source
   is labelled as your judgment.
-- Use the card's `Memory:` lines; one narrow `recall` only if it says `none`
-  (prior failed approaches in this repo are what memory is for).
+- Use the card's `Memory:` line (already filtered to this card; `none` means
+  nothing relevant is stored). For a narrower question about prior failed
+  approaches, run once `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/recall.py --query "<question>" --paths <files>`.
 
 Memory: list what is durable under `Memory candidates:` in your packet (kind `decision`). Do not call `retain`: the coordinator queues it and memory is written once, at the end of the session, by `memory_gate.py flush` at `/feature-ladder:wrap` (a script, no agent). End with `Retained: deferred - <n> candidates`.
 Include the key decision and why, rejected options with reasons, and

@@ -16,8 +16,11 @@ coordinator sends you a design question because a task routed as ambiguous or
 novel. Your output is a DESIGN.md section the coordinator can ACCEPT.
 
 Procedure:
-1. Memory: use the card's `Memory:` lines; `recall` once only if it says
-   `none` (a hook scopes it to this repo). Quote what you used.
+1. Memory: use the card's `Memory:` line, already filtered to what bears on
+   this card (`none` means nothing relevant is stored: do not re-query). Only
+   for a narrower question it did not cover, run once
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/recall.py --query "<question>" --paths <files>`
+   (no model; it prints only the relevant facts). Quote what you used.
 2. Read the skills file named in the card's "Skills for this task" block, if
    any. Then read the relevant code - the real interfaces, not the feature description.
    Note existing patterns the design must follow.

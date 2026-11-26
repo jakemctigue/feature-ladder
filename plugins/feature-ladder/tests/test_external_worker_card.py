@@ -75,7 +75,7 @@ class PrepareCard(Temp):
         self.assertIn("memory", added)
         self.assertTrue(mem.startswith("[pitfall] server/mapRoutes.ts"), mem)
         self.assertIn("[convention] npx vitest", mem)
-        self.assertLess(mem.index("[convention]"), mem.index("[decision]"))
+        self.assertNotIn("[decision]", mem)  # about another part of the repo: never padding
 
     def test_bounds_and_contract_built_in(self):
         card, added = ew.prepare_card(CARD, self.repo(), "T1", 12, 600, {"left": 3, "max": 4})
@@ -124,7 +124,10 @@ class PrepareCard(Temp):
         card, _ = ew.prepare_card(CARD, root, "T1", 40, 1500)
         mem = ew._card_line(card, "Memory")
         for item in scored["surface"]["items"]:
-            self.assertIn(item["text"][:80], mem)
+            if item["relevant"]:
+                self.assertIn(item["text"][:80], mem)
+            else:
+                self.assertNotIn(item["text"][:80], mem)
 
 
 class Run(Temp):

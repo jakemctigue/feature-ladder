@@ -37,7 +37,8 @@ coordinator's judgment.
   0. intake      scoper (Sonnet) settles the fields; ONE round of questions:
                  the session's subagent budget (first feature only), what is
                  uncertain and changes the model, open decisions
-  1. coordinator one recall (saved) -> confidence.py card: proceed, or
+  1. coordinator recall.py (reuses the scout's; only relevant facts) ->
+                 confidence.py card: proceed, or
                  reshard into smaller cards -> one Task Card each
                  (intake.py card: route + skills)
   2. worker      GLM or Sonnet medium does the change and its tests
@@ -47,8 +48,9 @@ coordinator's judgment.
                  lines, pr_checkpoint.py finish: PR, label review: pending,
                  merge the stack
 /feature-ladder:wrap [--review] [--adversarial] [--second-opinion]
-                 once at the end of the session: memory written by a script,
-                 and the reviews the user scheduled, over the whole session
+                 once at the end of the session: the reviews the user
+                 scheduled, over the whole session (memory is also written
+                 by a script when any session ends)
 ```
 
 ## Budgets (binding, enforced)
@@ -169,7 +171,7 @@ Design: <DESIGN.md section | "N/A - the request is the design">
 Confidence: <0.00-1.00> <proceed|reshard> (<mood>) - <one line of texture>
 Done when: <exact shell commands>
 Do not: <out of scope>
-Memory: <recall snippets that bear on this card, verbatim, or none>
+Memory: <the memory line recall.py printed, verbatim>
 Secrets: <NAME -> ENV_VAR, ... | none>
 Return: Evidence Packet
 <the "## Skills for this task" block from intake.py card>
@@ -234,13 +236,17 @@ re-dispatch once, then one band up once, then `partial`.
 
 ## Memory
 
-One scoped `recall` per feature (a hook pins it to this repo's bank and
-`project:<name>`, at most 1000 tokens), saved to
-`.feature-ladder/runs/<slug>/recall.json` so `confidence.py` can read it. No
-`retain` during a run: the coordinator queues `[kind] fact` lines with
-`session_budget.py remember`, the memory gate refuses summaries and vague
-lines, and `/feature-ladder:wrap` writes the queue with `memory_gate.py
-flush` (no model). Details: hindsight-memory skill.
+Every mode reads memory the same way: one `recall.py` call per feature (the
+scout's, reused by the coordinator), which recalls this repo's bank (project
+tags, `any_strict`, at most 1000 tokens), saves it to
+`.feature-ladder/runs/<slug>/recall.json` for `confidence.py`, and prints
+the `Memory:` line with only the facts that bear on the work (stale,
+duplicate and off-topic memories dropped, at most 5). No model reads the raw
+recall. No `retain` during a run: the coordinator queues `[kind] fact` lines
+with `session_budget.py remember`, the memory gate refuses summaries and
+vague lines, and the queue is written by `memory_gate.py flush` (no model)
+when the session ends, when the next one starts, or at
+`/feature-ladder:wrap`. Details: hindsight-memory skill.
 
 ## Branches, checkpoint PRs and the merge
 

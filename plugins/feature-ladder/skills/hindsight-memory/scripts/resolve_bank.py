@@ -38,7 +38,15 @@ Usage
 
 Environment: HINDSIGHT_MCP_URL (default https://api.hindsight.vectorize.io/mcp/),
 HINDSIGHT_API_KEY, HINDSIGHT_BANK_ID (the fallback bank outside a repository).
-The key is never printed.
+Each is read from the environment, then <repo>/.env, then
+~/.claude/feature-ladder/.env, then (Windows) the user's saved environment
+variables, so a key set after Claude Code started, or kept in a .env file, still
+reaches the scripts. The key is never printed.
+
+Project tags: memories are written with `project:<repo>` (the remote's repository
+name, or the folder name without a remote) and recalled with that tag OR the
+folder name's tag (`tags_match: any_strict`), so two clones of one repository in
+differently named folders share their memories and untagged memories never leak in.
 """
 import json
 import os
@@ -60,6 +68,7 @@ DEFAULT_BANK = "feature-ladder"  # same fallback as .mcp.json's X-Bank-Id
 CACHE = Path.home() / ".claude" / "feature-ladder" / "banks.json"
 PREFIX = "coding-agent::"
 SKIP_TOOLS = {"list_banks", "create_bank"}
+OWN_SERVER = "mcp__plugin_feature-ladder_hindsight__"  # the plugin's own .mcp.json server
 # The gate already admits only one concrete fact per memory. Server-side
 # rewriting ("concise", the default) would reword it, and consolidated
 # observations would only restate it, so new banks store the text as given.
@@ -169,6 +178,96 @@ def choose(ident, banks):
     return candidates(ident)[0], "create"
 
 
+def projects(cwd):
+    """Project names for the tags, the write tag first: the remote's repository
+    name (shared by every clone), then the folder name (what earlier versions
+    tagged with). Outside a repository: the folder name only. Read from the bank
+    cache when it has them (no git call); otherwise asks git and adds them."""
+    root = str(_root(cwd))
+    hit = _load_cache().get(root)
+    if isinstance(hit, dict) and isinstance(hit.get("projects"), list) and hit["projects"]:
+        return [str(n) for n in hit["projects"]]
+    names = _project_names(identity(cwd))
+    if isinstance(hit, dict) and hit.get("bank_id"):
+        try:
+            _remember(root, {**hit, "projects": names})
+        except OSError:
+            pass
+    return names
+
+
+def _project_names(ident):
+    names = []
+    for n in (ident.get("repo") if ident.get("is_git") else "", ident.get("project")):
+        if n and n.lower() not in {x.lower() for x in names}:
+            names.append(n)
+    return names or ["unknown"]
+
+
+# ------------------------------------------------------------- settings ----
+def _dotenv(name, files):
+    for f in files:
+        try:
+            lines = Path(f).read_text(encoding="utf-8-sig").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            t = line.strip()
+            if t.startswith("export "):
+                t = t[7:].lstrip()
+            k, sep, v = t.partition("=")
+            if sep and k.strip() == name:
+                v = v.strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                    v = v[1:-1]
+                if v:
+                    return v, str(f)
+    return None, None
+
+
+def _windows_user_env(name):
+    """A user environment variable saved in the registry: set with setx or the
+    Settings app after this process (or Claude Code) started, so not inherited."""
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            v, _ = winreg.QueryValueEx(k, name)
+        return str(v).strip() or None
+    except (ImportError, OSError):
+        return None
+
+
+def setting(name, cwd=None):
+    """(value, source) for a Hindsight setting, or (None, None)."""
+    v = os.environ.get(name, "").strip()
+    if v:
+        return v, "environment"
+    files = []
+    try:
+        files.append(_root(cwd or os.getcwd()) / ".env")
+    except Exception:  # noqa: BLE001
+        pass
+    files.append(Path.home() / ".claude" / "feature-ladder" / ".env")
+    v, f = _dotenv(name, files)
+    if v:
+        return v, f
+    v = _windows_user_env(name)
+    return (v, "Windows user environment") if v else (None, None)
+
+
+def key_status(cwd=None):
+    """Offline: is a Hindsight key reachable from the scripts? (ok, where)."""
+    v, src = setting("HINDSIGHT_API_KEY", cwd)
+    url = setting("HINDSIGHT_MCP_URL", cwd)[0] or DEFAULT_URL
+    if v:
+        return True, src
+    if not url.startswith("https://api.hindsight.vectorize.io"):
+        return True, "self-hosted server, no key needed"  # a local server usually takes no key
+    return False, ("no HINDSIGHT_API_KEY in the environment, <repo>/.env or ~/.claude/feature-ladder/.env")
+
+
 # ----------------------------------------------------------------- MCP ----
 def client_version():
     manifest = ladder_state.read_json(HERE.parents[2] / ".claude-plugin" / "plugin.json")
@@ -176,10 +275,11 @@ def client_version():
 
 
 class Mcp:
-    def __init__(self):
-        self.url = os.environ.get("HINDSIGHT_MCP_URL") or DEFAULT_URL
-        self.key = os.environ.get("HINDSIGHT_API_KEY", "")
-        self.bank = os.environ.get("HINDSIGHT_BANK_ID") or DEFAULT_BANK
+    def __init__(self, cwd=None, timeout=60):
+        self.url = setting("HINDSIGHT_MCP_URL", cwd)[0] or DEFAULT_URL
+        self.key = setting("HINDSIGHT_API_KEY", cwd)[0] or ""
+        self.bank = setting("HINDSIGHT_BANK_ID", cwd)[0] or DEFAULT_BANK
+        self.timeout = timeout
         self.sid = None
         self.n = 0
 
@@ -197,7 +297,7 @@ class Mcp:
         if self.sid:
             h["Mcp-Session-Id"] = self.sid
         req = urllib.request.Request(self.url, data=json.dumps(body).encode(), headers=h, method="POST")
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=self.timeout) as r:
             self.sid = r.headers.get("Mcp-Session-Id") or self.sid
             text = r.read().decode("utf-8", "replace")
         if notify or not text.strip():
@@ -270,11 +370,17 @@ def _remember(root, rec):
     ladder_state.write_json(CACHE, cache)
 
 
-def resolve(cwd, refresh=False, offline=False, create=False):
+def resolve(cwd, refresh=False, offline=False, create=False, recheck_planned=False):
     """Which bank this folder uses. `how` is pinned | existing | created |
     planned | not-a-repo. A planned bank does not exist yet: it is created only
     with create=True (the first memory write). A cached answer costs one git
-    call and no network."""
+    call and no network. recheck_planned=True asks the server again about a
+    cached "planned" bank, which another clone or machine may have created
+    since (the session-start hook does this, so memory written elsewhere is
+    found)."""
+    if recheck_planned and not refresh and not offline:
+        hit = _load_cache().get(str(_root(cwd)))
+        refresh = isinstance(hit, dict) and hit.get("how") == "planned"
     root = _root(cwd)
     p = pinned(root)
     if p:
@@ -293,9 +399,9 @@ def resolve(cwd, refresh=False, offline=False, create=False):
         return {**hit, "cached": True, **ident}
     if offline:
         return None
-    mcp = Mcp().start()
+    mcp = Mcp(root).start()
     bank, action = choose(ident, server_banks(mcp, ident))
-    rec = {"bank_id": bank, "how": action, "project": ident["project"],
+    rec = {"bank_id": bank, "how": action, "project": ident["project"], "projects": _project_names(ident),
            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if action == "create":
         if create:
@@ -326,30 +432,45 @@ def _stdin_json():
 
 
 def recall_args(bank, project):
-    """The exact recall arguments the gate passes through unchanged."""
+    """The exact recall arguments the gate passes through unchanged. `project`
+    is a name or the list from projects()."""
     import memory_gate
-    return {"bank_id": bank, "tags": [f"project:{project}"], "tags_match": "all",
+    args = {"tags": memory_gate.project_tags(project), "tags_match": memory_gate.TAGS_MATCH,
             "max_tokens": memory_gate.MAX_RECALL_TOKENS, "budget": "low", "types": list(memory_gate.RECALL_TYPES)}
+    return {"bank_id": bank, **args} if bank else args
+
+
+RECALL_HINT = ("Recall with `recall.py` (skills/hindsight-memory/scripts): it recalls, keeps only the facts "
+               "that bear on the card and prints the Memory: line, with no model.")
 
 
 def session_start():
     data = _stdin_json()
     cwd = data.get("cwd") or os.getcwd()
+    ok, where = key_status(cwd)
+    if not ok:
+        # Loud, every session: memory that silently does nothing is the failure this line prevents.
+        print(f"feature-ladder: Hindsight memory is OFF for this session: {where}. Put "
+              "HINDSIGHT_API_KEY=... in ~/.claude/feature-ladder/.env (or the environment) and start a new "
+              "session; until then runs recall nothing and queued memories wait on disk.")
+        return 0
     try:
-        r = resolve(cwd)
+        r = resolve(cwd, recheck_planned=True)
         if not r["bank_id"]:
             print("feature-ladder: this folder is not a git repository, so no per-repo Hindsight bank is used; "
-                  "memory goes to the default bank (HINDSIGHT_BANK_ID).")
+                  f"memory goes to the default bank (HINDSIGHT_BANK_ID), tagged project:{projects(cwd)[0]}.")
             return 0
         if r["how"] == "planned":
             print(f"feature-ladder: this repository has no Hindsight memory yet; its bank '{r['bank_id']}' is "
-                  "created on the first memory write (/feature-ladder:wrap). Skip recall: there is nothing to find.")
+                  "created on the first memory write (the end of the session). Skip recall: there is nothing "
+                  "to find.")
             return 0
         how = f"cached; {r['how']} {str(r.get('at') or '')[:10]}".strip() if r.get("cached") else r["how"]
-        print(f"feature-ladder: Hindsight bank for this repository is '{r['bank_id']}' ({how}). "
-              f"For recall pass your query plus exactly {json.dumps(recall_args(r['bank_id'], r['project']))} "
-              "so the hook has nothing to rewrite (it forces these values anyway). "
-              f"Memories are tagged project:{r['project']}.")
+        names = projects(cwd)
+        print(f"feature-ladder: Hindsight bank for this repository is '{r['bank_id']}' ({how}; key from {where}). "
+              f"{RECALL_HINT} A direct MCP recall must pass its query plus exactly "
+              f"{json.dumps(recall_args(r['bank_id'], names))} (the hook forces these values anyway). "
+              f"Memories are written tagged project:{names[0]}.")
     except urllib.error.HTTPError as e:
         print(f"feature-ladder: Hindsight rejected the request (HTTP {e.code}); check HINDSIGHT_API_KEY. "
               "Agents will work without memory this session.")
@@ -370,14 +491,33 @@ def pretooluse():
     data = _stdin_json()
     tool = str(data.get("tool_name", ""))
     tin = data.get("tool_input") or {}
-    if "hindsight" not in tool or not isinstance(tin, dict):
+    if "hindsight" not in tool.lower() or not isinstance(tin, dict):
         return 0
     cwd = data.get("cwd") or os.getcwd()
     short = tool.rsplit("__", 1)[-1]
+    if not tool.startswith(OWN_SERVER):
+        # The user's own Hindsight server: left alone, except that during a feature run
+        # a write through it is denied and its recalls count against the run.
+        try:
+            import memory_gate
+            root = _root(cwd)
+            if memory_gate._active_run(root) is None:
+                return 0
+            if short == "retain":
+                return _deny("feature-ladder: no memory writes during a feature run. Put the fact under "
+                             "'Memory candidates:' as '[kind] fact'; it is written once at the end of the session.")
+            if short == "recall":
+                ok, reason, _ = memory_gate.gate("recall", {}, root, projects(cwd))
+                if not ok:
+                    return _deny(reason)
+                memory_gate.commit_recall(root)
+        except Exception:  # noqa: BLE001
+            pass
+        return 0
     try:
         import memory_gate
         root = _root(cwd)
-        ok, reason, tin2 = memory_gate.gate(tool, tin, root, project_name(root))
+        ok, reason, tin2 = memory_gate.gate(tool, tin, root, projects(cwd))
     except Exception as e:  # noqa: BLE001 - a broken gate denies the memory call; it never breaks the session
         return _deny(f"feature-ladder: the memory gate could not check this call ({type(e).__name__}); "
                      "carry on without Hindsight.")
@@ -390,7 +530,7 @@ def pretooluse():
             r = None  # the server's default bank applies
         if r and short == "recall" and r.get("how") == "planned":
             return _deny("feature-ladder: this repository has no memories yet (its Hindsight bank is created on "
-                         "the first write at /feature-ladder:wrap). Carry on without recall.")
+                         "the first memory write at the end of a session). Carry on without recall.")
         if r and r.get("bank_id"):
             tin2["bank_id"] = r["bank_id"]
     if short == "recall":
@@ -412,7 +552,8 @@ def posttooluse():
     A retain that failed is not, so it can be retried."""
     data = _stdin_json()
     tool = str(data.get("tool_name", ""))
-    if "hindsight" not in tool or tool.rsplit("__", 1)[-1] != "retain" or _failed(data.get("tool_response")):
+    if (not tool.startswith(OWN_SERVER) or tool.rsplit("__", 1)[-1] != "retain"
+            or _failed(data.get("tool_response"))):
         return 0
     try:
         import memory_gate
@@ -443,7 +584,8 @@ def main(argv):
     ident = identity(cwd)
     if "--candidates" in argv:
         print(json.dumps({**ident, "pinned": pinned(ident), "candidates": candidates(ident),
-                          "create_as": candidates(ident)[0]}, indent=2))
+                          "create_as": candidates(ident)[0], "projects": projects(cwd),
+                          "recall_args": recall_args(None, projects(cwd))}, indent=2))
         return 0
     if "--choose" in argv:
         i = argv.index("--choose")
@@ -456,7 +598,7 @@ def main(argv):
                           "config_updates": BANK_CONFIG if action == "create" else None}, indent=2))
         return 0
     if "--list" in argv:
-        mcp = Mcp().start()
+        mcp = Mcp(cwd).start()
         for b in _bank_list(mcp.call("list_banks", {"limit": 100})):
             print(f"  {b.get('bank_id') or b.get('id')}  {b.get('name') or ''}")
         return 0
@@ -465,7 +607,7 @@ def main(argv):
         if not r or not r.get("bank_id") or r.get("how") == "planned":
             print("resolve_bank: this repository has no bank yet; it is configured when it is created")
             return 1
-        ok = configure(Mcp().start(), r["bank_id"])
+        ok = configure(Mcp(cwd).start(), r["bank_id"])
         print(json.dumps({"bank_id": r["bank_id"], "configured": ok, "config_updates": BANK_CONFIG}, indent=2))
         return 0 if ok else 3
     r = resolve(cwd, refresh="--refresh" in argv)

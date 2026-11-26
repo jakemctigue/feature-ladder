@@ -99,7 +99,8 @@ class Decisions(unittest.TestCase):
         self.assertEqual((r["threshold"], r["decision"]), (0.9, "reshard"))
 
     def test_remote_scorer_falls_back_to_the_lexicon(self):
-        r = conf.decide("card", "x", [], size="S", memories=mems(CONVENTION), scorer="jev",
+        r = conf.decide("card", "add owner checks to map routes", ["server/mapRoutes.ts"], size="S",
+                        memories=mems(CONVENTION), scorer="jev",
                         cfg={"key_env": "FEATURE_LADDER_TEST_NO_SUCH_KEY"})
         self.assertEqual(r["scorer"], "lexicon")
         self.assertTrue(any("jev scorer unavailable" in n for n in r.get("notes", [])))
@@ -245,8 +246,8 @@ class Cli(unittest.TestCase):
         (Path(self._home.name) / ".claude" / "feature-ladder").mkdir(parents=True)
         (Path(self._home.name) / ".claude" / "feature-ladder" / "providers.json").write_text(
             json.dumps({"confidence": {"scorer": "jev", "key_env": "FL_TEST_NO_SUCH_KEY"}}), encoding="utf-8")
-        code, out, err = self.run_cli("card", "--action", "add healthz", "--size", "S", "--memories",
-                                      self._lines("[convention] healthz passes green"))
+        code, out, err = self.run_cli("card", "--action", "add healthz endpoint", "--size", "S", "--memories",
+                                      self._lines("[convention] the healthz endpoint passes green"))
         self.assertEqual(code, 0, err)
         self.assertIn("FL_TEST_NO_SUCH_KEY", " ".join(json.loads(out).get("notes", [])))
 
