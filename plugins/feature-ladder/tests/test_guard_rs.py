@@ -237,6 +237,11 @@ def hook_payload(cwd, command, **extra):
 def run_hook(argv, payload, env=None):
     if isinstance(payload, str):
         payload = payload.encode("utf-8")
+    if env is None:
+        # The Python hook always runs through py.sh, which sets PYTHONUTF8=1; run it
+        # the same way so stdin is UTF-8 on Windows too (not the console code page).
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONIOENCODING"}
+        env["PYTHONUTF8"] = "1"
     r = subprocess.run(argv, input=payload, capture_output=True, timeout=120, env=env)
     return r.returncode, r.stdout.decode("utf-8").replace("\r\n", "\n"), r.stderr.decode("utf-8", "replace")
 
