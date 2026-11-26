@@ -105,7 +105,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "c934d1f8b7301ac746cf27f995aa1de4ffbf68b4395d30ac1eec346fecdd3c1d"
+          "content": "ed349776a8ecc9476b13d2fe7eed56eddbe051c9324a3f34e1f4ee271b9ca755"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/brainstorm.py",
@@ -160,7 +160,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "560c112015143e7b62b267f9475f7549de231a1a1106ae47176080513aee078e"
+          "content": "e86596245be0b6fec1ad16215a11a52b9e183a52fc633545cfa6f28ba092022b"
         }
       ],
       "name": "plugins/feature-ladder/skills/hindsight-memory/scripts/memory_gate.py",
@@ -171,7 +171,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "6a4ee108329a587a95cec29c2f7a01803e66a78f78553f100bc62b50fe4af274"
+          "content": "f6fec1373681cd186995e0d97ca6fa4f3a6a3a6c8add706c768fd85dd973f086"
         }
       ],
       "name": "plugins/feature-ladder/skills/hindsight-memory/scripts/recall.py",
@@ -193,7 +193,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "21555bd98f83d78b28bf1ca26a9ce07b5887d464ba7382f6b6b9e5a88b04bde3"
+          "content": "067da3f81e8e4e08a1bcb4d9845acdf341abdc7ed12d3f336ae682a886a53a26"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/confidence.py",
@@ -306,7 +306,7 @@
       ],
       "name": "feature-ladder",
       "type": "application",
-      "version": "1.20.0"
+      "version": "1.21.0"
     },
     "tools": {
       "components": [

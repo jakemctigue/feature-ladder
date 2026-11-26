@@ -23,6 +23,10 @@ concrete fact a future task can act on:
     backticked token;
   - not narration ("we implemented", "successfully", "this session", ...);
   - not a duplicate of anything already retained from this checkout.
+The app's architecture, settled in a brainstorm (brainstorm.py remember),
+has its own queue (.feature-ladder/session-memory-architecture.md): its
+"[decision] `arch:<id>` ..." facts pass the same checks, are written
+outside the per-session cap and are tagged `architecture`.
 A fact counts as retained only once the write has happened: the gate marks it
 "in flight", and the PostToolUse hook (or flush itself) records it in
 .feature-ladder/memory-ledger.jsonl. A write that failed can be retried.
@@ -73,6 +77,9 @@ RECALL_TYPES = ["world", "experience"]  # observations restate the stored facts:
 # return every untagged memory in the bank (Hindsight's documented behaviour).
 TAGS_MATCH = "any_strict"
 FLUSH_BACKOFF = 600            # seconds after a failed unattended flush before the next try
+ARCH_TAG = "architecture"      # the second tag of an architecture fact (instead of feature:session)
+ARCH_QUEUE = "session-memory-architecture.md"
+ARCH_RETAINS = 40              # architecture facts one flush writes at most (one per detail)
 ALLOWED_TOOLS = {"recall", "retain"}
 ROUTING_TOOLS = {"list_banks", "create_bank"}  # resolve_bank.py's own calls
 NARRATION = re.compile(
@@ -298,7 +305,7 @@ def gate(tool, args, root, project):
         pending[h] = time.time()
         st["pending"] = pending
         _save_state(sp, st)
-    feature = next((t for t in tags if t.startswith("feature:")), "feature:session")
+    feature = next((t for t in tags if t.startswith("feature:") or t == ARCH_TAG), "feature:session")
     args.update(retain_args(fact, kind, project, feature, metadata=meta))
     return True, "", args
 
@@ -349,7 +356,8 @@ def auto_skip(root):
     """Why an unattended flush must not run now, or None when it may."""
     if os.environ.get("FEATURE_LADDER_CHILD"):
         return "a GLM worker's own session stores nothing"
-    if not (Path(root) / ".feature-ladder" / "session-memory.md").is_file():
+    fl = Path(root) / ".feature-ladder"
+    if not ((fl / "session-memory.md").is_file() or (fl / ARCH_QUEUE).is_file()):
         return "nothing queued"
     if _active_run(root) is not None:
         return "a feature run is active: its facts are written after it finishes"
@@ -392,41 +400,57 @@ def flush(root, dry_run=False, emit=False, project=None, auto=False):
             return {"error": f"{type(e).__name__}: {e}"[:300]}
         _flush_state(root, failed=False)
         return out
-    q = Path(root) / ".feature-ladder" / "session-memory.md"
-    lines = [l for l in (q.read_text(encoding="utf-8").splitlines() if q.is_file() else []) if l.strip()]
-    seen, keep, rejected = retained_hashes(root), [], []
-    for line in lines:
-        try:
-            kind, fact, h = check_line(root, line, seen)
-            seen.add(h)
-            keep.append((kind, fact))
-        except ValueError as e:
-            rejected.append({"line": line.strip()[:200], "reason": str(e)})
+    fl = Path(root) / ".feature-ladder"
+    seen, rejected = retained_hashes(root), []
+
+    def checked(name):
+        q = fl / name
+        lines = [l for l in (q.read_text(encoding="utf-8").splitlines() if q.is_file() else []) if l.strip()]
+        keep = []
+        for line in lines:
+            try:
+                kind, fact, h = check_line(root, line, seen)
+                seen.add(h)
+                keep.append((kind, fact))
+            except ValueError as e:
+                if "already retained" not in str(e) or name != ARCH_QUEUE:
+                    rejected.append({"line": line.strip()[:200], "reason": str(e)})
+        return lines, keep
+
+    arch_lines, arch = checked(ARCH_QUEUE)       # the app's architecture first: features build on it
+    lines, keep = checked("session-memory.md")
+    arch, arch_over = arch[:ARCH_RETAINS], arch[ARCH_RETAINS:]
     keep, over = keep[:SESSION_RETAINS], keep[SESSION_RETAINS:]
+    todo = [(k, f, ARCH_TAG) for k, f in arch] + [(k, f, "feature:session") for k, f in keep]
     out = {"queued": len(lines), "written": [], "rejected": rejected, "dry_run": dry_run,
-           "deferred": [f"[{k}] {f}" for k, f in over]}
+           "deferred": [f"[{k}] {f}" for k, f in arch_over + over]}
+    if arch_lines:
+        out["architecture"] = [f"[{k}] {f}" for k, f in arch]
     if over:
         out["note"] = (f"{len(over)} line(s) are over the {SESSION_RETAINS}-per-session cap; they stay in the queue "
                        "for the next /feature-ladder:wrap.")
-    if not keep or dry_run or emit:
-        out["would_write"] = [f"[{k}] {f}" for k, f in keep]
-        if dry_run and keep:
+    if not todo or dry_run or emit:
+        out["would_write"] = [f"[{k}] {f}" for k, f, _ in todo]
+        if (dry_run or emit) and todo:
             bank = None
             if project is None:
                 import resolve_bank
                 project = resolve_bank.projects(str(root))
-                bank = (resolve_bank.resolve(str(root), offline=True) or {}).get("bank_id")
-            out["retain_calls"] = [retain_args(f, k, project, bank_id=bank) for k, f in keep]
+                try:
+                    bank = (resolve_bank.resolve(str(root), offline=True) or {}).get("bank_id")
+                except Exception:  # noqa: BLE001 - the connector picks its own bank then
+                    bank = None
+            out["retain_calls"] = [retain_args(f, k, project, tag, bank_id=bank) for k, f, tag in todo]
         if emit:
-            for kind, fact in keep:
+            for kind, fact, _ in todo:
                 record(root, fact, kind)
         return out
     import resolve_bank
     r = resolve_bank.ensure_bank(str(root))  # the bank is created here, on the first real write
     project = project or resolve_bank.projects(str(root))
     mcp = resolve_bank.Mcp(root).start()
-    for kind, fact in keep:
-        mcp.call("retain", retain_args(fact, kind, project, bank_id=(r or {}).get("bank_id")))
+    for kind, fact, tag in todo:
+        mcp.call("retain", retain_args(fact, kind, project, tag, bank_id=(r or {}).get("bank_id")))
         record(root, fact, kind)
         out["written"].append(f"[{kind}] {fact}")
     return out

@@ -416,14 +416,16 @@ def stale(text, root, tracked):
     names no such path, or one path that still exists, is never stale."""
     if tracked is None:
         return False
-    named = [m.group(1).strip(".").replace("\\", "/").lower() for m in FILE_TOKEN.finditer(str(text))]
+    named = [m.group(1).rstrip(".").replace("\\", "/").lower() for m in FILE_TOKEN.finditer(str(text))]
     named = [n for n in named if not n.startswith(("http", "www."))]
     if not named:
         return False
     for n in named:
-        n = n.lstrip("./")
-        if (Path(root) / n).exists() or any(t == n or t.endswith("/" + n) for t in tracked):
-            return False
+        while n.startswith(("./", "../")):   # a relative prefix, never the dot of `.github/` or `.claude/`
+            n = n.split("/", 1)[1]
+        for cand in {n, n.lstrip(".")}:
+            if cand and ((Path(root) / cand).exists() or any(t == cand or t.endswith("/" + cand) for t in tracked)):
+                return False
     return True
 
 
@@ -431,14 +433,67 @@ def _norm_fact(text):
     return " ".join(re.sub(r"[^a-z0-9/._` -]+", " ", str(text).lower()).split())
 
 
-def select_relevant(memories, action, paths, root=None, cap=MAX_RELEVANT):
+# The app's architecture, stored by brainstorm.py remember as one
+# "`arch:<detail>` Header: value" decision per detail (tag `architecture`).
+# A feature rarely repeats the words of its architecture ("add a sign-up page"
+# never says "Firebase Auth"), so these facts count as relevant when the work
+# touches their area: the area's words below (prefixes), or the detail's own
+# id. The stack, layout and tests bear on every card. They have their own
+# allowance (ARCH_CAP), so they never push a pitfall off the Memory: line.
+ARCH_RE = re.compile(r"`arch:([a-z0-9_]+)`")
+ARCH_CAP = 4
+ARCH_ALWAYS = {"stack", "structure", "testing"}
+ARCH_WORDS = {
+    "platform": ("web", "mobile", "desktop", "cli", "ios", "android", "browser", "phone", "offline", "pwa", "install"),
+    "frontend": ("ui", "page", "screen", "component", "form", "button", "view", "style", "css", "layout", "front",
+                 "client", "modal", "dashboard", "navigat"),
+    "backend": ("api", "endpoint", "route", "server", "handler", "service", "rest", "graphql", "rpc", "function",
+                "backend", "webhook"),
+    "data_store": ("data", "database", "db", "store", "storage", "save", "persist", "schema", "table", "collection",
+                   "model", "migrat", "query", "record", "firestore", "sql", "postgres", "mongo", "cache"),
+    "auth": ("auth", "login", "logout", "sign", "session", "password", "account", "oauth", "token", "register",
+             "invite"),
+    "hosting": ("deploy", "host", "environment", "production", "staging", "domain", "docker"),
+    "config_secrets": ("secret", "config", "setting", "credential", "env", "key"),
+    "background": ("job", "queue", "schedul", "cron", "worker", "realtime", "websocket", "background", "event",
+                   "notif"),
+    "files_media": ("file", "upload", "image", "photo", "video", "media", "attach", "download"),
+    "observability": ("log", "monitor", "metric", "analytic", "error", "alert", "trace"),
+    "ci_cd": ("ci", "pipeline", "workflow", "release", "build", "lint"),
+    "performance": ("perf", "fast", "slow", "cache", "scale", "load", "latency", "pagina"),
+    "security_privacy": ("secur", "privacy", "valid", "sanitiz", "rate", "encrypt", "gdpr", "pii"),
+    "dependencies": ("librar", "depend", "package", "install", "sdk"),
+    "rollout": ("flag", "rollout", "migrat", "rollback", "launch", "deploy", "preview", "release", "ship", "promot"),
+    "entities": ("data", "model", "schema", "entity", "record", "table", "collection", "field", "crud", "list",
+                 "create", "edit", "delete", "save"),
+    "roles": ("role", "permission", "admin", "access", "owner", "member", "team", "share", "private", "visib",
+              "invite", "join", "remov"),
+}
+
+
+def arch_detail(memory):
+    """The architecture detail a memory records, or None for an ordinary memory."""
+    m = ARCH_RE.search(memory["text"])
+    return m.group(1) if m else None
+
+
+def arch_area_hits(detail, action, paths):
+    """How many words of the work fall in the detail's area (prefix match)."""
+    words = set(WORD.findall((str(action) + " " + " ".join(str(p) for p in paths or [])).lower()))
+    keys = ARCH_WORDS.get(detail, ()) + tuple(w for w in detail.split("_") if len(w) >= 3)
+    return sum(1 for w in words if any(w.startswith(k) for k in keys))
+
+
+def select_relevant(memories, action, paths, root=None, cap=MAX_RELEVANT, arch_cap=ARCH_CAP):
     """Only the memories that bear on this card: duplicates, stale memories (their
     paths no longer exist) and off-topic ones are dropped; the rest are ranked by
     file hits, then word hits, then recency (mentioned_at), then recall order, and
-    capped. Returns (kept, dropped) where dropped counts each reason."""
+    capped. Architecture facts (arch_detail) are chosen apart: the newest per
+    detail, relevant by area (ARCH_WORDS) as well, at most `arch_cap` of them,
+    listed first. Returns (kept, dropped) where dropped counts each reason."""
     files, words = split_anchors(action, paths)
     tracked = _tracked(root) if root else None
-    seen, ranked = set(), []
+    seen, ranked, arch = set(), [], {}
     dropped = {"duplicate": 0, "stale": 0, "off_topic": 0, "over_cap": 0}
     for i, m in enumerate(memories):
         key = _norm_fact(m["text"])
@@ -446,6 +501,21 @@ def select_relevant(memories, action, paths, root=None, cap=MAX_RELEVANT):
             dropped["duplicate"] += 1
             continue
         seen.add(key)
+        detail = arch_detail(m)
+        if detail:
+            hits = relevance(m["text"], files, words)
+            area = arch_area_hits(detail, action, paths)
+            if not (is_relevant(hits) or area or detail in ARCH_ALWAYS):
+                dropped["off_topic"] += 1
+                continue
+            row = (-hits[0], -(hits[1] + area), _neg_time(m.get("at")), i, m)
+            old = arch.get(detail)
+            if old is not None:   # an older decision about the same detail was superseded
+                dropped["duplicate"] += 1
+                if old[2] <= row[2]:
+                    continue
+            arch[detail] = row
+            continue
         hits = relevance(m["text"], files, words)
         if not is_relevant(hits):
             dropped["off_topic"] += 1
@@ -457,7 +527,10 @@ def select_relevant(memories, action, paths, root=None, cap=MAX_RELEVANT):
     ranked.sort(key=lambda r: r[:4])
     kept = [r[-1] for r in ranked[:cap]] if cap else [r[-1] for r in ranked]
     dropped["over_cap"] = len(ranked) - len(kept)
-    return kept, dropped
+    rows = sorted(arch.values(), key=lambda r: r[:4])
+    arch_kept = [r[-1] for r in rows[:arch_cap]] if arch_cap else []
+    dropped["over_cap"] += len(rows) - len(arch_kept)
+    return arch_kept + kept, dropped
 
 
 def _neg_time(at):

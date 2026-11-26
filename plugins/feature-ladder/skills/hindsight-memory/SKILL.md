@@ -57,6 +57,16 @@ python3 scripts/recall.py --query "<request or card title>" --paths <files> [--r
   is stale and goes; the rest are ranked by file hits, word hits and recency
   and capped at 5. `Memory: none (...)` says why nothing is left, and is a
   real answer: workers do not re-query.
+- The app's architecture, stored by a brainstorm (`brainstorm.py remember`)
+  as one `` [decision] `arch:<detail>` Header: value `` fact per detail, is
+  chosen apart: a feature rarely repeats its architecture's words ("add a
+  sign-up page" never says "Firebase Auth"), so an `arch:` fact counts when
+  the work touches its area (`confidence.ARCH_WORDS`: sign-in, data,
+  screens, deploys...) and the stack, layout and tests always count. Only
+  the newest decision per detail is kept, at most 4 (`--arch-cap`), listed
+  first and on top of the 5 facts. `--no-architecture` leaves them out (a
+  `--brainstorm` feature run, whose cards carry the App context); the
+  brainstorm itself passes `--arch-cap 40` to see all of it.
 - The scout recalls once and saves to `.feature-ladder/intake/<slug>-recall.json`;
   the coordinator passes it as `--reuse`, so a feature makes one network
   recall. A reshard filters the same file per shard.
@@ -88,6 +98,14 @@ python3 scripts/recall.py --query "<request or card title>" --paths <files> [--r
   in the foreground and shows what was written.
 - At most 12 memories per flush. Lines over the cap are reported as
   `deferred` and stay in the queue; nothing is dropped.
+- A brainstorm's architecture (`brainstorm.py remember`) has its own queue,
+  `.feature-ladder/session-memory-architecture.md`: the same gate, written
+  first and outside the 12-per-flush cap (one fact per detail, at most 40),
+  tagged `architecture` instead of `feature:session`. `remember` starts the
+  background flush right away, before the first feature run, so later runs
+  and other machines can recall it. `flush --emit` prints `retain_calls`,
+  the exact arguments for each `retain` when the Claude app's connector
+  makes the writes.
 - A fact counts as retained only after the write happened (flush records it
   after the call; for a hand-made `retain` the PostToolUse hook does). A write
   that failed can be retried.

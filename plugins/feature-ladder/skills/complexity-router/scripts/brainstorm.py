@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
 feature-ladder brainstorm (the --brainstorm switch): settle every application
-and architecture detail of the app at the very front, in ONE round of
-questions, before the work is narrowed into features and built. Costs no model
-tokens itself; the scout (the Sonnet scoper in Claude Code, the conversation in
-the Claude app) fills in the judgment between the steps, exactly as it does
-for intake.py.
+and architecture detail of the app at the very front, asking as many
+questions as it takes (a first round, then follow-up rounds while details
+are still open or the answers raised new ones), before the work is narrowed
+into features and built. A concluded brainstorm hands its feature queue to
+/feature-ladder:feature (`--from-brainstorm`), and its architecture is
+stored in Hindsight (`remember`) so later feature runs recall it. Costs no
+model tokens itself; the scout (the Sonnet scoper in Claude Code, the
+conversation in the Claude app) fills in the judgment between the steps,
+exactly as it does for intake.py.
 
   guide
           Prints the scout's instructions for a brainstorm. Both surfaces read
@@ -22,10 +26,11 @@ for intake.py.
   decide  SHEET.json [--mode default|auto] [--max N]
           Picks the questions. Unlike intake.py, which asks only what changes
           the model, EVERY applicable detail that is not high confidence is
-          asked, application first, in batches of four. First come the
-          once-per-session questions (orchestrator, subagent budget) and what
-          to build afterwards (every feature, the first, or plan only), so
-          nothing is asked again later. `auto` asks nothing.
+          asked, application first, in batches of four, with no cap (--max N
+          sets one). First come the once-per-session questions (orchestrator,
+          subagent budget), so no feature run asks them again. What to build
+          is asked at the end, once the app is defined (the hand-off
+          question). `auto` asks nothing.
 
   apply   SHEET.json [ANSWERS.json] [--out FILE]
           Merges {"answers": {"<detail id>": "<chosen label or the user's
@@ -35,17 +40,53 @@ for intake.py.
           stores the session answers, and queues the drafted features in
           build order. A feature whose details the user changed is marked
           "revise"; one whose details were all answered "Not needed" is dropped.
+          `followup` lists the details still open, and `next_step` says what
+          comes next: "revise" (the scout proposes the open and newly needed
+          details and rewrites the features) or "build". When it is "build",
+          `handoff.question` asks whether to pass the app to the implementer
+          now (every feature, the first only, or not now); the answer goes to
+          `next --build all|first|plan`, the same hand-off
+          /feature-ladder:feature --from-brainstorm makes.
+
+  followup APP.json DETAILS.json
+          Follow-up round. Merges the scout's {"details": {"<id>": {value,
+          confidence, options, ...}}} (proposals for the open details, and any
+          new detail the answers called for) into the confirmed sheet and
+          prints the questions for this round, decide-style. After
+          MAX_ROUNDS follow-up rounds nothing more is asked: proposals are
+          taken as they are.
+
+  refine  APP.json [ANSWERS.json]
+          Settles the follow-up round's answers ({"answers": {...}}; a detail
+          left unanswered keeps the scout's proposal), re-plans the queue and
+          prints the sheet with its new `followup` and `next_step`.
 
   features APP.json FEATURES.json
           Replaces the queue with {"features": [...]} after a revision. Exit 1
           and nothing written when the list is invalid (unknown detail or
           dependency, a cycle, a missing request).
 
-  next    [--sheet APP.json] [--cwd DIR]
+  next    [--sheet APP.json | --app SLUG] [--feature ID] [--build all|first|plan] [--cwd DIR]
           The next feature to build: its request text for one ladder run and
           the `brainstorm` object for that run's intake answers (the short,
           binding app context for its cards). `feature` is null when the
           queue is done, blocked, plan-only, or the session budget is spent.
+          This is the hand-off /feature-ladder:feature --from-brainstorm uses:
+          --app picks a confirmed sheet by its slug (default: the latest),
+          --feature a queued feature by id, --build records the hand-off
+          answer (all, first, or plan: not now) and overrides what the sheet
+          builds (a plan-only sheet is built when --build all|first is given).
+
+  remember [--sheet APP.json | --app SLUG] [--no-flush]
+          Queues the settled architecture (every architecture detail, the
+          data model and permissions, that the user decided or the scout
+          proposed; nothing the repo already shows) as one "[decision]
+          `arch:<id>` ..." fact per detail in
+          .feature-ladder/session-memory-architecture.md, and starts the
+          unattended Hindsight write (memory_gate.py flush --background)
+          unless --no-flush. These facts are written outside the per-session
+          cap and tagged `architecture`; recall.py gives a feature the ones
+          that bear on it on its Memory: line.
 
   done    ID [--status done|partial|skipped|queued] [--note TEXT] [--sheet APP.json]
           Records how a feature ended (`queued` puts it back for a retry).
@@ -279,14 +320,22 @@ DOC_SUFFIXES = (".md", ".rst", ".txt", ".mdx")
 MANIFESTS = ["package.json", "pyproject.toml", "requirements*.txt", "go.mod", "Cargo.toml", "Gemfile", "pubspec.yaml"]
 MONOREPO = ["pnpm-workspace.yaml", "turbo.json", "nx.json", "lerna.json"]
 NOT_NEEDED = ("not needed", "none", "n/a", "na", "not applicable", "no", "skip")
+# The hand-off question, asked once the app is defined: pass it to the
+# implementer (one /feature-ladder:feature run per feature) now, or later.
 BUILD_OPTIONS = [
-    ("all", "Every feature, in order (Recommended)",
-     "One ladder run per feature until the session's subagent budget is spent; the rest stay queued"),
-    ("first", "The first feature only", "Builds the foundation feature; the rest stay queued for later runs"),
-    ("plan", "Plan only", "Stops after the feature list; nothing is built"),
+    ("all", "Implement every feature now (Recommended)",
+     "Passes the queue to the implementer: one atomic ladder run per feature, in order, until the session's "
+     "subagent budget is spent; the rest stay queued"),
+    ("first", "Implement the first feature only", "Builds the foundation feature now; the rest stay queued"),
+    ("plan", "Not now", "Stops with the plan; build it later with {command}"),
 ]
 MAX_VALUE = 220      # characters of one detail on a card
 MAX_CONTEXT = 1800   # characters of the whole card block
+MAX_ROUNDS = 3       # follow-up rounds of questions after the first; then proposals stand
+# What `remember` stores in Hindsight as the app's architecture: every
+# architecture detail, plus the two application details features must agree on.
+ARCH_EXTRA = ("entities", "roles")
+ARCH_QUEUE = "session-memory-architecture.md"   # beside session-memory.md (already git-ignored)
 
 GUIDE = """\
 BRAINSTORM GUIDE - follow exactly. You settle the whole app before anything is
@@ -302,12 +351,14 @@ scoped or built: you estimate, the user confirms. Change no code.
    Evidence that starts with "read:" names the files to read for that detail.
 
 2. Recall. What this repository's memory already decided:
-     python3 "RECALL" --query "<the request>" --out .feature-ladder/brainstorm/<slug>-recall.json
-   (no model; it keeps only the facts that bear on the request). Each fact on
-   its "memory" line is evidence: a recorded decision, convention or interface
-   settles its detail with confidence "high" and evidence "memory: [kind] ...";
-   a pitfall goes into the evidence of the detail it affects. "Memory: none"
-   means there is nothing to use; go on.
+     python3 "RECALL" --query "<the request>" --arch-cap 40 --out .feature-ladder/brainstorm/<slug>-recall.json
+   (no model; it keeps only the facts that bear on the request, plus every
+   architecture decision an earlier brainstorm stored, "`arch:<detail>` ...").
+   Each fact on its "memory" line is evidence: a recorded decision, convention
+   or interface settles its detail with confidence "high" and evidence
+   "memory: [kind] ..." (an `arch:<detail>` fact settles <detail>); a pitfall
+   goes into the evidence of the detail it affects. "Memory: none" means there
+   is nothing to use; go on.
 
 3. Read. The request first; then README, the manifests, the entry points and
    the "read:" files. At most ~20 files. For a new, empty project read nothing
@@ -328,8 +379,13 @@ scoped or built: you estimate, the user confirms. Change no code.
      your recommendation first. No filler options.
    - "status": "not_applicable" plus one line of evidence when the app has no
      such thing (no notifications, no files). Do not invent needs.
-   A detail the sheet lacks: add it under a new id with "group"
+   The sheet's details are a floor, not a ceiling: add EVERY detail this app
+   needs that the sheet lacks (a payment flow, offline sync, an import
+   format, a pricing rule...), each under a new id with "group"
    ("application" or "architecture"), "header" (<= 12 chars) and "question".
+   There is no limit on questions: a detail you are not sure of is asked,
+   not guessed. Ask nothing about how to build a feature (that is the
+   feature run's job), only what the app is and how it is put together.
 
 5. Draft "features": the app split into the smallest features that can each be
    built and tested on their own, in build order, foundation first. Each:
@@ -345,14 +401,26 @@ scoped or built: you estimate, the user confirms. Change no code.
 7. Return the sheet path, then the decide output verbatim, then
    `Retained: none - brainstorm only`.
 
-REVISE (only when asked to, after `apply`; skip steps 1-7). Read the confirmed
-app sheet (.json) named in your prompt. Rewrite the "request", "covers" and
-"depends_on" of every feature marked "revise": true so it matches the
-confirmed details (the user changed the ones listed under "changed"), and fix
-whatever "feature_errors" names. Keep every other feature as it is. Save the
-whole list as {{"features": [...]}} in <slug>-features.json beside the sheet and run
+REVISE (only when asked to, after `apply` or `refine`; skip steps 1-7). Read
+the confirmed app sheet (.json) named in your prompt.
+ a. Follow-up details, when its "followup" list is not empty or the user's
+    answers call for a detail the sheet does not have yet (they picked
+    Stripe: how refunds and webhooks work; they want teams: how invites
+    work). For each, propose "value", "confidence", "evidence" and 2-4
+    "options" exactly as in step 4 (new ones also "group", "header",
+    "question"). Save {{"details": {{"<id>": {{...}}}}}} as
+    <slug>-followup.json beside the sheet and run
+     python3 "SCRIPT" followup <the confirmed app .json> <that file>
+ b. Features, when any is marked "revise": true, "feature_errors" is not
+    empty, or a detail settled since has no feature: rewrite the "request",
+    "covers" and "depends_on" of those features to match the confirmed
+    details (the user changed the ones listed under "changed"; take your own
+    recommendation for any follow-up detail still being asked), add a feature
+    for an uncovered detail, and keep every other feature as it is. Save the
+    whole list as {{"features": [...]}} in <slug>-features.json and run
      python3 "SCRIPT" features <the confirmed app .json> <that file>
-Return its output verbatim, then `Retained: none - brainstorm only`.
+Return each output verbatim (followup first), then
+`Retained: none - brainstorm only`.
 """
 
 
@@ -659,14 +727,15 @@ def _options(d):
 
 
 # ------------------------------------------------------------------- decide --
-def decide(sheet, mode="default", max_q=40):
+def decide(sheet, mode="default", max_q=None):
     dims = sheet["dimensions"]
     questions, open_text, assumed, not_applicable = [], [], [], []
     for dim_id, d in _ordered(dims):
         row = {"detail": dim_id, "group": d["group"], "header": d["header"]}
         if d["status"] == "not_applicable":
             not_applicable.append(dict(row, why="; ".join(d["evidence"][:1])))
-        elif (d["confidence"] == "high" and d["value"]) or mode == "auto" or len(questions) + len(open_text) >= max_q:
+        elif (d["confidence"] == "high" and d["value"]) or mode == "auto" or \
+                (max_q is not None and len(questions) + len(open_text) >= max_q):
             entry = dict(row, value=d["value"], status=d["status"], confidence=d["confidence"], evidence=d["evidence"][:2])
             if mode != "auto" and not (d["confidence"] == "high" and d["value"]):
                 entry["note"] = "question budget used up"
@@ -680,11 +749,8 @@ def decide(sheet, mode="default", max_q=40):
                 open_text.append(q)   # nothing proposed: asked in the user's own words
 
     decisions = []
-    if mode != "auto":
+    if mode != "auto":   # what to build is asked at the end: progress()["handoff"]["question"]
         decisions = intake.session_decisions(sheet.get("repo_root"), "M", mode)
-        decisions.append({"id": "build", "header": "Build",
-                          "question": "Once the details are settled and the app is split into features, what should be built?",
-                          "options": [{"label": label, "description": desc} for _, label, desc in BUILD_OPTIONS]})
     return {
         "mode": mode,
         "request": sheet.get("request"),
@@ -778,13 +844,16 @@ STATUSES = ("queued", "running", "done", "partial", "skipped", "dropped")
 
 # -------------------------------------------------------------------- apply --
 def build_mode(label):
-    """The `build` decision's label (or all | first | plan) -> all | first | plan."""
+    """The hand-off answer (a label, or all | first | plan) -> all | first | plan;
+    "ask" when nothing was answered yet."""
     v = _strip_rec(label).lower()
-    if v in ("first", "plan"):
+    if not v:
+        return "ask"
+    if v in ("first", "plan", "all", "ask"):
         return v
-    if v.startswith(("the first", "first")):
+    if "first" in v:
         return "first"
-    if v.startswith("plan"):
+    if v.startswith(("plan", "not now", "later", "stop", "no")):
         return "plan"
     return "all"
 
@@ -795,43 +864,10 @@ def apply(sheet, answers, mode="default"):
     unknown = [k for k in given if k not in sheet["dimensions"]]
     if unknown:
         raise ValueError("answers name unknown detail(s): " + ", ".join(unknown))
-    dims = {}
-    for dim_id, d in _ordered(sheet["dimensions"]):
-        out = {"group": d["group"], "header": d["header"], "value": d["value"], "evidence": d["evidence"][:4]}
-        ans = norm(given.get(dim_id))
-        first = d["options"][0] if d["options"] else None
-        rec = _strip_rec(first if isinstance(first, str) else (first or {}).get("label"))
-        if not ans or ans.lower().startswith("you decide"):
-            if d["status"] == "not_applicable":
-                out.update(status="not_applicable", source="scout")
-            elif d["value"]:
-                detected = d["status"] == "detected" and d["confidence"] == "high"
-                out.update(status="detected" if detected else "assumed",
-                           source="repo" if detected else "scout:" + d["confidence"])
-            else:
-                out.update(status="open", source="none")
-        elif _strip_rec(ans).lower() in NOT_NEEDED:
-            out.update(status="not_applicable", source="user", value=None,
-                       changed=d["status"] != "not_applicable" and bool(d["value"]))
-        elif _same(_strip_rec(ans), rec) or _same(_strip_rec(ans), d["value"]) or \
-                (d["value"] and _same(_strip_rec(ans), _clip(d["value"], 80))):
-            out.update(status="decided", source="user (confirmed)", value=d["value"] or _strip_rec(ans))
-        else:
-            picked = next((o for o in d["options"] if not isinstance(o, str)
-                           and _same(_strip_rec(o.get("label")), _strip_rec(ans))), None)
-            out.update(status="decided", source="user", value=_strip_rec(ans), changed=True)
-            if picked and picked.get("description"):
-                out["detail"] = norm(picked["description"])
-        if not out.get("changed"):
-            out.pop("changed", None)
-        dims[dim_id] = out
-
+    dims = {dim_id: resolve(d, given.get(dim_id)) for dim_id, d in _ordered(sheet["dimensions"])}
     decisions = dict(answers.get("decisions") or {})
     features, errors, notes = plan_features(dims, sheet.get("features") or [])
-    counts = {}
-    for d in dims.values():
-        counts[d["status"]] = counts.get(d["status"], 0) + 1
-    return {
+    app = {
         "request": sheet.get("request"),
         "slug": sheet.get("slug"),
         "repo_root": sheet.get("repo_root"),
@@ -839,12 +875,162 @@ def apply(sheet, answers, mode="default"):
         "mode": mode,
         "build": build_mode(decisions.get("build")),
         "decisions": {k: v for k, v in decisions.items() if k in ("build", "orchestrator", "session_agents")},
-        "counts": counts,
         "dimensions": dims,
         "features": features,
         "feature_errors": errors,
         "notes": notes + [str(n) for n in answers.get("notes") or []],
+        "round": 0,
     }
+    return progress(app)
+
+
+def resolve(d, answer):
+    """One detail after the user's answer (None: not asked, or skipped)."""
+    out = {"group": d["group"], "header": d["header"], "value": d.get("value"), "evidence": (d.get("evidence") or [])[:4]}
+    if d.get("question"):
+        out["question"] = d["question"]
+    ans = norm(answer)
+    options = d.get("options") or []
+    first = options[0] if options else None
+    rec = _strip_rec(first if isinstance(first, str) else (first or {}).get("label"))
+    confidence = d.get("confidence") or "low"
+    if not ans or ans.lower().startswith("you decide"):
+        if d.get("status") == "not_applicable":
+            out.update(status="not_applicable", source=d.get("source") or "scout")
+        elif d.get("value"):
+            detected = d.get("status") == "detected" and confidence == "high"
+            out.update(status="detected" if detected else "assumed",
+                       source="repo" if detected else "scout:" + confidence)
+        else:
+            out.update(status="open", source="none")
+    elif _strip_rec(ans).lower() in NOT_NEEDED:
+        out.update(status="not_applicable", source="user", value=None,
+                   changed=d.get("status") != "not_applicable" and bool(d.get("value")))
+    elif _same(_strip_rec(ans), rec) or _same(_strip_rec(ans), d.get("value")) or \
+            (d.get("value") and _same(_strip_rec(ans), _clip(d["value"], 80))):
+        out.update(status="decided", source="user (confirmed)", value=d.get("value") or _strip_rec(ans))
+    else:
+        picked = next((o for o in options if not isinstance(o, str)
+                       and _same(_strip_rec(o.get("label")), _strip_rec(ans))), None)
+        out.update(status="decided", source="user", value=_strip_rec(ans), changed=True)
+        if picked and picked.get("description"):
+            out["detail"] = norm(picked["description"])
+    if not out.get("changed"):
+        out.pop("changed", None)
+    return out
+
+
+def _uncovered(app):
+    """Settled details that need code but no live feature covers."""
+    covered = {c for f in app.get("features") or [] if f["status"] != "dropped" for c in f["covers"]}
+    return [k for k, d in app["dimensions"].items() if k not in covered and k not in FRAMING
+            and d["status"] in ("decided", "assumed") and d.get("value") and d.get("source") != "repo"]
+
+
+def progress(app):
+    """Counts, the details still open (asked again in a follow-up round while
+    rounds are left), what the scout must still fix, and the next step."""
+    dims = app["dimensions"]
+    counts = {}
+    for d in dims.values():
+        counts[d["status"]] = counts.get(d["status"], 0) + 1
+    rounds_left = max(0, MAX_ROUNDS - int(app.get("round") or 0))
+    still_open = [k for k, d in _ordered(dims) if d["status"] == "open"]
+    app["counts"] = counts
+    app["followup"] = still_open if rounds_left else []
+    app["rounds_left"] = rounds_left
+    fix = [f["id"] for f in app.get("features") or [] if f.get("revise")]
+    reasons = []
+    if app["followup"]:
+        reasons.append("details still open: " + ", ".join(app["followup"]))
+    if fix:
+        reasons.append("features to rewrite: " + ", ".join(fix))
+    if app.get("feature_errors"):
+        reasons.append("feature list errors: " + "; ".join(app["feature_errors"][:3]))
+    new = [k for k in _uncovered(app) if dims[k].get("added_in_round")]
+    if new and app.get("features"):
+        reasons.append("details added in a follow-up round with no feature: " + ", ".join(new))
+    app["next_step"] = "revise" if reasons else "build"
+    app["revise_because"] = reasons
+    app["handoff"] = handoff(app)
+    return app
+
+
+def handoff(app):
+    """How a concluded brainstorm is passed to the implementer: the
+    /feature-ladder:feature --from-brainstorm command, and, while nobody has
+    answered it, the question that offers it (asked once the app is defined)."""
+    live = [f for f in app.get("features") or [] if f["status"] not in ("dropped", "done")]
+    command = f"/feature-ladder:feature --from-brainstorm {app.get('slug') or ''}".rstrip()
+    out = {"command": command, "next": live[0]["id"] if live else None, "queued": len(live), "question": None}
+    if app.get("build", "ask") == "ask" and app.get("next_step") == "build" and live:
+        out["question"] = {
+            "id": "handoff", "header": "Implement",
+            "question": f"The app is defined: {len(live)} feature(s) queued. Pass it to the implementer now?",
+            "options": [{"label": label, "description": desc.format(command=command), "value": key}
+                        for key, label, desc in BUILD_OPTIONS]}
+    return out
+
+
+# ----------------------------------------------------------- follow-up rounds --
+def followup(app, details):
+    """Merge the scout's proposals for open and newly needed details; return the
+    questions of this follow-up round (none once the rounds are used up)."""
+    if not isinstance(details, dict):
+        raise ValueError('followup needs {"details": {"<id>": {...}}}')
+    asking = int(app.get("round") or 0) < MAX_ROUNDS
+    dims = app["dimensions"]
+    for dim_id, s in details.items():
+        dim_id = re.sub(r"[^a-z0-9_]+", "_", str(dim_id).lower()).strip("_")
+        if not dim_id:
+            continue
+        s = s if isinstance(s, dict) else {"value": s}
+        old = dims.get(dim_id)
+        if old and old["status"] in ("decided", "detected") and old.get("source") != "scout":
+            continue   # the user (or the repo) already settled it: not asked again
+        d = normalise({"dimensions": {dim_id: dict({k: v for k, v in (old or {}).items()
+                                                     if k in ("group", "header", "question")}, **s)}})["dimensions"][dim_id]
+        settled_now = d["status"] == "not_applicable" or (d["value"] and (d["confidence"] == "high" or not asking))
+        out = resolve(d, None) if settled_now else dict(
+            {k: d[k] for k in ("group", "header", "question", "value", "evidence", "confidence", "options")},
+            status="proposed" if d["value"] else "open", source="scout:" + d["confidence"])
+        if old is None:
+            out["added_in_round"] = int(app.get("round") or 0) + 1
+        dims[dim_id] = out
+    asked = {k: d for k, d in dims.items() if d["status"] in ("proposed", "open") and asking}
+    questions, open_text = [], []
+    for k, d in _ordered(asked):
+        q = {"detail": k, "group": d["group"], "header": d["header"][:12], "question": d.get("question") or d["header"] + "?"}
+        opts = _options(dict(d, options=d.get("options") or [], evidence=d.get("evidence") or []))
+        (questions.append(dict(q, options=opts)) if opts else open_text.append(q))
+    app["pending_round"] = bool(asked)
+    progress(app)
+    return {"round": int(app.get("round") or 0) + 1, "asking": asking, "questions": questions, "open_text": open_text,
+            "ask_batches": intake._batches(len(questions)),
+            "note": None if asking else f"the {MAX_ROUNDS} follow-up rounds are used: the scout's proposals stand"}
+
+
+def refine(app, answers):
+    """Settle a follow-up round: answered details as the user said, the rest of
+    this round's proposals as proposed. Re-plans the queue."""
+    given = (answers or {}).get("answers") or {}
+    dims = app["dimensions"]
+    unknown = [k for k in given if k not in dims]
+    if unknown:
+        raise ValueError("answers name unknown detail(s): " + ", ".join(unknown))
+    for k, d in list(dims.items()):
+        if d["status"] in ("proposed", "open") or k in given:
+            prev = dict(d)
+            if prev["status"] not in ("proposed", "open"):
+                prev.setdefault("confidence", "low")
+            dims[k] = dict(resolve(prev, given.get(k)), **({"added_in_round": d["added_in_round"]}
+                                                          if d.get("added_in_round") else {}))
+    app["round"] = int(app.get("round") or 0) + 1
+    app.pop("pending_round", None)
+    features, errors, notes = plan_features(dims, app.get("features") or [])
+    app.update(features=features or app.get("features") or [], feature_errors=errors,
+               notes=list(dict.fromkeys((app.get("notes") or []) + notes)), refined_at=now())
+    return progress(app)
 
 
 # ------------------------------------------------------------------- render --
@@ -886,6 +1072,15 @@ def render(app):
         lines.append("none yet" + ("".join(f"\n- {e}" for e in app.get("feature_errors") or [])))
     if app.get("notes"):
         lines += ["", "## Notes", ""] + [f"- {n}" for n in app["notes"]]
+    if app.get("round"):
+        lines += ["", f"Follow-up rounds of questions: {app['round']} of at most {MAX_ROUNDS}."]
+    ho = app.get("handoff") or {}
+    if ho.get("next"):
+        lines += ["", "## Continue", "", f"Build the queue with `{ho['command']}` "
+                  f"(next: `{ho['next']}`; add a feature id after the slug to build just that one)."]
+    if app.get("architecture_memory"):
+        am = app["architecture_memory"]
+        lines += ["", f"Architecture stored in Hindsight memory: {am.get('queued', 0)} fact(s) queued {am.get('at', '')}."]
     lines.append("")
     return "\n".join(lines)
 
@@ -918,10 +1113,17 @@ def _confirmed(root):
     return found
 
 
-def current(root, sheet=None):
-    """The sheet named, else the one most recently confirmed in this repo."""
+def current(root, sheet=None, slug=None):
+    """The sheet named (a path, or a slug under .feature-ladder/brainstorm/),
+    else the one most recently confirmed in this repo."""
     if sheet:
         return Path(sheet), _load(sheet)
+    if slug:
+        slug = str(slug).strip()
+        hits = [fa for fa in _confirmed(root) if fa[0].stem == slug or fa[1].get("slug") == slug]
+        if not hits:
+            raise ValueError(f"no confirmed app sheet {slug!r} in {_dir(root)}")
+        return max(hits, key=lambda fa: fa[1]["confirmed_at"])
     found = _confirmed(root)
     if not found:
         raise ValueError("no confirmed app sheet here; run the brainstorm first")
@@ -973,20 +1175,42 @@ def summary(app):
     return dict(counts, blocked=blocked, total=len([f for f in feats if f["status"] != "dropped"]))
 
 
-def next_feature(path, app, root):
+def next_feature(path, app, root, feature_id=None, build=None):
     """Pick (and mark running) the next feature: one already running, else the
-    first queued one whose dependencies are all done."""
+    first queued one whose dependencies are all done. `feature_id` asks for one
+    feature by id; `build` (all | first) overrides the sheet's choice, so a
+    plan-only sheet can be handed to /feature-ladder:feature later."""
     feats = app.get("features") or []
     done = {f["id"] for f in feats if f["status"] == "done"}
-    result = {"sheet": str(path), "build": app.get("build", "all"), "feature": None}
+    if build in ("all", "first", "plan") and app.get("build") != build:
+        app["build"] = build
+        app["handoff"] = handoff(app)
+        save_app(app, str(path))
+    result = {"sheet": str(path), "slug": app.get("slug"), "build": app.get("build", "all"), "feature": None}
+    if app.get("next_step") == "revise" and app.get("revise_because"):
+        result["warning"] = "the sheet still has work for the scout: " + "; ".join(app["revise_because"])
     sess = intake.session_status(root)
     if "left" in sess:
         result["session_left"] = sess["left"]
     pick = None
     if app.get("build") == "plan":
-        result["note"] = "plan only: nothing is built in this run"
+        result["note"] = ("plan only: nothing is built in this run; pass it to the implementer later with "
+                          + handoff(app)["command"])
+    elif app.get("build", "ask") == "ask":
+        result["note"] = "ask handoff.question first, then `next --build all|first|plan` with the answer"
     elif result.get("session_left") == 0:
         result["note"] = "the session's subagent budget is spent; the rest stay queued"
+    elif feature_id:
+        pick = next((f for f in feats if f["id"] == feature_id), None)
+        if pick is None:
+            raise ValueError(f"no feature {feature_id!r} in this app sheet")
+        waiting = [d for d in pick["depends_on"] if d not in done]
+        if pick["status"] not in ("queued", "running"):
+            result["note"] = f"{feature_id} is {pick['status']}; `done {feature_id} --status queued` queues it again"
+            pick = None
+        elif waiting:
+            result["note"] = f"{feature_id} waits on {', '.join(waiting)}, not done yet"
+            pick = None
     else:
         pick = next((f for f in feats if f["status"] == "running"), None) or \
             next((f for f in feats if f["status"] == "queued" and all(d in done for d in f["depends_on"])), None)
@@ -1004,6 +1228,70 @@ def next_feature(path, app, root):
         result["note"] = ("blocked: " + ", ".join(left["blocked"]) + " wait on a feature that did not finish"
                           if left["blocked"] else "every feature is finished")
     return result
+
+
+# --------------------------------------------------- architecture -> Hindsight --
+def _memory_gate():
+    sys.path.insert(0, str(HERE.parents[1] / "hindsight-memory" / "scripts"))
+    import memory_gate
+    return memory_gate
+
+
+def architecture_facts(app):
+    """One '[decision] `arch:<id>` Header: value' line per architecture detail
+    the brainstorm settled (decided by the user or proposed by the scout and
+    kept). Details the repo already shows (detected) are left out: the scan
+    finds them again for free. Each line is one fact for the memory gate:
+    at most two sentences and 280 characters."""
+    mg = _memory_gate()
+    out = []
+    for k, d in _ordered(app.get("dimensions") or {}):
+        if (d["group"] != "architecture" and k not in ARCH_EXTRA) or d["status"] not in ("decided", "assumed"):
+            continue
+        value = norm(d.get("value"))
+        if d.get("detail") and len(value) < 120:
+            value += f" ({norm(d['detail'])})"
+        if not value:
+            continue
+        head = f"`arch:{k}` {d['header']}: "
+        body = " ".join(mg._sentences(value)[:mg.MAX_SENTENCES])
+        if len(head) + len(body) > mg.MAX_CHARS:
+            body = body[:mg.MAX_CHARS - len(head) - 3].rstrip(" ,;:.") + "..."
+        out.append(f"[decision] {head}{body}")
+    return out
+
+
+def remember(app, root, flush=True):
+    """Queue the architecture for Hindsight and (in Claude Code) start the
+    unattended write. Written outside the per-session cap, tagged
+    `architecture`, never during a feature run."""
+    mg = _memory_gate()
+    q = Path(root) / ".feature-ladder" / ARCH_QUEUE
+    queued_before = set()
+    if q.is_file():
+        queued_before = {mg._hash(l.split("]", 1)[-1].strip()) for l in q.read_text(encoding="utf-8").splitlines() if "]" in l}
+    seen = mg.retained_hashes(root) | queued_before
+    ok, skipped = [], []
+    for line in architecture_facts(app):
+        try:
+            kind, fact, h = mg.check_line(root, line, seen)
+            seen.add(h)
+            ok.append(f"[{kind}] {fact}")
+        except ValueError as e:
+            skipped.append({"line": line[:200], "reason": str(e)})
+    if ok:
+        q.parent.mkdir(parents=True, exist_ok=True)
+        with open(q, "a", encoding="utf-8") as fh:
+            for l in ok:
+                fh.write(f"- {l}\n")
+        intake._ensure_ignore(root)
+    started = None
+    if flush and (ok or q.is_file()):
+        try:
+            started = mg.background(Path(root))
+        except Exception as e:  # noqa: BLE001 - memory never stops the brainstorm
+            started = {"started": False, "reason": f"{type(e).__name__}: {e}"[:200]}
+    return {"queued": len(ok), "facts": ok, "skipped": skipped, "queue": str(q), "flush": started}
 
 
 # --------------------------------------------------------------------- main --
@@ -1049,7 +1337,8 @@ def main(argv):
             print(json.dumps(result, indent=2))
             return 0
         if cmd == "decide":
-            mode, max_q = opt("--mode", "default"), int(opt("--max", "40"))
+            mode, max_q = opt("--mode", "default"), opt("--max")
+            max_q = int(max_q) if max_q else None
             print(json.dumps(decide(load_sheet(rest[0]), mode, max_q), indent=2))
             return 0
         if cmd == "apply":
@@ -1078,17 +1367,48 @@ def main(argv):
             for f in feats:   # the list was just rewritten against the confirmed sheet
                 f.pop("revise", None)
                 f.pop("changed", None)
+            for d in app["dimensions"].values():   # ... so no detail flags a rewrite again
+                d.pop("changed", None)
+                d.pop("added_in_round", None)
             app.update(features=feats, feature_errors=[], notes=notes, revised_at=now())
+            progress(app)
             _, md = save_app(app, str(path))
-            print(json.dumps({"features": feats, "notes": notes, "written_to": str(path), "readable": md}, indent=2))
+            print(json.dumps({"features": feats, "notes": notes, "next_step": app["next_step"],
+                              "revise_because": app["revise_because"], "handoff": app["handoff"],
+                              "written_to": str(path), "readable": md}, indent=2))
+            return 0
+        if cmd in ("followup", "refine"):
+            path, app = Path(rest[0]), _load(rest[0])
+            data = _load(rest[1]) if len(rest) > 1 else {}
+            if cmd == "followup":
+                out = followup(app, data.get("details") if isinstance(data, dict) else None)
+                _, md = save_app(app, str(path))
+                print(json.dumps(dict(out, written_to=str(path), readable=md), indent=2))
+                return 0
+            refine(app, data)
+            _, md = save_app(app, str(path))
+            print(json.dumps(dict(app, written_to=str(path), readable=md), indent=2))
+            return 0
+        if cmd == "remember":
+            sheet_opt, slug, no_flush = opt("--sheet"), opt("--app"), flag("--no-flush")
+            root, _ = intake.repo_root(cwd)
+            path, app = current(root, sheet_opt, slug)
+            out = remember(app, app.get("repo_root") or root, flush=not no_flush)
+            facts = list(dict.fromkeys((app.get("architecture_memory") or {}).get("facts", []) + out["facts"]))
+            app["architecture_memory"] = {"facts": facts, "queued": len(facts), "at": now()}
+            save_app(app, str(path))
+            print(json.dumps(dict(out, sheet=str(path)), indent=2))
             return 0
         if cmd in ("next", "done", "context"):
-            sheet_opt, as_json = opt("--sheet"), flag("--json")
-            fid, status, note = opt("--feature"), opt("--status", "done"), opt("--note")
+            sheet_opt, slug, as_json = opt("--sheet"), opt("--app"), flag("--json")
+            fid, status, note, build = opt("--feature"), opt("--status", "done"), opt("--note"), opt("--build")
             root, _ = intake.repo_root(cwd)
-            path, app = current(root, sheet_opt)
+            path, app = current(root, sheet_opt, slug)
             if cmd == "next":
-                print(json.dumps(next_feature(path, app, root), indent=2))
+                if build not in (None, "all", "first", "plan"):
+                    print("next: --build is all, first or plan", file=sys.stderr)
+                    return 1
+                print(json.dumps(next_feature(path, app, root, fid, build), indent=2))
                 return 0
             fid = fid or (rest[0] if rest else None)
             if cmd == "context":
@@ -1109,8 +1429,9 @@ def main(argv):
             hits = [fa for fa in _confirmed(root) if text and norm(fa[1].get("request")) == text]
             if hits:
                 path, app = max(hits, key=lambda fa: fa[1]["confirmed_at"])
-                if app.get("build") == "plan":   # they came back to build what they planned
-                    app["build"] = "first"
+                if app.get("build") == "plan":   # they came back: offer the hand-off again
+                    app["build"] = "ask"
+                    progress(app)
                 app["resumed_at"] = now()
                 save_app(app, str(path))
                 print(str(path))

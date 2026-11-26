@@ -1,10 +1,12 @@
 """The --brainstorm switch: every application and architecture detail of the
-app is settled at the very front, in one round, before the work is narrowed
-into features and built.
+app is settled at the very front, before the work is narrowed into features
+and built (follow-up rounds, the hand-off and the architecture memory are in
+test_brainstorm_handoff.py).
 
 Pins: the repo scan settles what manifests settle (names only for secrets);
 every applicable detail that is not high confidence is asked, application
-first, with the session questions and the build choice in the same round;
+first, with the session questions in the same round (what to build is the
+hand-off question at the end);
 the answers become a confirmed sheet and a feature queue in build order; each
 feature's cards carry only the details it covers; and the whole phase adds no
 agent beyond the scout.
@@ -210,12 +212,9 @@ class Decide(Base):
         self.assertIn("edge_cases", [q["detail"] for q in dec["open_text"]])   # nothing proposed: free text
         self.assertIn("success", [q["detail"] for q in dec["open_text"]])      # the scout left it out entirely
 
-    def test_session_questions_and_the_build_choice_come_in_the_same_round(self):
+    def test_session_questions_come_in_the_same_round_and_build_is_asked_at_the_end(self):
         dec = self.decide()
-        self.assertEqual([d["id"] for d in dec["decisions"]], ["orchestrator", "session_agents", "build"])
-        build = dec["decisions"][-1]
-        self.assertEqual([o["label"] for o in build["options"]],
-                         ["Every feature, in order (Recommended)", "The first feature only", "Plan only"])
+        self.assertEqual([d["id"] for d in dec["decisions"]], ["orchestrator", "session_agents"])
         n = len(dec["decisions"]) + len(dec["questions"])
         self.assertEqual(sum(dec["ask_batches"]), n)
         self.assertTrue(all(b <= 4 for b in dec["ask_batches"]))
@@ -288,12 +287,12 @@ class Apply(Base):
         prop = intake.scan("add the household data model", str(self.root))
         self.assertEqual([d["id"] for d in intake.decide(prop)["decisions"]], [])
         self.assertEqual(brainstorm.decide(brainstorm.normalise(scout_sheet(), brainstorm.scan(REQUEST, str(self.root))))
-                         ["decisions"][0]["id"], "build")
+                         ["decisions"], [])
 
     def test_no_answers_file_means_the_scouts_values_stand(self):
         app = self.confirm()
         self.assertNotIn("decided", app["counts"])
-        self.assertEqual(app["build"], "all")
+        self.assertEqual(app["build"], "ask")          # the hand-off question is still to come
         self.assertEqual(session_budget.status(self.root)["budget"], "unset")   # nothing stored for the session
 
     def test_an_answer_for_an_unknown_detail_is_refused(self):
@@ -303,8 +302,10 @@ class Apply(Base):
         self.assertIn("colour", r.stderr)
 
     def test_build_choice_maps_to_all_first_or_plan(self):
-        for label, mode in (("Every feature, in order (Recommended)", "all"), ("The first feature only", "first"),
-                            ("Plan only", "plan"), ("first", "first"), ("", "all"), (None, "all")):
+        for label, mode in (("Implement every feature now (Recommended)", "all"),
+                            ("Implement the first feature only", "first"), ("Not now", "plan"),
+                            ("Every feature, in order (Recommended)", "all"), ("The first feature only", "first"),
+                            ("Plan only", "plan"), ("first", "first"), ("", "ask"), (None, "ask")):
             self.assertEqual(brainstorm.build_mode(label), mode, label)
 
 
@@ -405,8 +406,11 @@ class Queue(Base):
         self.assertEqual(self.run_cli("find", "some other request").stdout, "")
         found = self.run_cli("find", "  build a shared   grocery list app for households ").stdout.strip()
         self.assertTrue(found.endswith(".json"))
-        again = self.next()
-        self.assertEqual((again["build"], again["feature"]["id"]), ("first", "household-model"))
+        again = self.next()                       # they came back: the hand-off is offered again
+        self.assertIsNone(again["feature"])
+        self.assertIn("handoff.question", again["note"])
+        self.assertEqual(json.loads(self.run_cli("next", "--build", "first").stdout)["feature"]["id"],
+                         "household-model")
 
     def test_nothing_is_handed_out_once_the_session_budget_is_spent(self):
         self.confirm(dict(ANSWERS, decisions=dict(ANSWERS["decisions"], session_agents="Small (1-2 subagents)")))
@@ -473,7 +477,7 @@ class Wiring(unittest.TestCase):
         feature = self.read("plugins", "feature-ladder", "commands", "feature.md")
         self.assertIn("| `--brainstorm` |", feature)
         self.assertIn("[--brainstorm]", feature.split("---")[1])
-        self.assertIn("## 0b. Brainstorm (only with `--brainstorm`)", feature)
+        self.assertIn("## 0b. Brainstorm (only with `--brainstorm` or `--from-brainstorm`)", feature)
         self.assertIn("Mode: brainstorm", self.read("plugins", "feature-ladder", "agents", "scoper.md"))
         app = self.read("claude-app", "model-ladder-router", "SKILL.md")
         self.assertIn("complexity-router/scripts/brainstorm.py", app.split("for f in ")[1].split("; do")[0])
