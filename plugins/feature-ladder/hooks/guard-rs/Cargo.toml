@@ -1,0 +1,21 @@
+[package]
+name = "guard-irreversible"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "feature-ladder PreToolUse(Bash) audit hook: a byte-compatible Rust port of guard_irreversible.py + irreversible.gate"
+license = "MIT"
+build = "build.rs"
+
+[[bin]]
+name = "guard_irreversible"
+path = "src/main.rs"
+
+[dependencies]
+fancy-regex = "0.20.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

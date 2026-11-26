@@ -13,3 +13,7 @@ FEATURE-REPORT.md
 
 # local API keys (SILK_API_KEY for --no-bs, ...)
 .env
+
+# the Rust build of the audit hook (made locally by hooks/scripts/build_guard.sh)
+plugins/feature-ladder/hooks/bin/
+plugins/feature-ladder/hooks/guard-rs/target/

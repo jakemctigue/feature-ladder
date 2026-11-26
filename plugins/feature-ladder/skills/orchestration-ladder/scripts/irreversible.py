@@ -48,6 +48,12 @@ are rendered.
   classify "<command>"            print the decision as JSON (no side effects)
   report                          markdown table of outside-repo actions
   pending                         the review: pending rows as a markdown list
+
+hooks/guard-rs is a Rust port of gate() and the guard hook, used when built
+(hooks/scripts/build_guard.sh). This file stays the reference: change a rule
+here, mirror it in guard-rs/src/classify.rs, and tests/test_guard_rs.py
+compares the two. A binary built before the edit hands every call back to
+Python until it is rebuilt.
 """
 import json
 import re

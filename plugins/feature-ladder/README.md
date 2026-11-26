@@ -308,6 +308,21 @@ then `/plugin install feature-ladder@feature-ladder`. To check the install,
 `/agents` should list the fourteen `feature-ladder:*` agents, and `/mcp` should
 show `plugin:feature-ladder:hindsight`.
 
+Optional, with a Rust toolchain ([rustup](https://rustup.rs)): build the audit
+hook as a native binary so the check before every Bash call doesn't start
+Python (about 185 ms down to 60 ms per call on Windows):
+
+```sh
+bash ~/.claude/plugins/cache/feature-ladder/feature-ladder/<version>/hooks/scripts/build_guard.sh
+```
+
+The binary (`hooks/guard-rs`, installed in `hooks/bin/`) is a port of
+`guard_irreversible.py` and `irreversible.py`: same decisions, the same
+`run.json` bytes and the same lock. It only acts while it matches the Python
+files it was built from; after an edit or a plugin update it hands every call
+to the Python hook until you build it again. `build_guard.sh --clean` removes
+it.
+
 ### Claude app
 
 Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
