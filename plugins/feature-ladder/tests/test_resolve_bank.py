@@ -66,7 +66,8 @@ class RepoCase(unittest.TestCase):
         self.cache = Path(self.tmp.name) / "banks.json"
         self.mcp = FakeMcp()
         for p in (mock.patch.object(resolve_bank, "CACHE", self.cache),
-                  mock.patch.object(resolve_bank, "Mcp", lambda: self.mcp)):
+                  mock.patch.object(resolve_bank, "Mcp", lambda *a, **k: self.mcp),
+                  mock.patch.object(resolve_bank, "key_status", lambda *a, **k: (True, "test"))):
             p.start()
             self.addCleanup(p.stop)
         ladder_state._ROOTS.clear()
@@ -184,7 +185,7 @@ class Hook(RepoCase):
         self.mcp.banks.append({"bank_id": "coding-agent::acme-widgets", "name": "acme/widgets"})
         resolve_bank.resolve(str(self.root))
         exact = {"query": "retries", "bank_id": "coding-agent::acme-widgets", "tags": ["project:widgets"],
-                 "tags_match": "all", "max_tokens": 1000, "budget": "low", "types": ["world", "experience"]}
+                 "tags_match": "any_strict", "max_tokens": 1000, "budget": "low", "types": ["world", "experience"]}
         self.assertEqual(self.pre("recall", exact), {})
 
     def test_a_gate_that_raises_denies_instead_of_letting_the_call_through(self):

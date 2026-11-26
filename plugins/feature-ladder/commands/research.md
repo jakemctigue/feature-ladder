@@ -1,5 +1,5 @@
 ---
-description: Research what a requested feature wants from this codebase, without building it and without asking questions. Reuses the intake scan and the Sonnet scout's proposal, the router and the skill selector, then writes and prints a short research brief - what the feature touches, a qualitative cost label per agent (never a number) and what to expect. No Opus, no Fable, at most one Haiku evidence-collector call. Usage - /feature-ladder:research <description>
+description: Research what a requested feature wants from this codebase, without building it and without asking questions. Reuses the intake scan and the Sonnet scout's proposal, the router and the skill selector, then writes and prints a short research brief - what the feature touches, a qualitative cost label per agent (never a number) and what to expect. No Opus, no Fable, at most one Haiku evidence-collector call; memory is read by a script. Usage - /feature-ladder:research <description>
 argument-hint: <feature description>
 ---
 
@@ -51,7 +51,17 @@ Agent(subagent_type="feature-ladder:evidence-collector", model="haiku", effort="
 ```
 Otherwise dispatch nothing else.
 
-## 5. Build and print
+## 5. Memory (no model)
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/recall.py" --query "<request text>" --paths <the proposal's candidate files> --reuse .feature-ladder/intake/<slug>-recall.json --out .feature-ladder/intake/<slug>-recall.json
+```
+It reuses the scout's recall (or recalls once) and prints only the facts
+that bear on this request. Keep its `memory` line for step 6. If it prints
+`mcp_fallback`, make that one Hindsight MCP `recall`, save the result to the
+same file and run it again with `--from` that file.
+
+## 6. Build and print
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/brief.py" build --proposal .feature-ladder/intake/<slug>-proposal.json [--external "<name>" --evidence .feature-ladder/intake/<slug>-evidence.md]
@@ -59,7 +69,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/brief.py" build 
 It writes `.feature-ladder/intake/<slug>-brief.md` and prints it. Pass `--no-bs`
 before `build`'s other flags when the run has it, so the brief labels the cheap
 tiers with the Silk Compute models the runner will use. Show the brief
-as printed, then add this line: "To build it, run `/feature-ladder:feature
+as printed, then a `What memory says` line with step 5's `memory` line
+verbatim, then this line: "To build it, run `/feature-ladder:feature
 <the same request>` (add `--researcher` to see the brief first); the saved
 brief and proposal are reused, and the Ask step is yours."
 

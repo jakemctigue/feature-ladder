@@ -28,7 +28,7 @@ Both use the same scripts and rules, pinned to the same release tag.
 
 ```mermaid
 flowchart LR
-    A["0 · Intake<br/>Sonnet scout, ask once"] --> B["1 · Recall<br/>one Hindsight recall, 1,000 tokens"]
+    A["0 · Intake<br/>Sonnet scout, ask once"] --> B["1 · Recall<br/>recall.py: one Hindsight recall,<br/>only relevant facts, no model"]
     B --> C["2 · Card<br/>confidence.py sizes it,<br/>intake.py routes it"]
     C -- "&lt; 0.60" --> R["Reshard into<br/>smaller cards"]
     R --> D
@@ -37,7 +37,8 @@ flowchart LR
     D -- "one worker" --> F
     E --> F["5 · verify.py<br/>re-runs checks, no model"]
     F --> G["6 · Finish<br/>report, merge stack,<br/>review: pending"]
-    G -. "end of session" .-> W["/feature-ladder:wrap<br/>memory flush, ledger,<br/>reviews if asked"]
+    G -. "session ends" .-> M["memory flush<br/>script, no model"]
+    G -. "end of session" .-> W["/feature-ladder:wrap<br/>ledger, reviews if asked"]
 ```
 
 For a whole app, `--brainstorm` puts one step in front: every application and
@@ -153,13 +154,13 @@ refused entry stops the merge and is reported. Nothing is forced.
 
 ### Memory and the end of the session
 
-| Hindsight memory: read twice, written once | `/feature-ladder:wrap` |
+| Hindsight memory: in every mode, only what is relevant | `/feature-ladder:wrap` |
 |---|---|
-| One bank per repository, chosen by a hook | Always: memory flush, close the budget, print the ledger |
-| Recall only, 1,000 tokens, ≤ 3 per feature; `reflect` denied | `--review`: Codex, read-only, low findings dropped by script |
+| One bank per repository; project tags, untagged memories excluded | Always: memory flush, close the budget, print the ledger |
+| `recall.py`: one recall per feature, only facts naming the work's files or words; stale and duplicates dropped, ≤ 5 | `--review`: Codex, read-only, low findings dropped by script |
 | No writes during a run; workers list `[kind] fact` candidates | `--adversarial`: Codex attack tests in their own folder |
 | Gate: one fact, 25–280 chars, a real path or identifier | `--second-opinion`: one Fable answer to one open point |
-| Flushed verbatim at `wrap` by a script, no scribe | Report, don't loop: each bug becomes its own feature |
+| Flushed verbatim by a script when a session ends (or at `wrap`), no scribe | Report, don't loop: each bug becomes its own feature |
 
 ### The scripts that decide
 
@@ -175,7 +176,8 @@ refused entry stops the merge and is reported. Nothing is forced.
 | `pr_checkpoint.py` | Branches, checkpoint PRs, labelled merge |
 | `irreversible.py` | Outside-repo audit tiers |
 | `ledger.py` | Tokens per rung and model |
-| `memory_gate.py` | Scoped recall, gated queue, flush at wrap |
+| `recall.py` | The one recall per feature; keeps only the facts that bear on the work |
+| `memory_gate.py` | Recall scope, gated queue, flush when a session ends |
 | `brief.py` | Research brief: cost label per agent, no build |
 
 The details of each part follow below.
@@ -252,7 +254,8 @@ The details of each part follow below.
 - **Reviews and memory once per session, not per feature.** Codex review,
   adversarial tests and a Fable second opinion run only when you schedule
   them with `/feature-ladder:wrap`, once, over everything the session built.
-  Memory is written at the same point, by a script, through a strict gate.
+  Memory is written by a script, through a strict gate, whenever a session
+  ends (wrap does it too).
 - **Hooks enforce the budget.** A spawn hook denies any subagent past the
   session budget, a second mechanic or design step, the integrator before two
   coding agents have returned, and any review, scribe or other Fable rung
@@ -333,11 +336,11 @@ Add `claude-app/model-ladder-router/SKILL.md` as a skill on your account. At
 the start of a conversation it downloads `route.py`, `intake.py`, `brainstorm.py`,
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
-`skill-rules.json`, `resolve_bank.py`, `memory_gate.py`, `codex_review.py`,
+`skill-rules.json`, `resolve_bank.py`, `memory_gate.py`, `recall.py`, `codex_review.py`,
 `ladder_state.py` (the state helper the others import), `ledger.py` and
 `guard_irreversible.py` (the token ledger for external workers) and
 `worker-contract/SKILL.md` (the contract GLM workers get) from this repo,
-pinned to a release tag (currently `v1.19.0`), so the app and Claude Code
+pinned to a release tag (currently `v1.20.0`), so the app and Claude Code
 always run identical logic. The app session needs code execution and network
 access to GitHub. `--no-bs` works there too: put it on a feature request and
 that feature's cards are built with `intake.py card --no-bs`, so the cheap tier
@@ -350,7 +353,10 @@ Use [Hindsight Cloud](https://ui.hindsight.vectorize.io) or self-host. Cloud
 is the default recommendation: it costs under about $3 a month and runs
 Hindsight's own extraction and summary inference on its side, which is the
 part you would otherwise pay for in tokens. Set these in the environment that
-launches Claude Code:
+launches Claude Code, or as `NAME=value` lines in `~/.claude/feature-ladder/.env`
+(or the repository's `.env`): the scripts read all three places, so memory
+works even when the variable was set after Claude Code started. The plugin's
+MCP server (the fallback path) only sees the launch environment.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -375,7 +381,7 @@ To self-host with the cheapest-adequate model per operation:
 | `/feature-ladder:wrap [--review] [--adversarial] [--second-opinion]` | End of session: optional reviews over the whole session's diff, then the memory flush |
 | `/feature-ladder:route <task or JSON>` | Dry-run the router: which rung, why |
 | `/feature-ladder:skills <task> [--list] [--scan]` | Dry-run skill selection; `--list` shows installed skills and broken rules; `--scan` rescans every installed skill into a catalog and reports what the rules miss |
-| `/feature-ladder:recall <query>` | One gated Hindsight recall for this repo |
+| `/feature-ladder:recall <query>` | One recall for this repo, only the facts about the topic |
 | `/feature-ladder:codex-review [--adversarial]` | A Codex review of any branch or uncommitted work, on demand |
 | `/feature-ladder:workers [glm \| jev \| claude \| check [--probe]]` | Where the cheap cards run, and a setup check |
 
@@ -429,9 +435,11 @@ request text reuses the brief.
    budget (first feature only), uncertain variables whose answer changes the
    model, and open design decisions. You answer once; the confirmed intake
    is binding. The run moves to `feature-ladder/<slug>`.
-1. **Recall once.** One Hindsight recall, scoped by a hook to this repo's
-   bank and capped at 1000 tokens, saved to the run folder; only the snippets
-   that bear on the card go into it.
+1. **Recall once.** `recall.py` reuses the scout's recall (one Hindsight
+   call, this repo's bank, project tags, capped at 1000 tokens), saves it to
+   the run folder and prints the card's `Memory:` line: only the facts that
+   name the card's files or words, stale and duplicate ones dropped. No model
+   reads the raw recall.
 2. **Confidence, then one Task Card.** `confidence.py card` scores the recall
    against the card's files: at or above 0.60 the card proceeds, below it the
    card is resharded into smaller ones (once). `intake.py card` routes each
@@ -561,8 +569,8 @@ the plugin.
 **What the runner hands the cheap model.** `external_worker.py run`
 prepares the card before the child gets it, because a small model follows
 what is on the card and little else. It fills a `Memory:` line from the
-feature's saved recall (the same facts `confidence.py` scored, scope-first,
-at most five), adds a `Bounds:` line (max turns, timeout, edit only the
+feature's saved recall (only the facts that bear on the card, the same ones
+`confidence.py` scores, at most five; never unrelated filler), adds a `Bounds:` line (max turns, timeout, edit only the
 `Scope:`, how much session budget is left) and puts the Evidence Packet
 template on the card itself instead of only in the system prompt. A
 coordinator's own `Memory:` line is kept as written. The prepared card and
@@ -698,8 +706,12 @@ Hindsight recall and the card (or the command) and returns one number:
   "reshard" means run its preview or dry-run form first when the tool has
   one, then the real one. Everything is written next to the action in
   `FEATURE-REPORT.md`.
-- **Reads the recall as the MCP server returns it.** The coordinator saves
-  the recall tool result verbatim. `confidence.py` decodes MCP envelopes at
+- **Counts only relevant memories.** A memory moves the sentiment only when it
+  names one of the card's files or two distinctive words of its title; a
+  pitfall about another part of the repository no longer makes a card look
+  risky.
+- **Reads the recall as the MCP server returns it.** `recall.py` saves the
+  recall result verbatim. `confidence.py` decodes MCP envelopes at
   any depth (a `result` JSON string, or JSON inside `content[].text`), so
   each memory is scored on its own with its tag intact rather than the whole
   response counting as one note. `tests/fixtures/mcp_recall_envelopes.json`
@@ -834,25 +846,34 @@ python3 select_skills.py '{"role":"implementer","kind":"code","paths":["src/Form
 
 ## Hindsight memory, tightly controlled
 
-Every Hindsight call goes through a hook (`resolve_bank.py` plus
-`memory_gate.py`), with no model in the loop:
+Memory is on in every mode (feature runs, `--brainstorm`, `--researcher`,
+`--no-bs`, `/feature-ladder:research`, `/feature-ladder:recall`, GLM and Silk
+cards, the Claude app), with no model in the loop:
 
 - **The right bank:** one bank per repository, found deterministically (a
   pinned id in `.feature-ladder/hindsight.json`, else
   `coding-agent::<owner>-<repo>`, `<owner>-<repo>`, `coding-agent::<project>`,
-  `<project>`); the hook adds the `bank_id` to every call. A bank is created
-  only by the first memory write, so opening a session in a repository never
-  leaves an empty bank behind.
-- **Scoped reads:** `recall` only, tags forced to `project:<name>`, at most
-  1000 tokens of fact text, Hindsight's `observation` copies of the stored
-  facts left out, at most 3 recalls per feature (scout, coordinator, one
-  worker without a Memory line). The session-start line prints the exact
-  arguments; a call that already carries them is not rewritten by the hook.
-  `reflect`, knowledge pages and bank edits are denied: `reflect` is a
-  free-form summary by the server's model.
-- **Read twice, written once:** the coordinator's recall is saved to the run
-  folder and feeds `confidence.py` and the GLM card's `Memory:` line, so the
-  same memories that go on the card also size it.
+  `<project>`). A bank is created only by the first memory write; a cached
+  "no bank yet" is re-checked at session start, so a bank another clone
+  created is found.
+- **The key, wherever it is:** `HINDSIGHT_API_KEY` is read from the
+  environment, `<repo>/.env`, `~/.claude/feature-ladder/.env` or (Windows) the
+  saved user variables. Without one, the session-start line says memory is
+  OFF and why, instead of failing quietly.
+- **One read, only relevant facts:** `recall.py` makes the feature's one
+  recall (the scout's, reused by the coordinator) with tags
+  `project:<repo>` and `project:<folder>` and `tags_match: any_strict`, so
+  clones in differently named folders share memory and untagged memories
+  never come back; at most 1000 tokens, no `observation` copies, at most 3
+  recalls per feature. It then keeps only the facts that name the work's
+  files or two distinctive words of the request, drops duplicates and
+  memories whose named paths no longer exist, ranks by relevance and
+  recency, and prints at most five as the card's `Memory:` line. The same
+  rule decides what `confidence.py` counts and what a GLM card is given.
+  When the script cannot reach Hindsight it prints the exact arguments for
+  one MCP `recall` instead. `reflect`, knowledge pages and bank edits are
+  denied on the plugin's server; a Hindsight server of your own is left
+  alone outside a run.
 - **No writes during a run.** Workers list facts as `[kind] fact` under
   `Memory candidates:`; the coordinator queues the ones a future task could
   act on, and the gate checks each line on the spot.
@@ -861,15 +882,15 @@ Every Hindsight call goes through a hook (`resolve_bank.py` plus
   name a path, identifier, command or flag in the repo, contain no narration
   or summary, and not duplicate anything already stored. There is no
   `outcome` kind: what a feature did is in git.
-- **Written once, verbatim:** `/feature-ladder:wrap` runs
-  `memory_gate.py flush`, which writes the queue straight to the bank over MCP.
-  No scribe agent, no rewording: new banks are set to Hindsight's `verbatim`
-  extraction mode, so the server stores each fact as given (its default
-  rewrites them). For a bank made by an earlier version, run
-  `resolve_bank.py --configure` once in its repository. At most 12 memories
-  per session; lines over the cap stay queued for the next wrap. A fact is
-  marked as written only after the write happened, so a failed write can be
-  retried.
+- **Written verbatim, whenever a session ends:** the SessionEnd and
+  SessionStart hooks run `memory_gate.py flush` detached (never during a run,
+  never from a GLM child, not again for 10 minutes after a failure), and
+  `/feature-ladder:wrap` runs it in the foreground. It writes the queue
+  straight to the bank over MCP. No scribe agent, no rewording: new banks
+  are set to Hindsight's `verbatim` extraction mode (for a bank made by an
+  earlier version, run `resolve_bank.py --configure` once). At most 12
+  memories per flush; lines over the cap stay queued. A fact is marked as
+  written only after the write happened, so a failed write can be retried.
 
 ---
 
@@ -1030,7 +1051,8 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.19.0** | `--brainstorm` on `feature` and in the app skill: every application and architecture detail of the whole app (30 on the sheet, plus any the scout adds) is settled at the very front in one round of questions, then the app is split into a feature queue in build order and each feature runs as a normal atomic run with only its own details on its cards. `brainstorm.py` (scan, decide, apply, features, next, done, context) costs no model tokens; the phase adds no agent beyond the Sonnet scout, and the session subagent budget still stops the queue. Also: a recall the hook later refuses no longer uses up one of the run's three (`memory_gate.commit_recall`), and `abort` frees the run's saved intake for reuse. Optional Rust build of the outside-repo audit hook (`hooks/guard-rs`, `build_guard.sh`): same decisions and `run.json` bytes as the Python hook, about 185 ms down to 60 ms per Bash call on Windows, and it hands every call back to Python once the Python reference changes |
+| **v1.20.0** | Hindsight in every mode, and only relevant facts. `recall.py` is the one read for feature runs, `--brainstorm` (the scout now recalls), `--researcher`, `/feature-ladder:research`, `/feature-ladder:recall` and the app: it recalls once (the coordinator reuses the scout's), keeps only facts that name the work's files or two distinctive words of the request, drops duplicates and memories whose paths are gone, and prints at most five as the `Memory:` line, so no model reads the raw recall. Recall uses `tags_match: any_strict` (plain `all` also returned every untagged memory in the bank) over `project:<repo>` and `project:<folder>`, so clones in differently named folders share memory. `confidence.py` counts only relevant memories, and GLM cards no longer get unrelated memories as filler or Hindsight tools. The key is read from the environment, `.env` files or the Windows user variables, and session start says plainly when memory is off; a cached "no bank yet" is re-checked. Queued memories are written by a detached script when a session ends or starts (never during a run), not only at `wrap`. Another Hindsight server of yours is left alone outside a run. |
+| v1.19.0 | `--brainstorm` on `feature` and in the app skill: every application and architecture detail of the whole app (30 on the sheet, plus any the scout adds) is settled at the very front in one round of questions, then the app is split into a feature queue in build order and each feature runs as a normal atomic run with only its own details on its cards. `brainstorm.py` (scan, decide, apply, features, next, done, context) costs no model tokens; the phase adds no agent beyond the Sonnet scout, and the session subagent budget still stops the queue. Also: a recall the hook later refuses no longer uses up one of the run's three (`memory_gate.commit_recall`), and `abort` frees the run's saved intake for reuse. Optional Rust build of the outside-repo audit hook (`hooks/guard-rs`, `build_guard.sh`): same decisions and `run.json` bytes as the Python hook, about 185 ms down to 60 ms per Bash call on Windows, and it hands every call back to Python once the Python reference changes |
 | v1.18.0 | `--no-bs`: for one run, the cheap tier runs on [Silk Compute](https://silkcompute.com/docs/claude-code)'s open-weight models, each on a tier it can handle (DeepSeek V4.1 Flash 1017 Fast for mechanic cards, DeepSeek V4.1 Flash 1017 for implementer cards up to score 6, Kimi K3.1 Pro for implementer/medium 7-14; T3 and up stay on Claude), with a busy-model fallback, the key from `SILK_API_KEY`, a `.env` or Secret Manager, and cost from the Silk balance. Never a saved setting. The Claude app skill has the switch too: `intake.py card --no-bs` routes the card and prints a runner command that carries `--no-bs`, and `external_worker.py run --no-bs` runs it on Silk without a `run.json`. The research brief labels the Silk models with `brief.py build --no-bs` |
 | v1.17.0 | A review of every script, fixed test-first. **Sessions:** `/feature-ladder:wrap` loads again (its frontmatter was invalid YAML, and the guard test skipped values starting with `[`); `finish` and `abort` return to the base branch, so the second feature of a session lands on it instead of on the first feature's branch; `start` refuses over an active run; wrap reviews from `session_base_sha`. **Secrets:** the audit log redacts secret values before storing them, the deny rule's bypasses (`NAME_API_KEY=...`, quoted `.env`, `printenv NAME`) and false positives (`.env.example`, `--set-secrets=`) are closed, `hindsight.env` is ignored wherever it sits, and `git add -A` no longer sweeps `.env`/`.pem` files into a commit. **Environments:** a Firebase project like `backstage-prod` or `latest-app` is production, not non-production. **State:** one `ladder_state.py` gives every script and hook the same state folder (the main checkout, also from a linked worktree), atomic writes and a lock; an unreadable `session.json` denies spawns instead of meaning "no budget", parallel spawns cannot overspend, a retry with the same slug starts clean, a second window does not reset a running feature's budget, and agents from outside the ladder are not charged outside a run. **Memory:** a bank is created by the first memory write, not by opening a session, and stores facts verbatim (`resolve_bank.py --configure` for older banks); a write is recorded only after it happened; lines over the 12-per-session cap stay queued; recall leaves out Hindsight's `observation` copies and is not rewritten when it already carries the printed arguments. **Ledger:** usage is counted once per API message (it was 1.5-5x too high) and only for the run's own subagents. **Windows:** checks run in Git Bash, timeouts stop the whole process tree, output cannot crash on a cp1252 console, `.cmd` shims work, and the hook launcher starts Python once (a Bash-call hook went from about 650 ms to 350 ms). **Routing:** the implementer's skill budget fits the debugging and test-first skills together (20,000 characters); recommended intake options land in the router's own bucket; the design question is reachable; keyword matching sees plurals and derived forms; an intake is used up when a run starts from it and stale ones are skipped; a scan makes 6 git calls, not 18. **Other:** Codex review enforces its timeout and its guard sees deleted and renamed files; a failed external worker returns a failing exit code and gives its budget slot back; README and LICENSE copies are checked for equality; the fixture generators moved to `scripts/fixtures/` with `--check`; CI has a time limit and cancels superseded runs |
 | v1.16.0 | The orchestrator is your pick, asked up front once per session: Opus 5.5 xhigh or Fable 5.2 runs the coordinator (`--orchestrator fable\|opus` answers in advance; a hook denies a Fable coordinator you did not pick). `select_skills.py --scan` rescans every installed skill into a deterministic catalog with a coverage report; multi-line descriptions and plugin manifest names (`dak:`) are read correctly; the shipped rules were refreshed against the rescan (22 rules for skills that are gone removed, 3 retargeted, 20 added) |

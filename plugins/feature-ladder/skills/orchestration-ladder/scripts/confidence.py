@@ -55,8 +55,10 @@ import json
 import math
 import os
 import re
+import subprocess
 import sys
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -263,7 +265,8 @@ def _items_from(obj, out):
         text = next((obj[k] for k in ("text", "content", "fact", "memory") if isinstance(obj.get(k), str)), None)
         if text:
             out.append({"text": text, "tags": [str(t) for t in obj.get("tags") or []],
-                        "metadata": obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}})
+                        "metadata": obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {},
+                        "at": obj.get("mentioned_at") or obj.get("mentionedAt") or obj.get("occurred_start")})
             return
         for v in obj.values():
             _items_from(v, out)
@@ -296,7 +299,8 @@ def parse_memories(source):
     for r in raw:
         kind, fact = _kind_of(r["text"], r.get("tags") or [], r.get("metadata") or {})
         if fact:
-            out.append({"kind": kind, "text": " ".join(fact.split()), "tags": r.get("tags") or []})
+            out.append({"kind": kind, "text": " ".join(fact.split()), "tags": r.get("tags") or [],
+                        **({"at": r["at"]} if r.get("at") else {})})
     return out
 
 
@@ -305,10 +309,9 @@ def live_recall(query, cwd):
     try:
         import memory_gate
         import resolve_bank
-        ident = resolve_bank.identity(cwd)
         root = memory_gate.repo_root(cwd)
         args = {"query": query, "max_tokens": memory_gate.MAX_RECALL_TOKENS}
-        ok, why, args = memory_gate.gate("recall", args, root, ident.get("project") or "feature-ladder")
+        ok, why, args = memory_gate.gate("recall", args, root, resolve_bank.projects(cwd))
         if not ok:
             return [], why
         resolved = resolve_bank.resolve(cwd) or {}
@@ -318,7 +321,7 @@ def live_recall(query, cwd):
         if bank:
             args["bank_id"] = bank
         memory_gate.commit_recall(root)
-        res = resolve_bank.Mcp().start().call("recall", args)
+        res = resolve_bank.Mcp(root).start().call("recall", args)
         return parse_memories(res), None
     except Exception as e:  # noqa: BLE001 - no memory is "unknown territory", not an error
         return [], f"recall unavailable: {e}"[:200]
@@ -372,19 +375,124 @@ def touching(text, anch):
     return n
 
 
+# A memory is relevant to a card when it names one of the card's files (or a
+# distinctive file stem), or at least RELEVANT_WORDS distinct words of the
+# action. One shared word ("deploy", "user") is how unrelated memories got in.
+RELEVANT_WORDS = 2
+MAX_RELEVANT = 5           # facts a Memory: line carries at most
+FILE_TOKEN = re.compile(r"(?<![\w./-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]{1,8})(?![\w/])")
+
+
+def split_anchors(action, paths):
+    """(file anchors, word anchors): what a memory can name to count as touching the card."""
+    files = anchors("", paths)
+    words = {t for t in anchors(action, []) if t not in files and _distinctive(t)}
+    return files, words
+
+
+def relevance(text, files, words):
+    """(file hits, word hits) for one memory text."""
+    return touching(text, files), touching(text, words)
+
+
+def is_relevant(hits):
+    return hits[0] > 0 or hits[1] >= RELEVANT_WORDS
+
+
+def _tracked(root):
+    """Files git tracks under root, as lower-case '/' paths ([] when not a repository)."""
+    try:
+        r = subprocess.run(["git", "ls-files", "-z"], cwd=str(root), capture_output=True, timeout=20)
+        if r.returncode != 0:
+            return None
+        return [f.decode("utf-8", "replace").lower() for f in r.stdout.split(b"\0") if f]
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def stale(text, root, tracked):
+    """True when the memory names repository paths (with a folder part) and none of
+    them exists any more: it is about code that was moved or deleted. A memory that
+    names no such path, or one path that still exists, is never stale."""
+    if tracked is None:
+        return False
+    named = [m.group(1).strip(".").replace("\\", "/").lower() for m in FILE_TOKEN.finditer(str(text))]
+    named = [n for n in named if not n.startswith(("http", "www."))]
+    if not named:
+        return False
+    for n in named:
+        n = n.lstrip("./")
+        if (Path(root) / n).exists() or any(t == n or t.endswith("/" + n) for t in tracked):
+            return False
+    return True
+
+
+def _norm_fact(text):
+    return " ".join(re.sub(r"[^a-z0-9/._` -]+", " ", str(text).lower()).split())
+
+
+def select_relevant(memories, action, paths, root=None, cap=MAX_RELEVANT):
+    """Only the memories that bear on this card: duplicates, stale memories (their
+    paths no longer exist) and off-topic ones are dropped; the rest are ranked by
+    file hits, then word hits, then recency (mentioned_at), then recall order, and
+    capped. Returns (kept, dropped) where dropped counts each reason."""
+    files, words = split_anchors(action, paths)
+    tracked = _tracked(root) if root else None
+    seen, ranked = set(), []
+    dropped = {"duplicate": 0, "stale": 0, "off_topic": 0, "over_cap": 0}
+    for i, m in enumerate(memories):
+        key = _norm_fact(m["text"])
+        if key in seen:
+            dropped["duplicate"] += 1
+            continue
+        seen.add(key)
+        hits = relevance(m["text"], files, words)
+        if not is_relevant(hits):
+            dropped["off_topic"] += 1
+            continue
+        if root and stale(m["text"], root, tracked):
+            dropped["stale"] += 1
+            continue
+        ranked.append((-hits[0], -hits[1], _neg_time(m.get("at")), i, m))
+    ranked.sort(key=lambda r: r[:4])
+    kept = [r[-1] for r in ranked[:cap]] if cap else [r[-1] for r in ranked]
+    dropped["over_cap"] = len(ranked) - len(kept)
+    return kept, dropped
+
+
+def _neg_time(at):
+    """Sort key: newer first; a memory without a date sorts after dated ones."""
+    try:
+        return -datetime.fromisoformat(str(at).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return math.inf
+
+
 def surface(memories, action, paths, scorer=None, cfg=None):
+    """Only memories relevant to the card (is_relevant) move the sentiment; the
+    rest are listed but weigh nothing, so a pitfall about another part of the
+    repository never makes this card look risky. Only the relevant ones are
+    sent to a remote scorer."""
     cfg = cfg or {}
-    anch = anchors(action, paths)
-    pols, used, note = sentiments(memories, scorer, cfg)
+    files, words = split_anchors(action, paths)
+    hits = [relevance(m["text"], files, words) for m in memories]
+    rel = [i for i, h in enumerate(hits) if is_relevant(h)]
+    pols = [polarity(m["text"]) for m in memories]
+    used, note = "lexicon", None
+    if rel:
+        got, used, note = sentiments([memories[i] for i in rel], scorer, cfg)
+        for i, pol in zip(rel, got):
+            pols[i] = pol
     items = []
-    for mem, pol in zip(memories, pols):
+    for mem, pol, h in zip(memories, pols, hits):
         text = mem["text"]
-        matches = touching(text, anch)
+        matches = h[0] + h[1]
         score = clamp(KIND_PRIOR.get(mem["kind"], 0.0) + 0.6 * pol, -1.0, 1.0)
         items.append({"kind": mem["kind"], "text": text[:160], "polarity": pol, "score": round(score, 2),
-                      "weight": 1 + min(2, matches), "relevant": matches > 0})
-    if items:
-        s = round(sum(i["score"] * i["weight"] for i in items) / sum(i["weight"] for i in items), 3)
+                      "weight": 1 + min(2, matches), "relevant": is_relevant(h)})
+    counted = [i for i in items if i["relevant"]]
+    if counted:
+        s = round(sum(i["score"] * i["weight"] for i in counted) / sum(i["weight"] for i in counted), 3)
         mood = next(m for lim, m in MOODS if s < lim)
     else:
         s, mood = None, "unknown"
@@ -401,6 +509,9 @@ def surface(memories, action, paths, scorer=None, cfg=None):
 def texture(items, mood):
     if not items:
         return "no memories of this area: unknown territory"
+    if not any(i["relevant"] for i in items):
+        return f"{len(items)} memories recalled, none about this card: unknown territory"
+    items = [i for i in items if i["relevant"]]
     kinds = {}
     for i in items:
         kinds[i["kind"]] = kinds.get(i["kind"], 0) + 1

@@ -148,7 +148,7 @@ class WriteIsOnlyRecordedOnceItHappened(unittest.TestCase):
         self.assertIn("already retained", reason)
 
     def test_already_normalised_calls_pass_through_unchanged(self):
-        recall = {"query": "maps workflow", "tags": ["project:bossforge"], "tags_match": "all", "max_tokens": 1000,
+        recall = {"query": "maps workflow", "tags": ["project:bossforge"], "tags_match": "any_strict", "max_tokens": 1000,
                   "budget": "low", "types": ["world", "experience"]}
         ok, _, out = self.gate("recall", dict(recall))
         self.assertTrue(ok)

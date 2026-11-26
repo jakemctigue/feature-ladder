@@ -20,8 +20,9 @@ Method:
 1. State the invariant the current design cannot hold, with the evidence from
    the packets you were given. If you can show the invariant *can* be held
    with the existing design, say so - that ends the escalation.
-2. Use the card's `Memory:` lines for prior architecture decisions; one
-   narrow `recall` only if it says `none`.
+2. Use the card's `Memory:` line for prior architecture decisions. For a
+   narrower question it did not cover, run once
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/recall.py --query "<question>" --paths <files>`.
 3. Enumerate the minimal structural changes that restore the invariant.
    Prefer the change with the smallest blast radius that is also honest about
    the trade-off. Reject grand redesigns unless nothing smaller works, and say

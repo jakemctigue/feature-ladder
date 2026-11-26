@@ -1,5 +1,5 @@
 ---
-description: End a coding session - write the session's queued memories to Hindsight once (a script, no model), and only if you ask for them, run ONE review over everything the session built (Codex, adversarial tests, a Fable second opinion). Run it once after many features, never per feature. Usage - /feature-ladder:wrap [--review] [--adversarial] [--second-opinion] [--base <ref>]
+description: End a coding session - write the session's queued memories to Hindsight now (a script, no model; the session-end hook also does it unattended), and only if you ask for them, run ONE review over everything the session built (Codex, adversarial tests, a Fable second opinion). Run it once after many features, never per feature. Usage - /feature-ladder:wrap [--review] [--adversarial] [--second-opinion] [--base <ref>]
 argument-hint: "[--review] [--adversarial] [--second-opinion] [--base <ref>]"
 ---
 
@@ -48,6 +48,11 @@ counts against the session's subagent budget; a denied spawn is final, so
 report what was skipped.
 
 ## 3. Memory, once, with no model
+
+The plugin also writes the queue unattended when a session starts or ends
+(`memory_gate.py flush --background`, the same gate and cap, never during a
+run), so memory is stored even when a session ends without wrap. Wrap writes
+it now and shows what was written:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/memory_gate.py" flush

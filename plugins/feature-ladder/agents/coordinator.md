@@ -51,12 +51,23 @@ the design.
 
 # The loop
 
-1. **Recall once.** One Hindsight `recall` whose query names the feature
-   area and its files (a hook scopes it to this repo's bank and
-   `project:<name>` and caps it at 1000 tokens). Save the tool result
-   verbatim to `.feature-ladder/runs/<slug>/recall.json` and paste only the
-   snippets that bear on the card into its `Memory:` line. If the server is
-   down, continue with an empty file.
+1. **Recall once, with no model.**
+   ```
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/recall.py --query "<the feature request>" --paths <the intake's candidate_files> --reuse .feature-ladder/intake/<slug>-recall.json --out .feature-ladder/runs/<slug>/recall.json
+   ```
+   It reuses the scout's recall when there is one (otherwise it recalls this
+   repository's bank, scoped to the project and capped at 1000 tokens), saves
+   it to `recall.json` for `confidence.py`, and prints `memory`: only the facts
+   that bear on this feature (stale, duplicate and off-topic ones dropped, at
+   most 5). Paste that line verbatim as the card's `Memory:` line; do not read
+   `recall.json` yourself. `Memory: none (...)` is a real answer: nothing
+   relevant is stored. If it prints `mcp_fallback`, make that one Hindsight MCP
+   `recall`, save the result to `recall.json` and run `recall.py --from
+   .feature-ladder/runs/<slug>/recall.json` with the same `--query` and
+   `--paths`. Never skip this step: memory is part of every run, whatever the
+   switches. For a reshard, run it once per shard with that shard's title
+   and files and `--reuse .feature-ladder/runs/<slug>/recall.json` (no second
+   network call).
 2. **Confidence, then the Task Card.** Ask the project's own memory how sure
    it is about this card before you write it:
    ```
@@ -87,7 +98,7 @@ the design.
    Confidence: <0.00-1.00> <proceed|reshard> (<mood>) - <one line of texture>
    Done when: <exact shell commands>
    Do not: <out of scope>
-   Memory: <the recall snippets, verbatim, or none>
+   Memory: <the `memory` line recall.py printed, verbatim>
    App: <only in a --brainstorm run: the intake's brainstorm.context, verbatim; otherwise leave the line out>
    Secrets: <NAME -> ENV_VAR, ... | none>
    Return: Evidence Packet

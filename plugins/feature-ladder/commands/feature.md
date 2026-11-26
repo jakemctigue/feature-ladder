@@ -167,8 +167,10 @@ confirmed intake:
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/brief.py" build --proposal .feature-ladder/intake/<slug>-proposal.json --intake .feature-ladder/intake/<slug>.json --switches researcher[,<other switches>] [--external "<name>" --evidence <file>]
 ```
-It writes `.feature-ladder/intake/<slug>-brief.md` and prints it; show it. Then
-continue to step 4 in the same turn: the intake is already confirmed, so do not
+It writes `.feature-ladder/intake/<slug>-brief.md` and prints it; show it,
+followed by one `What memory says` line: the `memory` line of
+`python3 "${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/recall.py" --query "<request text>" --paths <candidate files> --reuse .feature-ladder/intake/<slug>-recall.json --out .feature-ladder/intake/<slug>-recall.json`
+(no model; it reuses the scout's recall). Then continue to step 4 in the same turn: the intake is already confirmed, so do not
 ask anything again.
 
 ## 4. Branch
@@ -203,12 +205,12 @@ Confirmed intake (binding): <path to .feature-ladder/intake/<slug>.json>
 Budget: size <S|M|L> - <budget.shape>
 Run branch: <branch from step 4, or 'none - not a git repo'>  Base: <base>  PRs: <enabled | disabled: reason>
 Merge: <finish merges the stack and labels it review: pending | the user asked for --no-merge: finish with --no-merge>
-Project: infer the project name from the repo (package name, pyproject/package.json name, or directory name) and use it as the `project:<name>` tag for all Hindsight calls.
+Memory: recall with recall.py (it reuses the scout's .feature-ladder/intake/<slug>-recall.json, picks the bank and the project tags, and prints only the facts that bear on this feature); never set bank or tags by hand.
 Switches ENABLED by the user: <second-opinion, escalate, ultra | none - no Fable rung but the integrator, no reviews>.
 App context (only in a --brainstorm run; binding, settled with the user): <the intake's brainstorm.context, verbatim | none>
 Secrets (Google Secret Manager, project <project>): <names, or 'none'>. Values never enter the transcript: workers run commands that need one through with_secrets.py.
 Run to completion. Do not stop to ask the user anything: decide non-critical choices yourself, park critical design decisions in checkpoint PRs, and run the outside-repo steps the feature needs (the audit hook logs them with review: pending; there is no policy and no approve step).
-Implement only this feature and its tests. Stay within the budget: it is the whole protocol. Recall once and save it. Run confidence.py card before each card and reshard once when it says so; confidence.py action before a risky or never-tier command. Build each Task Card with intake.py card. Dispatch the integrator (Fable) once if two or more different coding agents wrote code. Verify with verify.py. Queue memory with session_budget.py remember. Finish with pr_checkpoint.py finish. Report back with the path of .feature-ladder/runs/<slug>/FEATURE-REPORT.md, files changed, the exact passing check commands, the PR stack with each merge result, what is pending review, assumptions made, anything unverified."
+Implement only this feature and its tests. Stay within the budget: it is the whole protocol. Recall once with recall.py and paste its memory line into every card. Run confidence.py card before each card and reshard once when it says so; confidence.py action before a risky or never-tier command. Build each Task Card with intake.py card. Dispatch the integrator (Fable) once if two or more different coding agents wrote code. Verify with verify.py. Queue memory with session_budget.py remember. Finish with pr_checkpoint.py finish. Report back with the path of .feature-ladder/runs/<slug>/FEATURE-REPORT.md, files changed, the exact passing check commands, the PR stack with each merge result, what is pending review, assumptions made, anything unverified."
 )
 ```
 

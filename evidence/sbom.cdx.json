@@ -105,7 +105,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "31c5a7fd22e80b0ebe3c6109ac8d3eafbf1d106a2d2f96b6145912c8a59a357a"
+          "content": "c934d1f8b7301ac746cf27f995aa1de4ffbf68b4395d30ac1eec346fecdd3c1d"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/brainstorm.py",
@@ -160,10 +160,21 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "7c6280d5ecb6d04121edcd3e4512a7f7c751477f5453d956ec439cef6c28a451"
+          "content": "560c112015143e7b62b267f9475f7549de231a1a1106ae47176080513aee078e"
         }
       ],
       "name": "plugins/feature-ladder/skills/hindsight-memory/scripts/memory_gate.py",
+      "type": "file"
+    },
+    {
+      "bom-ref": "file:plugins/feature-ladder/skills/hindsight-memory/scripts/recall.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6a4ee108329a587a95cec29c2f7a01803e66a78f78553f100bc62b50fe4af274"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/hindsight-memory/scripts/recall.py",
       "type": "file"
     },
     {
@@ -171,7 +182,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "9471222eda3f5f15fa536dac7e58df82a9e02da100c5ecabafa8aefae0126008"
+          "content": "64442f6e982565bdbc876841db70224d593db4074dddb4df743ebcf348eca89a"
         }
       ],
       "name": "plugins/feature-ladder/skills/hindsight-memory/scripts/resolve_bank.py",
@@ -182,7 +193,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "3afd53cc1f626fb451762c652aa64c149eccc6faf81e8faa192fbf431d18ce8a"
+          "content": "21555bd98f83d78b28bf1ca26a9ce07b5887d464ba7382f6b6b9e5a88b04bde3"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/confidence.py",
@@ -193,7 +204,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "3603b3fde19bd3ab0a4ccde206a01800cc0d9062cb9043e1ac1c6d60bdcb78dc"
+          "content": "f217cb0cb4fbbd9f99e04516bf277890b0d532602e5d7800007dc8375de273f6"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/external_worker.py",
@@ -295,7 +306,7 @@
       ],
       "name": "feature-ladder",
       "type": "application",
-      "version": "1.19.0"
+      "version": "1.20.0"
     },
     "tools": {
       "components": [

@@ -87,7 +87,7 @@ class HooksManifest(unittest.TestCase):
 
     def test_hooks_json_shape(self):
         self.assertTrue(self.hooks.get("description"))
-        known = {"SessionStart", "PreToolUse", "PostToolUse", "SubagentStop", "Stop", "UserPromptSubmit"}
+        known = {"SessionStart", "SessionEnd", "PreToolUse", "PostToolUse", "SubagentStop", "Stop", "UserPromptSubmit"}
         self.assertTrue(set(self.hooks["hooks"]) <= known, set(self.hooks["hooks"]) - known)
         n = 0
         for event, h in self.commands():

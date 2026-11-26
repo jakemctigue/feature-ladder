@@ -17,8 +17,10 @@ job is to reach a settled, evidenced conclusion - not to rewrite the feature.
 
 Method:
 1. Restate the exact question and the acceptance condition in two sentences.
-2. Recall from Hindsight: prior pitfalls and failed hypotheses in this area
-   (they are the cheapest evidence you will get).
+2. Memory: the card's `Memory:` line, then once
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/recall.py --query "<question>" --paths <files>`
+   with the failing behaviour as the question: prior pitfalls and failed
+   hypotheses in this area are the cheapest evidence you will get.
 3. Build the smallest reproduction that distinguishes the hypotheses. Prefer a
    script or a failing test over reasoning alone. Run it.
 4. For conflicting evidence packets, identify what each worker actually

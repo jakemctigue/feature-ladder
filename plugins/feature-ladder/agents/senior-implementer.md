@@ -19,7 +19,8 @@ Before coding:
   any), then the DESIGN.md section and the files in scope. If the design conflicts with
   what the code actually does, stop and return `blocked` with the specific
   conflict - do not improvise a different design.
-- Skim the Memory lines in your Task Card; if you need more, one narrow `recall`.
+- Read the `Memory:` line in your Task Card: it is the recall, already
+  filtered to this card. Do not query Hindsight again.
 
 While coding:
 - Stay inside the Scope list. Needing a file outside it is a `partial` return

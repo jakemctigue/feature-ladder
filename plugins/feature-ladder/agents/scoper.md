@@ -38,11 +38,19 @@ evidence, and do not list an open decision the block answers.
    the output). It gives a first guess for every field, the candidate files,
    the test command, the deployment targets and the git state.
 
-2. **Recall.** One Hindsight `recall` (tool
-   `mcp__plugin_feature-ladder_hindsight__recall`, query = the feature area,
-   tags `project:<name>`; a hook picks the bank) for prior decisions,
-   pitfalls and how similar features were built. It feeds `novelty` and the
-   open decisions. If the server is down, skip it.
+2. **Recall.** One call, no model:
+   ```
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/recall.py" --query "<the feature request>" --paths <the scan's candidate files> --out .feature-ladder/intake/<slug>-recall.json
+   ```
+   It recalls this repository's memory and prints only the facts that bear on
+   the request (`memory`), dropping stale, duplicate and off-topic ones. Use
+   those facts for `novelty` and the open decisions: a recorded decision or
+   convention answers its question (confidence `high`, evidence `memory: [kind]
+   ...`). `Memory: none (...)` means nothing relevant is stored; go on. If it
+   prints `mcp_fallback`, make that one Hindsight MCP `recall`, save the result
+   to the same file and run `recall.py --from <that file>` with the same
+   `--query` and `--paths`. The coordinator reuses the saved file, so do not
+   recall again.
 
 3. **Read.** The candidate files that matter (at most ~15; use Grep/Glob to
    find the real entry points, callers and tests). Do not read the whole repo.

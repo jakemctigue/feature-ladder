@@ -6,7 +6,8 @@ hook applies them) and in the Claude app (the skill runs `check` before each
 call).
 
 Reads (`recall`): this repository's bank only (the bank hook routes it), tags
-forced to `project:<name>`, at most MAX_RECALL_TOKENS of fact text, no
+forced to the project's tags with `tags_match: any_strict` (untagged memories
+never come back), at most MAX_RECALL_TOKENS of fact text, no
 `observation` duplicates of the stored facts, at most RUN_RECALLS calls per
 feature run (the scout, the coordinator, one worker). A call that already
 carries exactly these arguments is passed through unchanged, so the hook has
@@ -29,7 +30,7 @@ Every other Hindsight tool (reflect, knowledge pages, bank edits) is denied
 to agents: reflect is a free-form summary by the server's model.
 
     memory_gate.py check "<[kind] fact>" [--cwd DIR]   exit 0 ok, 1 rejected (reason printed)
-    memory_gate.py flush [--cwd DIR] [--dry-run | --emit]
+    memory_gate.py flush [--cwd DIR] [--dry-run | --emit | --auto | --background]
                                                        retain the session queue directly over
                                                        MCP (no model), print what was written,
                                                        rejected and `deferred` (lines past the
@@ -38,7 +39,13 @@ to agents: reflect is a free-form summary by the server's model.
                                                        with the exact `retain_calls` to make by
                                                        hand; --emit lists it and records it as
                                                        written (the Claude app makes the retain
-                                                       calls itself)
+                                                       calls itself); --auto writes only when it
+                                                       is safe to do unattended (no active run,
+                                                       not a GLM child, a key, something queued,
+                                                       no failure in the last 10 minutes) and
+                                                       prints nothing otherwise; --background
+                                                       starts --auto detached and returns at once
+                                                       (the SessionStart/SessionEnd hooks)
 """
 import hashlib
 import json
@@ -62,6 +69,10 @@ RUN_RECALLS = 3
 SESSION_RETAINS = 12
 PENDING_SECONDS = 120          # how long a gated retain counts as "in flight"
 RECALL_TYPES = ["world", "experience"]  # observations restate the stored facts: half the tokens for nothing
+# OR over the project's tags, and never an untagged memory: plain "all"/"any" also
+# return every untagged memory in the bank (Hindsight's documented behaviour).
+TAGS_MATCH = "any_strict"
+FLUSH_BACKOFF = 600            # seconds after a failed unattended flush before the next try
 ALLOWED_TOOLS = {"recall", "retain"}
 ROUTING_TOOLS = {"list_banks", "create_bank"}  # resolve_bank.py's own calls
 NARRATION = re.compile(
@@ -210,10 +221,20 @@ def _int(value, default):
         return default
 
 
+def project_names(project):
+    names = [project] if isinstance(project, str) else [str(p) for p in (project or []) if p]
+    return names or ["unknown"]
+
+
+def project_tags(project):
+    """`project:<name>` for each name (str or list), the write tag first."""
+    return [f"project:{n}" for n in project_names(project)]
+
+
 def retain_args(fact, kind, project, feature="feature:session", bank_id=None, metadata=None):
     """The exact `retain` arguments the gate lets through unchanged."""
     args = {"content": fact, "context": "feature-ladder",
-            "tags": [f"project:{project}", feature, kind],
+            "tags": [project_tags(project)[0], feature, kind],
             "metadata": {**(metadata or {}), "source": "feature-ladder", "kind": kind}}
     if bank_id:
         args["bank_id"] = bank_id
@@ -229,7 +250,6 @@ def gate(tool, args, root, project):
     if short not in ALLOWED_TOOLS:
         return False, (f"feature-ladder: Hindsight '{short}' is not used by the ladder (only recall at the start "
                        "of a feature and retain at /feature-ladder:wrap). Carry on without it."), args
-    tag = f"project:{project}"
     run = _active_run(root)
     if short == "recall":
         key = _recall_key(run)
@@ -247,8 +267,8 @@ def gate(tool, args, root, project):
                 if not key and recalls:
                     st["recalls"] = {}
                     _save_state(sp, st)
-        args["tags"] = [tag]
-        args["tags_match"] = "all"
+        args["tags"] = project_tags(project)
+        args["tags_match"] = TAGS_MATCH
         args["max_tokens"] = max(0, min(_int(args.get("max_tokens"), MAX_RECALL_TOKENS), MAX_RECALL_TOKENS))
         args.setdefault("budget", "low")
         if not isinstance(args.get("types"), list) or not args["types"]:
@@ -312,8 +332,66 @@ def record(root, fact, kind):
     ladder_state.ensure_gitignore(root)
 
 
-def flush(root, dry_run=False, emit=False, project=None):
+def _flush_state(root, failed=None):
+    """Read (failed=None) or set the time of the last failed unattended flush."""
+    with ladder_state.locked(root, "memory-gate"):
+        sp, st = _state(root)
+        if failed is None:
+            return st.get("flush_failed_at")
+        if failed:
+            st["flush_failed_at"] = time.time()
+        else:
+            st.pop("flush_failed_at", None)
+        _save_state(sp, st)
+
+
+def auto_skip(root):
+    """Why an unattended flush must not run now, or None when it may."""
+    if os.environ.get("FEATURE_LADDER_CHILD"):
+        return "a GLM worker's own session stores nothing"
+    if not (Path(root) / ".feature-ladder" / "session-memory.md").is_file():
+        return "nothing queued"
+    if _active_run(root) is not None:
+        return "a feature run is active: its facts are written after it finishes"
+    import resolve_bank
+    ok, why = resolve_bank.key_status(str(root))
+    if not ok:
+        return why
+    last = _flush_state(root)
+    if isinstance(last, (int, float)) and time.time() - last < FLUSH_BACKOFF:
+        return "the last unattended write failed less than 10 minutes ago"
+    return None
+
+
+def background(root):
+    """Start `flush --auto` detached and return at once: a hook must not wait on the network."""
+    why = auto_skip(root)
+    if why:
+        return {"started": False, "reason": why}
+    import subprocess
+    kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+          "cwd": str(root), "close_fds": True}
+    if os.name == "nt":
+        kw["creationflags"] = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED | NEW_GROUP | NO_WINDOW
+    else:
+        kw["start_new_session"] = True
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "flush", "--auto", "--cwd", str(root)], **kw)
+    return {"started": True}
+
+
+def flush(root, dry_run=False, emit=False, project=None, auto=False):
     """Retain the session queue straight over MCP: no model reads or rewrites it."""
+    if auto:
+        why = auto_skip(root)
+        if why:
+            return {"skipped": why}
+        try:
+            out = flush(root, project=project)
+        except Exception as e:  # noqa: BLE001
+            _flush_state(root, failed=True)
+            return {"error": f"{type(e).__name__}: {e}"[:300]}
+        _flush_state(root, failed=False)
+        return out
     q = Path(root) / ".feature-ladder" / "session-memory.md"
     lines = [l for l in (q.read_text(encoding="utf-8").splitlines() if q.is_file() else []) if l.strip()]
     seen, keep, rejected = retained_hashes(root), [], []
@@ -336,7 +414,7 @@ def flush(root, dry_run=False, emit=False, project=None):
             bank = None
             if project is None:
                 import resolve_bank
-                project = resolve_bank.project_name(root)
+                project = resolve_bank.projects(str(root))
                 bank = (resolve_bank.resolve(str(root), offline=True) or {}).get("bank_id")
             out["retain_calls"] = [retain_args(f, k, project, bank_id=bank) for k, f in keep]
         if emit:
@@ -345,8 +423,8 @@ def flush(root, dry_run=False, emit=False, project=None):
         return out
     import resolve_bank
     r = resolve_bank.ensure_bank(str(root))  # the bank is created here, on the first real write
-    project = project or resolve_bank.project_name(root)
-    mcp = resolve_bank.Mcp().start()
+    project = project or resolve_bank.projects(str(root))
+    mcp = resolve_bank.Mcp(root).start()
     for kind, fact in keep:
         mcp.call("retain", retain_args(fact, kind, project, bank_id=(r or {}).get("bank_id")))
         record(root, fact, kind)
@@ -378,7 +456,20 @@ def main(argv):
             return 1
     if argv[0] == "flush":
         try:
-            print(json.dumps(flush(root, "--dry-run" in argv, "--emit" in argv), indent=2))
+            if "--background" in argv:
+                try:
+                    if not sys.stdin.isatty():  # a hook: the payload names the session's folder
+                        payload = json.loads(sys.stdin.read().lstrip("\ufeff") or "{}")
+                        if isinstance(payload, dict) and payload.get("cwd") and "--cwd" not in sys.argv:
+                            root = repo_root(payload["cwd"])
+                    background(root)
+                except Exception:  # noqa: BLE001 - a hook never fails the session
+                    pass
+                return 0
+            out = flush(root, "--dry-run" in argv, "--emit" in argv, auto="--auto" in argv)
+            if "--auto" in argv and "skipped" in out:
+                return 0
+            print(json.dumps(out, indent=2))
             return 0
         except Exception as e:  # noqa: BLE001
             print(json.dumps({"error": f"{type(e).__name__}: {e}"[:300]}))
