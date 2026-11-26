@@ -59,7 +59,10 @@ the design.
    repository's bank, scoped to the project and capped at 1000 tokens), saves
    it to `recall.json` for `confidence.py`, and prints `memory`: only the facts
    that bear on this feature (stale, duplicate and off-topic ones dropped, at
-   most 5). Paste that line verbatim as the card's `Memory:` line; do not read
+   most 5, plus up to 4 decisions of the app's stored architecture,
+   `` `arch:<detail>` ``, in this feature's area). In a `--brainstorm` run (your
+   prompt has an App context) add `--no-architecture`: the App line already
+   carries it. Paste that line verbatim as the card's `Memory:` line; do not read
    `recall.json` yourself. `Memory: none (...)` is a real answer: nothing
    relevant is stored. If it prints `mcp_fallback`, make that one Hindsight MCP
    `recall`, save the result to `recall.json` and run `recall.py --from

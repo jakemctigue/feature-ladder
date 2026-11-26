@@ -1,6 +1,7 @@
 """The --brainstorm switch: every application and architecture detail of the
-app is settled at the very front, in one round, before the work is narrowed
-into features and built.
+app is settled at the very front, before the work is narrowed into features
+and built (follow-up rounds, the hand-off and the architecture memory are in
+test_brainstorm_handoff.py).
 
 Pins: the repo scan settles what manifests settle (names only for secrets);
 every applicable detail that is not high confidence is asked, application
@@ -473,7 +474,7 @@ class Wiring(unittest.TestCase):
         feature = self.read("plugins", "feature-ladder", "commands", "feature.md")
         self.assertIn("| `--brainstorm` |", feature)
         self.assertIn("[--brainstorm]", feature.split("---")[1])
-        self.assertIn("## 0b. Brainstorm (only with `--brainstorm`)", feature)
+        self.assertIn("## 0b. Brainstorm (only with `--brainstorm` or `--from-brainstorm`)", feature)
         self.assertIn("Mode: brainstorm", self.read("plugins", "feature-ladder", "agents", "scoper.md"))
         app = self.read("claude-app", "model-ladder-router", "SKILL.md")
         self.assertIn("complexity-router/scripts/brainstorm.py", app.split("for f in ")[1].split("; do")[0])

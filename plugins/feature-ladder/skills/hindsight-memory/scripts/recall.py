@@ -6,6 +6,7 @@ recall, and no model call is made.
 
     recall.py --query "<request or card title>" [--paths FILE ...] [--cwd DIR]
               [--out FILE] [--reuse FILE | --from FILE] [--cap N]
+              [--arch-cap N | --no-architecture]
 
   --query   what the work is about (the feature request, or the card's title)
   --paths   the files the work touches (the intake's candidate files, a card's
@@ -19,6 +20,10 @@ recall, and no model call is made.
   --from    only filter this saved recall (a recall made through the Hindsight
             MCP tool when the script cannot reach the server); no network
   --cap     facts in the Memory: line (default 5)
+  --arch-cap  architecture facts on top of --cap (default 4; a brainstorm
+            passes a large number to see the whole stored architecture)
+  --no-architecture  leave the stored architecture out (a --brainstorm
+            feature run: its cards already carry the App context)
 
 How the facts are chosen (confidence.select_relevant, shared with
 confidence.py and external_worker.py):
@@ -29,7 +34,11 @@ confidence.py and external_worker.py):
   - a memory is kept only if it names one of the paths (or a distinctive file
     stem) or at least two distinctive words of the query;
   - a memory whose named repository paths no longer exist is stale and dropped;
-  - the rest are ranked by file hits, word hits, then newest first, and capped.
+  - the rest are ranked by file hits, word hits, then newest first, and capped;
+  - the app's architecture (brainstorm.py remember: "`arch:<detail>` ..."
+    decisions) is chosen apart: the newest decision per detail, kept when the
+    work touches its area (data, sign-in, screens, deploys...) or it is the
+    stack, layout or tests, at most --arch-cap, listed first.
 
 Output (JSON): memory (the line to paste, verbatim), facts, recalled, kept,
 dropped {duplicate, stale, off_topic, over_cap}, source (live | reused | file |
@@ -52,12 +61,16 @@ import resolve_bank  # noqa: E402
 import confidence  # noqa: E402
 
 MULTI = {"--paths"}
-SINGLE = {"--query", "--cwd", "--out", "--reuse", "--from", "--cap"}
+SINGLE = {"--query", "--cwd", "--out", "--reuse", "--from", "--cap", "--arch-cap"}
+FLAGS = {"--no-architecture"}
 
 
 def parse(argv):
     a, cur = {"--paths": []}, None
     for tok in argv:
+        if tok in FLAGS:
+            a[tok], cur = True, None
+            continue
         if tok in MULTI or tok in SINGLE:
             cur = tok
             if tok in SINGLE:
@@ -131,6 +144,7 @@ def run(a):
     if not query.strip():
         raise ValueError("--query is required")
     cap = int(a.get("--cap") or confidence.MAX_RELEVANT)
+    arch_cap = 0 if a.get("--no-architecture") else int(a.get("--arch-cap") or confidence.ARCH_CAP)
     out = Path(a["--out"]) if a.get("--out") else default_out(root)
     if not out.is_absolute():
         out = Path(cwd) / out
@@ -154,9 +168,12 @@ def run(a):
         mems = confidence.parse_memories(raw)
     else:
         mems = []
-    facts, dropped = confidence.select_relevant(mems, query, a["--paths"], root=root, cap=cap)
+    if a.get("--no-architecture"):
+        mems = [m for m in mems if not confidence.arch_detail(m)]
+    facts, dropped = confidence.select_relevant(mems, query, a["--paths"], root=root, cap=cap, arch_cap=arch_cap)
     result = {"memory": memory_line(facts, len(mems), dropped, reason), "facts": [f"[{m['kind']}] {m['text']}" for m in facts],
               "recalled": len(mems), "kept": len(facts), "dropped": dropped, "source": source,
+              "architecture": sum(1 for m in facts if confidence.arch_detail(m)),
               "saved_to": saved, "bank": bank}
     if reason:
         result["reason"] = reason

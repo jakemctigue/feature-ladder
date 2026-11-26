@@ -27,7 +27,9 @@ its feature list, before any feature is scoped.
 
 **App context.** If your prompt carries an `App context` block, the user
 already settled those details in a brainstorm: treat them as high-confidence
-evidence, and do not list an open decision the block answers.
+evidence, do not list an open decision the block answers, and add
+`--no-architecture` to the recall in step 2 (the block already carries the
+architecture).
 
 1. **Scan.** From the repo root, run:
    ```
@@ -43,7 +45,10 @@ evidence, and do not list an open decision the block answers.
    python3 "${CLAUDE_PLUGIN_ROOT}/skills/hindsight-memory/scripts/recall.py" --query "<the feature request>" --paths <the scan's candidate files> --out .feature-ladder/intake/<slug>-recall.json
    ```
    It recalls this repository's memory and prints only the facts that bear on
-   the request (`memory`), dropping stale, duplicate and off-topic ones. Use
+   the request (`memory`), dropping stale, duplicate and off-topic ones, and
+   the app's stored architecture decisions (`` `arch:<detail>` ``, from an
+   earlier brainstorm) in this feature's area. An architecture decision is
+   binding: follow it unless the request says otherwise. Use
    those facts for `novelty` and the open decisions: a recorded decision or
    convention answers its question (confidence `high`, evidence `memory: [kind]
    ...`). `Memory: none (...)` means nothing relevant is stored; go on. If it

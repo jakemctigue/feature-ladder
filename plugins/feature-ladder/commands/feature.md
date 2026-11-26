@@ -1,6 +1,6 @@
 ---
-description: "Add ONE feature with the orchestration ladder, atomically - just the code change and its tests. A Sonnet scout settles every routing variable; you answer only what is uncertain (and, once per session, which model orchestrates - Opus 5.5 xhigh or Fable 5.2 - and how many subagents the session may spawn); then one worker (GLM 5.3 Flash or Sonnet medium for most work) builds it on its own branch, the stack is merged and labelled review: pending, and what ran outside the repo is listed for you. Apart from an orchestrator you picked, Fable only integrates when two or more coding agents wrote code. No reviews, no scribes - those are /feature-ladder:wrap at the end of the session. With --brainstorm, every application and architecture detail of the whole app is settled first, in one round of questions, and the app is then split into features that are built one ladder run each. Usage - /feature-ladder:feature <description> [--auto] [--no-merge] [--orchestrator fable|opus] [--brainstorm] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]"
-argument-hint: <feature description> [--auto] [--no-merge] [--orchestrator fable|opus] [--brainstorm] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]
+description: "Add ONE feature with the orchestration ladder, atomically - just the code change and its tests. A Sonnet scout settles every routing variable; you answer only what is uncertain (and, once per session, which model orchestrates - Opus 5.5 xhigh or Fable 5.2 - and how many subagents the session may spawn); then one worker (GLM 5.3 Flash or Sonnet medium for most work) builds it on its own branch, the stack is merged and labelled review: pending, and what ran outside the repo is listed for you. Apart from an orchestrator you picked, Fable only integrates when two or more coding agents wrote code. No reviews, no scribes - those are /feature-ladder:wrap at the end of the session. With --brainstorm, every application and architecture detail of the whole app is settled first, with as many questions as it takes (all before anything is built), the architecture is stored in Hindsight, and the app is then split into features that are built one ladder run each. --from-brainstorm builds the queue of a concluded brainstorm without re-typing anything. Usage - /feature-ladder:feature <description> [--auto] [--no-merge] [--orchestrator fable|opus] [--brainstorm] [--from-brainstorm [app-slug] [feature-id]] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]"
+argument-hint: <feature description> [--auto] [--no-merge] [--orchestrator fable|opus] [--brainstorm] [--from-brainstorm [app-slug] [feature-id]] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]
 ---
 
 Start a feature-ladder run for: $ARGUMENTS
@@ -18,7 +18,8 @@ Separate the request text from these switches:
 | `--auto` | Ask nothing. Use the scout's values and the recommended option for every decision (the session budget defaults to Small; the orchestrator is Opus xhigh unless `--orchestrator` says otherwise). |
 | `--orchestrator fable\|opus` | The model that runs the coordinator for this run: Fable 5.2, or Opus 5.5 at xhigh effort. Answers the up-front orchestrator question in advance, so it is not asked. |
 | `--no-merge` | Leave the PR stack open instead of merging it. By default `finish` merges the stack into your branch and labels it `review: pending`. |
-| `--brainstorm` | Before any feature is scoped: settle every application and architecture detail of the whole app in one round of questions, split the app into features, then build them one atomic run each (step 0b). The scout does it; no Opus, no Fable, no extra agent. |
+| `--brainstorm` | Before any feature is scoped: settle every application and architecture detail of the whole app, asking as many questions as it takes (a first round, then follow-up rounds while details are open), store the architecture in Hindsight, split the app into features, then build them one atomic run each (step 0b). The scout does it; no Opus, no Fable, no extra agent. |
+| `--from-brainstorm [app-slug] [feature-id]` | Build from a concluded brainstorm: no request text, no questions. Takes the confirmed app sheet (the latest in this repo, or the one whose slug is given) and runs its queue from step 0b.5; with a feature id, just that feature. A plan-only sheet is built now. |
 | `--researcher` | Show a short research brief first (what the feature wants from the codebase, a qualitative cost label per agent, what to expect), then continue the run from the same confirmed intake without re-asking. Uses no Opus and no Fable; see step 3b. |
 | `--no-bs` | For this run only, the cheap tier runs on Silk Compute's open-weight models, each on the tier it is capable of: DeepSeek V4.1 Flash 1017 Fast for mechanic cards, DeepSeek V4.1 Flash 1017 for small implementer cards (score <= 6), Kimi K3.1 Pro for the intermediate band (implementer/medium, score 7-14). T3 and up stay on Claude. Needs `SILK_API_KEY` (environment, the repo's `.env`, `~/.claude/feature-ladder/.env`, or Secret Manager); without it the cards run on Claude and say why. Add `no-bs` to `switches` in step 3. |
 | `--second-opinion` | Allows the Fable `second-opinion` rung for one sharp question the coordinator cannot settle. |
@@ -41,46 +42,69 @@ Nothing in the run waits for you: deploys, data steps and the merge happen
 when the feature needs them and are logged `review: pending` for you to look
 at afterwards.
 
-## 0b. Brainstorm (only with `--brainstorm`)
+## 0b. Brainstorm (only with `--brainstorm` or `--from-brainstorm`)
 
 The request is a whole app or a large piece of one. Everything about it is
-gathered here, at the very front, and asked once; only then is it narrowed
-into features. `B` below is
+gathered here, at the very front, with as many questions as it takes; only
+then is it narrowed into features and built. `B` below is
 `python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/brainstorm.py"`.
+With `--from-brainstorm`, go straight to 6.
 
 1. **Reuse.** `B find "<request text>"`. If it prints a path, the app sheet
    for this exact request was confirmed earlier: say "Reusing the app sheet
-   you confirmed at <time>" in one line and go to 5.
+   you confirmed at <time>" in one line and go to 6.
 2. **Gather.** Dispatch the scout in brainstorm mode. It scans the repo,
-   settles every detail (purpose, users, workflows, data model, permissions,
-   integrations; platform, stack, data store, sign-in, hosting, secrets,
-   testing and the rest), drafts the feature list and runs `B decide`:
+   recalls what memory already settled, settles every detail (purpose,
+   users, workflows, data model, permissions, integrations; platform, stack,
+   data store, sign-in, hosting, secrets, testing and the rest, plus any
+   detail this app needs that the sheet lacks), drafts the feature list and
+   runs `B decide`:
    ```
    Agent(subagent_type="feature-ladder:scoper", model="sonnet", effort="medium", name="app-brainstorm",
          prompt="Request: <request text>\nMode: brainstorm\nDecide mode: <auto | default>\nFollow your instructions exactly.")
    ```
-3. **Ask once** (skip with `--auto`). Show one line of counts (`counts`:
+3. **Ask** (skip with `--auto`). Show one line of counts (`counts`:
    details, settled without asking, asked). Then ask everything with
-   AskUserQuestion, at most 4 questions per call, in this order: `decisions`
-   (`orchestrator` and `session_agents` when present - skip `orchestrator`
-   when `--orchestrator` was given - then `build`: every feature, the first
-   only, or plan only), then every item of `questions` as given (`header`,
-   `question`, options; the recommended option first), then `open_text` as
-   one plain numbered message the user answers in their own words. This is
-   the only round of questions in the whole run.
+   AskUserQuestion, at most 4 questions per call, however many calls it
+   takes, in this order: `decisions` (`orchestrator` and `session_agents`
+   when present - skip `orchestrator` when `--orchestrator` was given - then
+   `build`: every feature, the first only, or plan only), then every item of
+   `questions` as given (`header`, `question`, options; the recommended
+   option first), then `open_text` as one plain numbered message the user
+   answers in their own words. There is no cap on questions.
 4. **Confirm.** Write `{"answers": {"<detail>": "<the chosen label, or the user's words>"}, "decisions": {"<id>": "<chosen label>"}}`
    (with `--auto` and no session budget yet: `"decisions": {"session_agents": "Small"}`)
    to `.feature-ladder/brainstorm/<slug>-answers.json` and run
    `B apply <the sheet path the scout returned> .feature-ladder/brainstorm/<slug>-answers.json`.
-   It writes the confirmed app sheet (`readable`: a `.md` to point the user
-   at) and queues the features in build order. If any feature has
-   `"revise": true` (the user changed a detail it covers), or
-   `feature_errors` is not empty, dispatch the same scout once more with
-   `Mode: brainstorm revise\nApp sheet: <written_to>` and nothing else.
-   Tell the user in one short message: the sheet's path, the features in
-   order (one line each), what was dropped, and what `build` will do.
-5. **Build from the queue.** `B next` returns the next feature. While
-   `feature` is not null:
+   It writes the confirmed app sheet (`written_to`; `readable`: a `.md` to
+   point the user at) and queues the features in build order.
+5. **Follow up until the app is defined.** While `next_step` is `revise`
+   (it names why under `revise_because`: details still open, details the
+   answers newly call for, features to rewrite):
+   - dispatch the same scout with `Mode: brainstorm revise\nApp sheet: <written_to>`
+     and nothing else. It proposes the open and newly needed details and
+     runs `B followup` (which prints this round's questions), and rewrites
+     the features with `B features`;
+   - if `B followup` printed questions or `open_text` (and not `--auto`),
+     ask them exactly as in 3, write `{"answers": {...}}` to
+     `.feature-ladder/brainstorm/<slug>-followup-answers.json` and run
+     `B refine <written_to> <that file>`; with `--auto` run
+     `B refine <written_to>` (the proposals stand);
+   - look at `next_step` again (from `refine`, or from `features` when
+     nothing was asked).
+   Every round happens before anything is built; after `MAX_ROUNDS` (3)
+   follow-up rounds `followup` asks nothing more and the scout's proposals
+   stand. Then store the architecture: `B remember` (no model; one
+   `[decision] \`arch:<detail>\` ...` fact per settled architecture detail,
+   written to Hindsight in the background, outside the per-session cap,
+   before the first feature runs). Tell the user in one short message: the
+   sheet's path, the features in order (one line each), what was dropped,
+   how many architecture facts went to memory, and what `build` will do.
+6. **Build from the queue.** `B next` returns the next feature (with
+   `--from-brainstorm`: `B next --build <first when a feature id was given, else all> [--app <app-slug>] [--feature <feature-id>]`;
+   if it names no sheet, say "No concluded brainstorm here: run
+   `/feature-ladder:feature <the app> --brainstorm` first" and stop). Relay
+   any `warning`. While `feature` is not null:
    - run steps 1 to 5 below for `feature.request` exactly as for a single
      feature, in `--auto` mode (nothing is asked again; the session answers
      are already stored), adding `"brainstorm": <feature.brainstorm>` to the
@@ -89,13 +113,14 @@ into features. `B` below is
    - then `B done <feature.id> --status <done | partial>` from the
      coordinator's report;
    - stop after this one when `build` is `first` or `--no-merge` was given
-     (later features need the earlier ones merged); otherwise `B next` again.
+     (later features need the earlier ones merged); otherwise `B next` again
+     (without `--feature`).
    When `feature` is null, relay its `note` (finished, blocked, plan only, or
-   the session budget is spent) with `remaining`, and add: "Run the same
-   request with `--brainstorm` again to continue the queue."
+   the session budget is spent) with `remaining`, and add: "Continue with
+   `<handoff.command from the sheet>`" (`/feature-ladder:feature --from-brainstorm <slug>`).
 
-Without `--brainstorm` none of this runs, and the scout never loads its
-brainstorm instructions (`B guide`).
+Without `--brainstorm` or `--from-brainstorm` none of this runs, and the
+scout never loads its brainstorm instructions (`B guide`).
 
 ## 1. Intake (nothing is delegated before this finishes)
 
