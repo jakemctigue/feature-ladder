@@ -105,7 +105,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "820f2390e0b26bb2912c214e0006cf0aabc6ec56ef4b1c65da40ea430a2f2295"
+          "content": "ed349776a8ecc9476b13d2fe7eed56eddbe051c9324a3f34e1f4ee271b9ca755"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/brainstorm.py",

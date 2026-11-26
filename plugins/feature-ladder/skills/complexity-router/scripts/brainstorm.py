@@ -28,9 +28,9 @@ exactly as it does for intake.py.
           the model, EVERY applicable detail that is not high confidence is
           asked, application first, in batches of four, with no cap (--max N
           sets one). First come the once-per-session questions (orchestrator,
-          subagent budget) and what to build afterwards (every feature, the
-          first, or plan only), so nothing is asked again later. `auto` asks
-          nothing.
+          subagent budget), so no feature run asks them again. What to build
+          is asked at the end, once the app is defined (the hand-off
+          question). `auto` asks nothing.
 
   apply   SHEET.json [ANSWERS.json] [--out FILE]
           Merges {"answers": {"<detail id>": "<chosen label or the user's
@@ -42,7 +42,11 @@ exactly as it does for intake.py.
           "revise"; one whose details were all answered "Not needed" is dropped.
           `followup` lists the details still open, and `next_step` says what
           comes next: "revise" (the scout proposes the open and newly needed
-          details and rewrites the features) or "build".
+          details and rewrites the features) or "build". When it is "build",
+          `handoff.question` asks whether to pass the app to the implementer
+          now (every feature, the first only, or not now); the answer goes to
+          `next --build all|first|plan`, the same hand-off
+          /feature-ladder:feature --from-brainstorm makes.
 
   followup APP.json DETAILS.json
           Follow-up round. Merges the scout's {"details": {"<id>": {value,
@@ -62,15 +66,16 @@ exactly as it does for intake.py.
           and nothing written when the list is invalid (unknown detail or
           dependency, a cycle, a missing request).
 
-  next    [--sheet APP.json | --app SLUG] [--feature ID] [--build all|first] [--cwd DIR]
+  next    [--sheet APP.json | --app SLUG] [--feature ID] [--build all|first|plan] [--cwd DIR]
           The next feature to build: its request text for one ladder run and
           the `brainstorm` object for that run's intake answers (the short,
           binding app context for its cards). `feature` is null when the
           queue is done, blocked, plan-only, or the session budget is spent.
           This is the hand-off /feature-ladder:feature --from-brainstorm uses:
           --app picks a confirmed sheet by its slug (default: the latest),
-          --feature a queued feature by id, --build overrides what the sheet
-          builds (a plan-only sheet is built when --build is given).
+          --feature a queued feature by id, --build records the hand-off
+          answer (all, first, or plan: not now) and overrides what the sheet
+          builds (a plan-only sheet is built when --build all|first is given).
 
   remember [--sheet APP.json | --app SLUG] [--no-flush]
           Queues the settled architecture (every architecture detail, the
@@ -315,11 +320,14 @@ DOC_SUFFIXES = (".md", ".rst", ".txt", ".mdx")
 MANIFESTS = ["package.json", "pyproject.toml", "requirements*.txt", "go.mod", "Cargo.toml", "Gemfile", "pubspec.yaml"]
 MONOREPO = ["pnpm-workspace.yaml", "turbo.json", "nx.json", "lerna.json"]
 NOT_NEEDED = ("not needed", "none", "n/a", "na", "not applicable", "no", "skip")
+# The hand-off question, asked once the app is defined: pass it to the
+# implementer (one /feature-ladder:feature run per feature) now, or later.
 BUILD_OPTIONS = [
-    ("all", "Every feature, in order (Recommended)",
-     "One ladder run per feature until the session's subagent budget is spent; the rest stay queued"),
-    ("first", "The first feature only", "Builds the foundation feature; the rest stay queued for later runs"),
-    ("plan", "Plan only", "Stops after the feature list; nothing is built"),
+    ("all", "Implement every feature now (Recommended)",
+     "Passes the queue to the implementer: one atomic ladder run per feature, in order, until the session's "
+     "subagent budget is spent; the rest stay queued"),
+    ("first", "Implement the first feature only", "Builds the foundation feature now; the rest stay queued"),
+    ("plan", "Not now", "Stops with the plan; build it later with {command}"),
 ]
 MAX_VALUE = 220      # characters of one detail on a card
 MAX_CONTEXT = 1800   # characters of the whole card block
@@ -741,11 +749,8 @@ def decide(sheet, mode="default", max_q=None):
                 open_text.append(q)   # nothing proposed: asked in the user's own words
 
     decisions = []
-    if mode != "auto":
+    if mode != "auto":   # what to build is asked at the end: progress()["handoff"]["question"]
         decisions = intake.session_decisions(sheet.get("repo_root"), "M", mode)
-        decisions.append({"id": "build", "header": "Build",
-                          "question": "Once the details are settled and the app is split into features, what should be built?",
-                          "options": [{"label": label, "description": desc} for _, label, desc in BUILD_OPTIONS]})
     return {
         "mode": mode,
         "request": sheet.get("request"),
@@ -839,13 +844,16 @@ STATUSES = ("queued", "running", "done", "partial", "skipped", "dropped")
 
 # -------------------------------------------------------------------- apply --
 def build_mode(label):
-    """The `build` decision's label (or all | first | plan) -> all | first | plan."""
+    """The hand-off answer (a label, or all | first | plan) -> all | first | plan;
+    "ask" when nothing was answered yet."""
     v = _strip_rec(label).lower()
-    if v in ("first", "plan"):
+    if not v:
+        return "ask"
+    if v in ("first", "plan", "all", "ask"):
         return v
-    if v.startswith(("the first", "first")):
+    if "first" in v:
         return "first"
-    if v.startswith("plan"):
+    if v.startswith(("plan", "not now", "later", "stop", "no")):
         return "plan"
     return "all"
 
@@ -949,10 +957,19 @@ def progress(app):
 
 
 def handoff(app):
-    """How a concluded brainstorm is continued in /feature-ladder:feature."""
+    """How a concluded brainstorm is passed to the implementer: the
+    /feature-ladder:feature --from-brainstorm command, and, while nobody has
+    answered it, the question that offers it (asked once the app is defined)."""
     live = [f for f in app.get("features") or [] if f["status"] not in ("dropped", "done")]
-    return {"command": f"/feature-ladder:feature --from-brainstorm {app.get('slug') or ''}".rstrip(),
-            "next": live[0]["id"] if live else None, "queued": len(live)}
+    command = f"/feature-ladder:feature --from-brainstorm {app.get('slug') or ''}".rstrip()
+    out = {"command": command, "next": live[0]["id"] if live else None, "queued": len(live), "question": None}
+    if app.get("build", "ask") == "ask" and app.get("next_step") == "build" and live:
+        out["question"] = {
+            "id": "handoff", "header": "Implement",
+            "question": f"The app is defined: {len(live)} feature(s) queued. Pass it to the implementer now?",
+            "options": [{"label": label, "description": desc.format(command=command), "value": key}
+                        for key, label, desc in BUILD_OPTIONS]}
+    return out
 
 
 # ----------------------------------------------------------- follow-up rounds --
@@ -1165,8 +1182,9 @@ def next_feature(path, app, root, feature_id=None, build=None):
     plan-only sheet can be handed to /feature-ladder:feature later."""
     feats = app.get("features") or []
     done = {f["id"] for f in feats if f["status"] == "done"}
-    if build in ("all", "first") and app.get("build") != build:
+    if build in ("all", "first", "plan") and app.get("build") != build:
         app["build"] = build
+        app["handoff"] = handoff(app)
         save_app(app, str(path))
     result = {"sheet": str(path), "slug": app.get("slug"), "build": app.get("build", "all"), "feature": None}
     if app.get("next_step") == "revise" and app.get("revise_because"):
@@ -1176,7 +1194,10 @@ def next_feature(path, app, root, feature_id=None, build=None):
         result["session_left"] = sess["left"]
     pick = None
     if app.get("build") == "plan":
-        result["note"] = "plan only: nothing is built in this run"
+        result["note"] = ("plan only: nothing is built in this run; pass it to the implementer later with "
+                          + handoff(app)["command"])
+    elif app.get("build", "ask") == "ask":
+        result["note"] = "ask handoff.question first, then `next --build all|first|plan` with the answer"
     elif result.get("session_left") == 0:
         result["note"] = "the session's subagent budget is spent; the rest stay queued"
     elif feature_id:
@@ -1384,8 +1405,8 @@ def main(argv):
             root, _ = intake.repo_root(cwd)
             path, app = current(root, sheet_opt, slug)
             if cmd == "next":
-                if build not in (None, "all", "first"):
-                    print("next: --build is all or first", file=sys.stderr)
+                if build not in (None, "all", "first", "plan"):
+                    print("next: --build is all, first or plan", file=sys.stderr)
                     return 1
                 print(json.dumps(next_feature(path, app, root, fid, build), indent=2))
                 return 0
@@ -1408,8 +1429,9 @@ def main(argv):
             hits = [fa for fa in _confirmed(root) if text and norm(fa[1].get("request")) == text]
             if hits:
                 path, app = max(hits, key=lambda fa: fa[1]["confirmed_at"])
-                if app.get("build") == "plan":   # they came back to build what they planned
-                    app["build"] = "first"
+                if app.get("build") == "plan":   # they came back: offer the hand-off again
+                    app["build"] = "ask"
+                    progress(app)
                 app["resumed_at"] = now()
                 save_app(app, str(path))
                 print(str(path))

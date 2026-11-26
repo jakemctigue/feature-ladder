@@ -55,7 +55,10 @@ flowchart LR
     Q --> F{"details open or<br/>newly needed?"}
     F -- "yes, up to 3 rounds" --> Q
     F -- "no" --> H["brainstorm.py remember<br/>architecture to Hindsight"]
-    H --> N["Feature queue<br/>/feature-ladder:feature --from-brainstorm"]
+    H --> P{"Pass it to the<br/>implementer now?"}
+    P -- "every feature / the first" --> N["Feature queue<br/>same path as --from-brainstorm"]
+    P -- "not now" --> L["later:<br/>/feature-ladder:feature --from-brainstorm"]
+    L --> N
     N --> R["one atomic run per feature"]
 ```
 
@@ -420,9 +423,8 @@ lacks; the sheet is a floor, not a ceiling. `brainstorm.py scan` settles what
 the repo's manifests and files already settle, with no model, and the scout
 recalls what memory (an earlier brainstorm's architecture included) already
 decided. Then you are asked, in batches of four and with no cap: every detail
-that is not certain (not only the ones that would change the model), the two
-session questions, and what to build afterwards (every feature, the first
-only, or plan only). Your answers become `.feature-ladder/brainstorm/<slug>.md`
+that is not certain (not only the ones that would change the model) and the
+two session questions. Your answers become `.feature-ladder/brainstorm/<slug>.md`
 and a feature queue in build order; a feature whose details you changed is
 rewritten, and one whose details you all marked not needed is dropped. While
 details are still open, or your answers call for ones the sheet lacked (you
@@ -432,7 +434,9 @@ anything is built. Then `brainstorm.py remember` stores the settled
 architecture in Hindsight, one `` [decision] `arch:<detail>` ... `` fact per
 detail you decided or the scout proposed (nothing the repo already shows),
 written in the background outside the 12-per-session cap and tagged
-`architecture`. Each feature then runs as a normal atomic feature without
+`architecture`. Last comes the hand-off question: pass the app to the
+implementer now (every feature, or the first only), or not now. "Now" runs
+exactly what `--from-brainstorm` runs. Each feature then runs as a normal atomic feature without
 asking again, and its cards carry only the details that feature covers. The
 session subagent budget still stops the queue; `/feature-ladder:feature
 --from-brainstorm [app-slug] [feature-id]` continues it at any time, with no
@@ -1081,7 +1085,7 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.21.0** | From brainstorm to feature, with the architecture in memory. `--brainstorm` asks as many questions as it takes: no cap on the first round (it was 40), the sheet's 30 details are a floor the scout adds to, and follow-up rounds (`brainstorm.py followup`, `refine`; at most three, all before anything is built) settle details still open and the ones your answers called for. `brainstorm.py remember` stores the settled architecture in Hindsight as one `` `arch:<detail>` `` decision per detail, outside the per-session cap and tagged `architecture`, before the first feature runs. `recall.py` and `confidence.select_relevant` give each later feature the architecture decisions in its area (up to four, newest per detail, apart from the five usual facts), so the relevance filter no longer drops them for requests that share no word with them. `/feature-ladder:feature --from-brainstorm [app-slug] [feature-id]` (and the same in the app skill) builds a concluded brainstorm's queue with no request text and no questions; `brainstorm.py next --app/--feature/--build` is the hand-off. `memory_gate.py flush --emit` now prints the exact `retain_calls` for the app's connector. |
+| **v1.21.0** | From brainstorm to feature, with the architecture in memory. `--brainstorm` asks as many questions as it takes: no cap on the first round (it was 40), the sheet's 30 details are a floor the scout adds to, and follow-up rounds (`brainstorm.py followup`, `refine`; at most three, all before anything is built) settle details still open and the ones your answers called for. `brainstorm.py remember` stores the settled architecture in Hindsight as one `` `arch:<detail>` `` decision per detail, outside the per-session cap and tagged `architecture`, before the first feature runs. `recall.py` and `confidence.select_relevant` give each later feature the architecture decisions in its area (up to four, newest per detail, apart from the five usual facts), so the relevance filter no longer drops them for requests that share no word with them. A defined app ends with one hand-off question (it replaces the up-front "what to build" question): implement every feature now, the first only, or not now; "now" takes the same path as `/feature-ladder:feature --from-brainstorm [app-slug] [feature-id]`, which (also in the app skill) builds a concluded brainstorm's queue with no request text and no questions; `brainstorm.py next --app/--feature/--build` is the hand-off. `memory_gate.py flush --emit` now prints the exact `retain_calls` for the app's connector. |
 | v1.20.0 | Hindsight in every mode, and only relevant facts. `recall.py` is the one read for feature runs, `--brainstorm` (the scout now recalls), `--researcher`, `/feature-ladder:research`, `/feature-ladder:recall` and the app: it recalls once (the coordinator reuses the scout's), keeps only facts that name the work's files or two distinctive words of the request, drops duplicates and memories whose paths are gone, and prints at most five as the `Memory:` line, so no model reads the raw recall. Recall uses `tags_match: any_strict` (plain `all` also returned every untagged memory in the bank) over `project:<repo>` and `project:<folder>`, so clones in differently named folders share memory. `confidence.py` counts only relevant memories, and GLM cards no longer get unrelated memories as filler or Hindsight tools. The key is read from the environment, `.env` files or the Windows user variables, and session start says plainly when memory is off; a cached "no bank yet" is re-checked. Queued memories are written by a detached script when a session ends or starts (never during a run), not only at `wrap`. Another Hindsight server of yours is left alone outside a run. |
 | v1.19.0 | `--brainstorm` on `feature` and in the app skill: every application and architecture detail of the whole app (30 on the sheet, plus any the scout adds) is settled at the very front in one round of questions, then the app is split into a feature queue in build order and each feature runs as a normal atomic run with only its own details on its cards. `brainstorm.py` (scan, decide, apply, features, next, done, context) costs no model tokens; the phase adds no agent beyond the Sonnet scout, and the session subagent budget still stops the queue. Also: a recall the hook later refuses no longer uses up one of the run's three (`memory_gate.commit_recall`), and `abort` frees the run's saved intake for reuse. Optional Rust build of the outside-repo audit hook (`hooks/guard-rs`, `build_guard.sh`): same decisions and `run.json` bytes as the Python hook, about 185 ms down to 60 ms per Bash call on Windows, and it hands every call back to Python once the Python reference changes |
 | v1.18.0 | `--no-bs`: for one run, the cheap tier runs on [Silk Compute](https://silkcompute.com/docs/claude-code)'s open-weight models, each on a tier it can handle (DeepSeek V4.1 Flash 1017 Fast for mechanic cards, DeepSeek V4.1 Flash 1017 for implementer cards up to score 6, Kimi K3.1 Pro for implementer/medium 7-14; T3 and up stay on Claude), with a busy-model fallback, the key from `SILK_API_KEY`, a `.env` or Secret Manager, and cost from the Silk balance. Never a saved setting. The Claude app skill has the switch too: `intake.py card --no-bs` routes the card and prints a runner command that carries `--no-bs`, and `external_worker.py run --no-bs` runs it on Silk without a `run.json`. The research brief labels the Silk models with `brief.py build --no-bs` |

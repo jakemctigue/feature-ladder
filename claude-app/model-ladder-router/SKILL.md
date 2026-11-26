@@ -133,13 +133,13 @@ brainstorm (`--from-brainstorm [app-slug] [feature-id]`, or "build the next
 feature of the app"): then go straight to 5.
 
 1. `B find "<request>"`: a path means the app sheet for this request is
-   already confirmed; go to 5.
+   already confirmed; ask its `handoff.question` if set (as at the end of 4),
+   then go to 5.
 2. `B guide` and follow what it prints. You are the scout: scan, recall,
    settle every detail (and add any this app needs that the sheet lacks),
    draft the features, `B decide`. Start no subagent for this.
 3. Ask everything `decide` lists, however many questions that is:
-   `decisions` (orchestrator, session subagents, and `build`: every feature,
-   the first only, or plan only), every item of `questions`, then
+   `decisions` (orchestrator, session subagents), every item of `questions`, then
    `open_text` in the user's own words. If the user said to just go, ask
    nothing. Save
    `{"answers": {"<detail>": "<chosen label or their words>"}, "decisions": {"<id>": "<label>"}}`
@@ -154,8 +154,13 @@ feature of the app"): then go straight to 5.
    with `memory_gate.py flush` (see Memory; with a connector, `flush --emit`
    and one `retain` per `retain_calls` entry). Tell the user the sheet's
    `readable` path, the features in order, one line each, and how many
-   architecture facts went to memory.
-5. `B next` gives the next feature (to continue a concluded brainstorm:
+   architecture facts went to memory. Then ask `handoff.question`: pass the
+   app to the implementer now (every feature, or the first only) or not now
+   (if the user said to just go: every feature). Go to 5 with
+   `B next --build <the option's value>`; for "Not now" run
+   `B next --build plan`, give them `handoff.command` to build it later, and
+   stop.
+5. `B next --build <the hand-off answer>` gives the next feature (to continue a concluded brainstorm:
    `B next --build all [--app <slug>]`, or `--build first --feature <id>`
    for one feature). Run its `request` through sections 2 to 4 as one normal
    feature, asking nothing more (recommended options), with

@@ -143,6 +143,31 @@ class HandOff(Base):
         self.assertEqual(bad.returncode, 1)
         self.assertIn("no confirmed app sheet", bad.stderr)
 
+    def test_a_defined_app_offers_to_pass_it_to_the_implementer(self):
+        answers = {"answers": dict(ANSWERS["answers"], entities="One list per household"),
+                   "decisions": {k: v for k, v in ANSWERS["decisions"].items() if k != "build"}}
+        app = self.confirm(answers)
+        self.assertEqual(app["build"], "ask")
+        self.assertIsNone(app["handoff"]["question"])        # not while the scout still has work
+        path = self.app_path(app)
+        blanks = app["followup"]
+        done = json.loads(self.run_cli("refine", path, self.write("a.json", {"answers": {
+            k: "Not needed" for k in blanks}})).stdout)
+        self.assertEqual(done["next_step"], "build", done["revise_because"])
+        q = done["handoff"]["question"]
+        self.assertEqual([o["value"] for o in q["options"]], ["all", "first", "plan"])
+        self.assertTrue(q["options"][0]["label"].endswith("(Recommended)"))
+        self.assertIn(f"--from-brainstorm {self.slug}", q["options"][2]["description"])
+        waiting = self.next()
+        self.assertIsNone(waiting["feature"])                 # nothing is built before the answer
+        self.assertIn("handoff.question", waiting["note"])
+        later = self.next("--build", "plan")                  # "Not now"
+        self.assertIsNone(later["feature"])
+        self.assertIn(f"/feature-ladder:feature --from-brainstorm {self.slug}", later["note"])
+        self.assertIsNone(self.load(app)["handoff"]["question"])
+        now = self.next("--app", self.slug, "--build", "all")   # what --from-brainstorm runs
+        self.assertEqual(now["feature"]["id"], "household-model")
+
     def test_the_readable_sheet_says_how_to_continue(self):
         app = self.confirm(ANSWERS)
         md = Path(app["readable"]).read_text(encoding="utf-8")
