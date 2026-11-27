@@ -7,14 +7,16 @@ Why: cost scales with worker turns x context, and those tokens count against
 the Claude plan. A child `claude -p` pointed at OpenRouter runs the same
 tools, the same Evidence Packet contract and the same guard hook, but bills
 OpenRouter credits (GLM 5.3 Flash: ~$0.15/M in, $0.50/M out) and leaves the
-plan limit alone. Opus rungs and the Fable coordinator stay on Anthropic.
+plan limit alone. T1 evidence cards run here too, on Inkling, read only. Opus
+rungs and Fable stay on Anthropic; the GLM 5.3 coordinator uses the same
+mechanism from external_coordinator.py.
 
   external_worker.py check [--probe]
       CLI present? key readable? OpenRouter key valid (credits, limits)?
       --probe also sends one minimal request to each configured model.
       Exit 0 ok, 3 unavailable (install/sign-in/key), 1 error.
 
-  external_worker.py run --card FILE --id T1 [--rung implementer|implementer-high|mechanic]
+  external_worker.py run --card FILE --id T1 [--rung implementer|implementer-high|mechanic|evidence-collector]
                          [--model ID] [--cwd DIR] [--timeout S] [--max-turns N] [--score N]
                          [--no-bs]
       Runs the card. A card without a Memory: line gets one from the feature's
@@ -81,9 +83,10 @@ Whatever the child printed is shown and saved with the key masked ("***").
       "key_env": "OPENROUTER_API_KEY",           # environment variable, if set
       "key_secret": "OPENROUTER_API_KEY",        # else Google Secret Manager name
       "models": {
-        "mechanic":         "z-ai/glm-5.3-flash:nitro",
-        "implementer":      "z-ai/glm-5.3-flash:nitro",
-        "implementer-high": "z-ai/glm-5.3"
+        "mechanic":           "z-ai/glm-5.3-flash:nitro",
+        "implementer":        "z-ai/glm-5.3-flash:nitro",
+        "implementer-high":   "z-ai/glm-5.3",
+        "evidence-collector": "thinkingmachines/inkling"   # T1: read-only research, web allowed
       },
       "context_1m": true,                        # append [1m] so Claude Code allows 1M context
       "max_turns": 40,
@@ -109,6 +112,10 @@ sys.path.insert(0, str(HERE))
 
 import ladder_state  # noqa: E402
 
+# T1, the evidence collector: Thinking Machines' Inkling (the full model, 41B
+# active of 975B; 1M context, tool use) through OpenRouter. Read-only, web
+# allowed; Haiku medium when OpenRouter cannot take the card (exit 3).
+INKLING = "thinkingmachines/inkling"
 DEFAULTS = {
     "workers": "auto",
     "openrouter": {
@@ -122,6 +129,7 @@ DEFAULTS = {
             "mechanic": "z-ai/glm-5.3-flash:nitro",
             "implementer": "z-ai/glm-5.3-flash:nitro",
             "implementer-high": "z-ai/glm-5.3",
+            "evidence-collector": INKLING,
         },
         "context_1m": True,
         "max_turns": 40,
@@ -133,9 +141,9 @@ DEFAULTS = {
 # price; the ledger shows what each card cost).
 PRESETS = {
     "glm": {"mechanic": "z-ai/glm-5.3-flash:nitro", "implementer": "z-ai/glm-5.3-flash:nitro",
-            "implementer-high": "z-ai/glm-5.3"},
+            "implementer-high": "z-ai/glm-5.3", "evidence-collector": INKLING},
     "jev": {"mechanic": "typesafe/jev-router", "implementer": "typesafe/jev-router",
-            "implementer-high": "typesafe/jev-router"},
+            "implementer-high": "typesafe/jev-router", "evidence-collector": INKLING},
 }
 # --no-bs: Silk Compute (https://silkcompute.com/docs/claude-code), an
 # Anthropic-compatible endpoint serving abliterated open-weight models. Used only
@@ -175,7 +183,9 @@ SILK = {
         "kimi-k3.1-pro-uncensored": "hy4-uncensored",
     },
 }
-EXTERNAL_RUNGS = {"mechanic", "implementer"}  # never senior-implementer, experts, Fable, scribe, codex-reviewer
+EXTERNAL_RUNGS = {"mechanic", "implementer", "evidence-collector"}  # never senior-implementer, experts, Fable,
+# scribe, codex-reviewer. The evidence collector (T1) runs only where the provider names a model for it
+# (OpenRouter: Inkling); Silk has none, so under --no-bs it stays on Haiku.
 # intake.py card sends a card here when takes() says so: the router's provider
 # "glm" (T0 and implementer/medium with score <= route.GLM_MAX_SCORE), and with
 # --no-bs also implementer/medium up to SILK["reach"].
@@ -184,6 +194,13 @@ EXTERNAL_RUNGS = {"mechanic", "implementer"}  # never senior-implementer, expert
 TOOLS = "Bash,Read,Edit,Write,MultiEdit,Glob,Grep"
 DISALLOWED = ("Agent,Task,Skill,WebSearch,WebFetch,NotebookEdit,"
               "mcp__plugin_feature-ladder_hindsight__recall,mcp__plugin_feature-ladder_hindsight__retain")
+# The evidence collector reads and searches; it never edits. A session on a
+# third-party endpoint may not offer WebSearch (an Anthropic server tool) or
+# WebFetch; the card's Bounds line then points it at `curl -sL` through Bash.
+READ_ONLY_RUNGS = {"evidence-collector"}
+TOOLS_READ_ONLY = "Bash,Read,Glob,Grep,WebFetch,WebSearch"
+DISALLOWED_READ_ONLY = ("Agent,Task,Skill,Edit,Write,MultiEdit,NotebookEdit,"
+                        "mcp__plugin_feature-ladder_hindsight__recall,mcp__plugin_feature-ladder_hindsight__retain")
 # The child's own words when OpenRouter turned the request away: nothing ran, so the
 # card should fall back to a subagent (exit 3) instead of being reported as an error.
 UNAVAILABLE = re.compile(r"\b(401|402|403)\b|no auth credentials|invalid (x-)?api[- ]key|unauthori[sz]ed|"
@@ -279,6 +296,8 @@ def model_for(cfg, rung, effort=None, override=None, score=None):
         return override
     p = cfg["openrouter"]
     models = p["models"]
+    if rung == "evidence-collector":
+        return models.get(rung)  # no implementer stand-in: without its own model, T1 stays on Haiku
     key = rung
     s = _score(score)
     if rung == "implementer" and (effort or "").lower() == "high":
@@ -296,6 +315,8 @@ def takes(cfg, route):
     provider's "reach" score (the intermediate T2 band). Never T3 and up."""
     if route.get("provider") == "glm":
         return True
+    if route.get("provider") == "inkling":  # T1, where the provider names a model for it
+        return bool(cfg["openrouter"]["models"].get("evidence-collector"))
     reach, s = _score(cfg["openrouter"].get("reach")), _score(route.get("score"))
     return (reach is not None and s is not None and s <= reach
             and route.get("agent") == "implementer" and route.get("effort") == "medium")
@@ -458,6 +479,21 @@ def child_env(cfg, key, model):
 CONTRACT_FILES = [HERE.parents[1] / "worker-contract" / "SKILL.md", HERE / "worker-contract.md"]
 
 
+AGENTS_DIR = HERE.parents[2] / "agents"
+
+
+def agent_text(name):
+    """An agent's instructions (its .md file without the frontmatter), or "" where
+    the file is not installed (the Claude app). Only given to rungs whose job
+    the generic worker contract does not describe (the evidence collector)."""
+    for f in (AGENTS_DIR / f"{name}.md", HERE / f"{name}.md"):
+        try:
+            return re.sub(r"^---.*?---\s*", "", f.read_text(encoding="utf-8"), count=1, flags=re.S).strip()
+        except OSError:
+            continue
+    return ""
+
+
 def contract_text():
     for f in CONTRACT_FILES:
         try:
@@ -517,7 +553,7 @@ def memory_line(root, scope, title=""):
     return [f"[{m['kind']}] {m['text']}" for m in picked], len(picked)
 
 
-def prepare_card(card, root, task_id, max_turns, timeout, budget=None):
+def prepare_card(card, root, task_id, max_turns, timeout, budget=None, web=False):
     """The queue card the external worker is handed: the coordinator's card with
     a Memory: line from the saved recall when it has none, a Bounds: line and the
     output contract inline (cheap models weigh the card over the system prompt)."""
@@ -535,7 +571,9 @@ def prepare_card(card, root, task_id, max_turns, timeout, budget=None):
             card += "\nMemory: none"
             added.append("memory")
     if _card_line(card, "Bounds") is None:
-        b = f"Bounds: at most {max_turns} turns and {timeout}s; edit only Scope; no subagents, no web"
+        b = (f"Bounds: at most {max_turns} turns and {timeout}s; read only, no edits; no subagents; web allowed "
+             "(WebFetch/WebSearch when this session offers them, else `curl -sL <url>` through Bash)"
+             if web else f"Bounds: at most {max_turns} turns and {timeout}s; edit only Scope; no subagents, no web")
         if budget and budget.get("left") is not None:
             b += f"; session subagent budget {budget['left']} of {budget.get('max')} left"
         card += "\n" + b
@@ -546,16 +584,20 @@ def prepare_card(card, root, task_id, max_turns, timeout, budget=None):
     return card + "\n", added
 
 
-def record_ledger(root, task_id, rung, model, result, provider="openrouter"):
+def record_ledger(root, task_id, rung, model, result, provider="openrouter", slug=None, key=None):
     """One row per card in runs/<slug>/usage.jsonl (the file hooks/scripts/ledger.py
     reports from). Written here directly, so it also works where the hook script is
     not installed (the Claude app). A line that cannot be read is kept, not fatal."""
     try:
         run = ladder_state.read_json(ladder_state.state_dir(root) / "run.json")
         if not isinstance(run, dict):
-            return
+            if not slug:
+                return
+            run = {}
+        if slug:  # the caller read it before the run finished (finish may close run.json)
+            run = dict(run, slug=slug)
         usage = result.get("usage") or {}
-        entry = {"at": now(), "key": f"external-{task_id}", "slug": run.get("slug"),
+        entry = {"at": now(), "key": key or f"external-{task_id}", "slug": run.get("slug"),
                  "agent": f"{rung} ({provider})", "rung": rung, "model": model, "effort": None,
                  "task": task_id, "turns": int(result.get("num_turns") or 0),
                  "input": int(usage.get("input_tokens") or 0),
@@ -776,15 +818,19 @@ def run(args):
         budget = session_budget.status(session_budget.find_root(cwd))
     except Exception:  # noqa: BLE001
         budget = None
+    read_only = rung in READ_ONLY_RUNGS
     card, added = prepare_card(Path(card_path).read_text(encoding="utf-8-sig"), root, task_id,
-                               max_turns, timeout, budget)
+                               max_turns, timeout, budget, web=read_only)
     # The contract goes in a file: an npm-installed `claude.cmd` passes its arguments
     # through cmd.exe, which cuts a multi-line argument at the first newline.
     fd, contract_file = tempfile.mkstemp(prefix="fl-contract-", suffix=".md")
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(contract_text() + "\n")
+        role = agent_text(rung) if read_only else ""
+        fh.write((role + "\n\n" if role else "") + contract_text() + "\n")
     cmd = [exe, "-p", "--model", "sonnet", "--output-format", "json", "--max-turns", str(max_turns),
-           "--permission-mode", "acceptEdits", "--allowedTools", TOOLS, "--disallowedTools", DISALLOWED,
+           "--permission-mode", "acceptEdits",
+           "--allowedTools", TOOLS_READ_ONLY if read_only else TOOLS,
+           "--disallowedTools", DISALLOWED_READ_ONLY if read_only else DISALLOWED,
            "--append-system-prompt-file", contract_file]
     usage_before = usage_usd(cfg, key)
     marker = ladder_state.state_dir(root) / f"external-{safe}.lock"  # "this card is running", for the cost note

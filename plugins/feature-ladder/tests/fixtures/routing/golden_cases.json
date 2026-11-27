@@ -118,8 +118,8 @@
         "effort": "medium",
         "hard_flags": [],
         "model": "haiku",
-        "provider": "claude",
-        "rung": "T1 Haiku Medium - collect sources / prepare evidence",
+        "provider": "inkling",
+        "rung": "T1 Inkling / Haiku Medium - collect sources / prepare evidence",
         "score": 1,
         "size": "S"
       },

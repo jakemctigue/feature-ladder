@@ -19,12 +19,18 @@ of silently meaning "no budget".
 In the same round the user picks the session's orchestrator, the model the
 coordinator runs on:
 
-    opus  = Opus 5.5 at xhigh effort     fable = Fable 5.2
+    glm   = GLM 5.3 (the full model, not Flash) through OpenRouter: the
+            coordinator runs in a child `claude -p` session that
+            external_coordinator.py starts, billed to OpenRouter credits
+    fable = Fable 5.2 (a Claude subagent)
+    opus  = Opus 5.5 at xhigh effort (a Claude subagent): not asked any more;
+            `--orchestrator opus`, the Claude app, and the automatic fallback
+            when OpenRouter cannot run the GLM coordinator
 
 It is asked once per coding session, up front, beside the budget. A run
-started with `--orchestrator fable|opus` answers it in advance. Nothing picks
-Fable on its own: with no answer (--auto) the coordinator runs on Opus xhigh,
-and a coordinator spawn on Fable is denied unless the user chose Fable.
+started with `--orchestrator glm|fable|opus` answers it in advance. Nothing
+picks Fable on its own: with no answer (--auto) the coordinator runs on GLM
+5.3, and a coordinator spawn on Fable is denied unless the user chose Fable.
 
 As a PreToolUse hook on Agent/Task it denies a spawn when:
   - the session budget is spent;
@@ -42,7 +48,7 @@ As a PreToolUse hook on Agent/Task it denies a spawn when:
 
     session_budget.py status [--cwd DIR]          JSON: size, max, used, left (or "unset")
     session_budget.py set --size S|M|L [--cwd DIR]
-    session_budget.py orchestrator [--set opus|fable] [--cwd DIR]
+    session_budget.py orchestrator [--set glm|fable|opus] [--cwd DIR]
                                                   JSON: the session's orchestrator (key, label, model,
                                                   effort, chosen); --set stores the user's answer
     session_budget.py charge --agent NAME [--model M] [--cwd DIR]
@@ -81,15 +87,30 @@ INTEGRATOR = "integrator"  # the one Fable rung a run reaches on its own: after 
 INTEGRATOR_MIN_WORKERS = 2
 
 # The orchestrator: the model the coordinator runs on, picked by the user once
-# per session in the up-front question. `model` and `effort` are what the Agent call passes; `model_id` is
-# the full id for callers that need one.
+# per session in the up-front question. `runner` says how it runs: "subagent"
+# (the Agent call passes `model` and `effort`) or "openrouter" (a child
+# `claude -p` session on that provider, started by external_coordinator.py with
+# `model_id`; `model` is then only a short name). `model_id` is the full id.
 ORCHESTRATORS = {
-    "opus": {"label": "Opus 5.5 xhigh", "model": "opus", "model_id": "claude-opus-5-5", "effort": "xhigh",
-             "description": "Opus 5.5 at xhigh effort runs the coordinator. Used when nothing is picked."},
+    "glm": {"label": "GLM 5.3", "model": "glm", "model_id": "z-ai/glm-5.3", "effort": "medium",
+            "runner": "openrouter",
+            "description": "GLM 5.3 (full, not Flash) runs the coordinator through OpenRouter, billed to "
+                           "OpenRouter credits. Used when nothing is picked."},
     "fable": {"label": "Fable 5.2", "model": "fable", "model_id": "claude-fable-5-2", "effort": "medium",
+              "runner": "subagent",
               "description": "Fable 5.2 runs the coordinator. Only ever used when you pick it here."},
+    "opus": {"label": "Opus 5.5 xhigh", "model": "opus", "model_id": "claude-opus-5-5", "effort": "xhigh",
+             "runner": "subagent",
+             "description": "Opus 5.5 at xhigh effort runs the coordinator, on the Claude plan."},
 }
-DEFAULT_ORCHESTRATOR = "opus"  # never Fable unless the user said so
+DEFAULT_ORCHESTRATOR = "glm"  # never Fable unless the user said so
+# What the up-front question offers. Claude Code: GLM 5.3 or Fable (Opus stays
+# reachable with --orchestrator opus and is the fallback when OpenRouter cannot
+# run GLM). The Claude app cannot hand coordination to another model (the
+# conversation is the orchestrator), so it keeps asking Opus or Fable.
+ASKED = ("glm", "fable")
+ASKED_APP = ("opus", "fable")
+FALLBACK_ORCHESTRATOR = "opus"  # when GLM cannot run (no CLI, no key, OpenRouter refused)
 
 
 def now():
@@ -146,10 +167,12 @@ def status(root):
 
 
 def orchestrator_key(value):
-    """'Fable 5.2', 'fable', 'claude-fable-5-2', 'Opus 5.5 xhigh', 'opus' -> key, or None."""
+    """'GLM 5.3', 'glm', 'z-ai/glm-5.3', 'Fable 5.2', 'fable', 'claude-fable-5-2',
+    'Opus 5.5 xhigh', 'opus' -> key, or None."""
     v = str(value or "").strip().lower()
-    if v.startswith("claude-"):
-        v = v[len("claude-"):]
+    for prefix in ("claude-", "z-ai/"):
+        if v.startswith(prefix):
+            v = v[len(prefix):]
     for key in ORCHESTRATORS:
         if v.startswith(key):
             return key
@@ -170,7 +193,7 @@ def orchestrator(root, override=None):
         key, source = DEFAULT_ORCHESTRATOR, "default"
     o = ORCHESTRATORS[key]
     return {"key": key, "label": o["label"], "model": o["model"], "model_id": o["model_id"],
-            "effort": o["effort"], "source": source, "chosen": source != "default"}
+            "effort": o["effort"], "runner": o["runner"], "source": source, "chosen": source != "default"}
 
 
 def set_orchestrator(root, value):
@@ -245,7 +268,8 @@ def _check(root, agent, model, via):
         if orchestrator(root, run_pick)["key"] != "fable":
             return False, ("feature-ladder: the coordinator runs on Fable only when the user picked Fable 5.2 "
                            "as the orchestrator (the up-front question, or --orchestrator fable on this "
-                           "run). Dispatch it with model opus, effort xhigh.")
+                           "run). Hand it to external_coordinator.py (GLM 5.3), or dispatch it with model "
+                           "opus, effort xhigh when OpenRouter is unavailable.")
     if agent in NOT_COUNTED:
         return True, ""
     sess = load(root)

@@ -20,12 +20,12 @@ coordinator's judgment.
 |---|---|---|---|
 | I | `scoper` | sonnet / medium | Intake before anything is delegated: every router variable with evidence, the decisions to ask |
 | T0 | `mechanic` | GLM 5.3 Flash (OpenRouter), else haiku / low | Mechanical patches, docs drafts, fixtures; at most one per feature |
-| T1 | `evidence-collector` | haiku / medium | Collect sources, extract claims |
+| T1 | `evidence-collector` | Inkling (OpenRouter, read only), else haiku / medium | Collect sources, extract claims |
 | T2 | `implementer` | GLM 5.3 Flash for score <= 6, else **sonnet / medium** | Bounded coding and its tests: the default rung |
 | T3 | `implementer` | sonnet / high | Bounded coding, harder |
 | T4-T5 | `senior-implementer` | opus / medium or high | Difficult implementation under an agreed design |
 | D | `domain-expert(-high)` | opus / medium or high | One design step, only on a hard flag |
-| C | `coordinator` | opus / xhigh, or fable when the user picked Fable 5.2 up front | Confidence, card, dispatch, verify.py, accept, merge: 12-24 turns |
+| C | `coordinator` | GLM 5.3 through OpenRouter (`external_coordinator.py`), or fable when the user picked Fable 5.2 up front; opus / xhigh as the fallback | Confidence, card, dispatch, verify.py, accept, merge: 12-24 turns |
 | FI | `integrator` | fable / medium | Once per feature, only after two or more different coding agents wrote code; coding tools (Read, Edit, Write, Bash, Glob, Grep) to reconcile seams, plus superpowers skills |
 | F-Low/High/Extra/Ultra | `second-opinion`, `deep-verifier`, `architect-escalation`, `ultra-investigator` | fable | Only with `--second-opinion`, `--escalate`, `--ultra` |
 | X | `codex-reviewer` | haiku / low driving OpenAI Codex | Only at `/feature-ladder:wrap --review` |
@@ -56,10 +56,15 @@ coordinator's judgment.
 ## Budgets (binding, enforced)
 
 **Orchestrator**: asked once per coding session, first, and stored in
-`.feature-ladder/session.json`: Opus 5.5 at xhigh effort or Fable 5.2 runs
-the coordinator. `--orchestrator fable|opus` answers it for one run without
-asking; with no answer it is Opus xhigh. The spawn hook denies a coordinator
-on Fable the user did not pick.
+`.feature-ladder/session.json`: GLM 5.3 (the full model, through OpenRouter)
+or Fable 5.2 runs the coordinator. `--orchestrator glm|fable|opus` answers it
+for one run without asking; with no answer it is GLM 5.3. Opus 5.5 xhigh
+takes GLM's place in the question when OpenRouter is not set up, and is the
+fallback when `external_coordinator.py run` exits 3. The GLM coordinator is a
+child `claude -p` on OpenRouter with no Agent tool; the Claude rungs it routes
+to go through `external_coordinator.py dispatch` on the user's own sign-in,
+under the same budget and spawn rules (`session_budget.check`). The spawn hook
+denies a coordinator on Fable the user did not pick.
 
 **Brainstorm** (`--brainstorm` only): before the intake, the scout settles
 every application and architecture detail of the whole app, the user answers
@@ -127,6 +132,23 @@ that name through gcloud) are present; otherwise `intake.py card` prints a
 subagent runner and says why. `/feature-ladder:workers jev` switches the
 cheap tier to `typesafe/jev-router`; `claude` turns it off. Configuration:
 `~/.claude/feature-ladder/providers.json`.
+
+Several OpenRouter cards whose Scopes do not overlap run together through
+OpenClaude (`oc`, npm `@gitlawb/openclaude`), a Claude Code fork on any
+OpenAI-compatible endpoint: `scripts/openclaude_runner.py fanout --card A --id
+T1 --rung implementer --card B --id T2 --rung mechanic` starts one OpenClaude
+agent per card at the same time, each on its rung's OpenRouter model (or
+`--model`), one session budget slot each, and prints the packets in order.
+`openclaude_runner.py team --prompt-file F --agents N` is one OpenClaude lead
+(GLM 5.3) whose Agent tool starts up to N OpenRouter agents, held to N and to
+the session budget by a PreToolUse hook (`gate`). Both bill OpenRouter only;
+exit 3 when OpenClaude or the key is missing (run the cards one by one).
+
+Cards with `provider: inkling` (T1, the evidence collector) run the same way
+on Thinking Machines' Inkling (`thinkingmachines/inkling`) with read-only
+tools (`--rung evidence-collector`; web through WebFetch where offered, else
+`curl`), and on Haiku medium when OpenRouter cannot take them. Silk has no T1
+model, so under `--no-bs` they stay on Haiku.
 
 **`--no-bs` (Silk Compute).** Only a run started with `--no-bs` (the switch
 lands in `run.json`) moves the cheap tier to Silk Compute

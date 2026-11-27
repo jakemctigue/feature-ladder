@@ -1,6 +1,6 @@
 ---
-description: "Add ONE feature with the orchestration ladder, atomically - just the code change and its tests. A Sonnet scout settles every routing variable; you answer only what is uncertain (and, once per session, which model orchestrates - Opus 5.5 xhigh or Fable 5.2 - and how many subagents the session may spawn); then one worker (GLM 5.3 Flash or Sonnet medium for most work) builds it on its own branch, the stack is merged and labelled review: pending, and what ran outside the repo is listed for you. Apart from an orchestrator you picked, Fable only integrates when two or more coding agents wrote code. No reviews, no scribes - those are /feature-ladder:wrap at the end of the session. With --brainstorm, every application and architecture detail of the whole app is settled first, with as many questions as it takes (all before anything is built), the architecture is stored in Hindsight, and the app is split into features; at the end it offers to pass them to the implementer (one ladder run each) now or later. --from-brainstorm builds the queue of a concluded brainstorm without re-typing anything. Usage - /feature-ladder:feature <description> [--auto] [--no-merge] [--orchestrator fable|opus] [--brainstorm] [--from-brainstorm [app-slug] [feature-id]] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]"
-argument-hint: <feature description> [--auto] [--no-merge] [--orchestrator fable|opus] [--brainstorm] [--from-brainstorm [app-slug] [feature-id]] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]
+description: "Add ONE feature with the orchestration ladder, atomically - just the code change and its tests. A Sonnet scout settles every routing variable; you answer only what is uncertain (and, once per session, which model orchestrates - GLM 5.3 through OpenRouter or Fable 5.2 - and how many subagents the session may spawn); then one worker (GLM 5.3 Flash or Sonnet medium for most work) builds it on its own branch, the stack is merged and labelled review: pending, and what ran outside the repo is listed for you. Apart from an orchestrator you picked, Fable only integrates when two or more coding agents wrote code. No reviews, no scribes - those are /feature-ladder:wrap at the end of the session. With --brainstorm, every application and architecture detail of the whole app is settled first, with as many questions as it takes (all before anything is built), the architecture is stored in Hindsight, and the app is split into features; at the end it offers to pass them to the implementer (one ladder run each) now or later. --from-brainstorm builds the queue of a concluded brainstorm without re-typing anything. Usage - /feature-ladder:feature <description> [--auto] [--no-merge] [--orchestrator glm|fable|opus] [--brainstorm] [--from-brainstorm [app-slug] [feature-id]] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]"
+argument-hint: <feature description> [--auto] [--no-merge] [--orchestrator glm|fable|opus] [--brainstorm] [--from-brainstorm [app-slug] [feature-id]] [--researcher] [--no-bs] [--second-opinion] [--escalate] [--ultra]
 ---
 
 Start a feature-ladder run for: $ARGUMENTS
@@ -15,8 +15,8 @@ Separate the request text from these switches:
 
 | Switch | Effect |
 |---|---|
-| `--auto` | Ask nothing. Use the scout's values and the recommended option for every decision (the session budget defaults to Small; the orchestrator is Opus xhigh unless `--orchestrator` says otherwise). |
-| `--orchestrator fable\|opus` | The model that runs the coordinator for this run: Fable 5.2, or Opus 5.5 at xhigh effort. Answers the up-front orchestrator question in advance, so it is not asked. |
+| `--auto` | Ask nothing. Use the scout's values and the recommended option for every decision (the session budget defaults to Small; the orchestrator is GLM 5.3 unless `--orchestrator` says otherwise). |
+| `--orchestrator glm\|fable\|opus` | The model that runs the coordinator for this run: GLM 5.3 (the full model, through OpenRouter, billed to OpenRouter credits), Fable 5.2, or Opus 5.5 at xhigh effort (no longer offered in the question, but still available here). Answers the up-front orchestrator question in advance, so it is not asked. |
 | `--no-merge` | Leave the PR stack open instead of merging it. By default `finish` merges the stack into your branch and labels it `review: pending`. |
 | `--brainstorm` | Before any feature is scoped: settle every application and architecture detail of the whole app, asking as many questions as it takes (a first round, then follow-up rounds while details are open), store the architecture in Hindsight, split the app into features, then offer to pass it to the implementer: every feature now (one atomic run each), the first only, or not now (later with `--from-brainstorm`) (step 0b). The scout does it; no Opus, no Fable, no extra agent. |
 | `--from-brainstorm [app-slug] [feature-id]` | Build from a concluded brainstorm: no request text, no questions. Takes the confirmed app sheet (the latest in this repo, or the one whose slug is given) and runs its queue from step 0b.5; with a feature id, just that feature. A plan-only sheet is built now. |
@@ -155,7 +155,7 @@ From the scout's `decide` output:
 2. Ask with AskUserQuestion, at most 4 questions per call, in this order:
    `decisions` (the two session questions first when present, each asked
    once per coding session: `orchestrator` - which model runs the
-   coordinator, Opus 5.5 xhigh or Fable 5.2; skip it when `--orchestrator`
+   coordinator, GLM 5.3 or Fable 5.2; skip it when `--orchestrator`
    was given - then `session_agents`, how many subagents the whole session
    may spawn - Small 1-2, Medium 3-4, Large up to 8; then `workspace`), then
    `questions`. There is no "live changes" question: outside-repo steps run
@@ -171,7 +171,7 @@ From the scout's `decide` output:
 
 Write `{"<field>": <value>, ..., "decisions": {"<id>": "<chosen label>"}, "switches": ["second-opinion", ...], "notes": [...]}`
 (with `--auto` and no session budget yet, add `"decisions": {"session_agents": "Small"}`;
-with `--orchestrator <fable|opus>`, add `"orchestrator": "<fable|opus>"` at the top level)
+with `--orchestrator <glm|fable|opus>`, add `"orchestrator": "<glm|fable|opus>"` at the top level)
 to `.feature-ladder/intake/<slug>-answers.json` and run:
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/intake.py" apply .feature-ladder/intake/<slug>-proposal.json .feature-ladder/intake/<slug>-answers.json
@@ -181,7 +181,7 @@ session's subagent budget and orchestrator. Tell the user in one line: the
 orchestrator (`orchestrator.label`), the size and what it
 means (`budget.shape`), the rung and where it runs (GLM, Silk with `--no-bs`, or Claude), the
 subagents left in the session, whether the stack merges or stays open, and
-"Running now; no more questions." For example: "Orchestrator Opus 5.5 xhigh. Size S: one GLM 5.3 Flash
+"Running now; no more questions." For example: "Orchestrator GLM 5.3. Size S: one GLM 5.3 Flash
 worker, no design, no review. 3 of 4 session subagents left. Merges when
 green, labelled review: pending. Running now." If `budget.workers` is 0 the
 session budget is spent: say so and stop.
@@ -193,9 +193,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/brief.py" find "
 ```
 If it prints a path, a brief for this exact request is saved: run
 `brief.py show "<request text>"` and show it. Otherwise, only if the request
-names an external library or API the repo does not already use, dispatch ONE
-`feature-ladder:evidence-collector` (Haiku medium; at most 8 bullets, saved to
-`.feature-ladder/intake/<slug>-evidence.md`), then build the brief from the
+names an external library or API the repo does not already use, run ONE
+evidence collector (T1: Inkling through OpenRouter; at most 8 bullets, saved
+to `.feature-ladder/intake/<slug>-evidence.md`). Write its card to
+`.feature-ladder/cards/<slug>-E1.md` (`TASK E1: <library or API>`, the
+question: the current API surface the request needs, install or auth steps,
+one pitfall, sources cited, no code changes) and run
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/external_worker.py" run --card .feature-ladder/cards/<slug>-E1.md --id E1 --rung evidence-collector --timeout 540
+```
+Exit 3 (OpenRouter unavailable): dispatch `feature-ladder:evidence-collector`
+(Haiku medium) with the same card instead. Then build the brief from the
 confirmed intake:
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/complexity-router/scripts/brief.py" build --proposal .feature-ladder/intake/<slug>-proposal.json --intake .feature-ladder/intake/<slug>.json --switches researcher[,<other switches>] [--external "<name>" --evidence <file>]
@@ -220,17 +228,37 @@ HEAD was moved back to the base branch of the previous run).
 
 ## 5. Hand off
 
-The coordinator's `model` and `effort` are the confirmed intake's
-`orchestrator.model` and `orchestrator.effort` (`opus` / `xhigh`, or `fable` /
-`medium` when the user picked Fable 5.2). Copy them exactly; a hook denies a
-Fable coordinator the user did not pick. Switches are the intake's `switches`. Secrets: the intake's `secrets.names`
-lists the Secret Manager secrets the feature reads (names only).
+Build the hand-off prompt below (the text after `prompt=`). Switches are the
+intake's `switches`. Secrets: the intake's `secrets.names` lists the Secret
+Manager secrets the feature reads (names only). Then hand it off by the
+confirmed intake's `orchestrator.runner`:
+
+**`"runner": "openrouter"` (GLM 5.3, the default).** Write the prompt to
+`.feature-ladder/runs/<slug>/coordinator-prompt.md` and run, with the Bash
+tool's `run_in_background: true` (and its longest timeout, if it takes one;
+the run can last longer than one foreground call):
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/external_coordinator.py" run --prompt-file .feature-ladder/runs/<slug>/coordinator-prompt.md
+```
+You are notified when it exits; do not poll. Its stdout is the coordinator's
+report plus one `external coordinator:` line (model, turns, cost). Exit 3
+(no `claude` CLI, no OpenRouter key, a rejected key or no credits; nothing
+ran): tell the user in one line that GLM 5.3 was unavailable and why, and
+dispatch the Opus coordinator below with `model="opus"`, `effort="xhigh"`.
+Exit 1: the coordinator failed or timed out; relay what it printed, and if
+`pr_checkpoint.py status` shows the run still active, say so and offer
+`finish` or `abort`.
+
+**`"runner": "subagent"` (Fable 5.2, or Opus 5.5 xhigh).** The coordinator's
+`model` and `effort` are the confirmed intake's `orchestrator.model` and
+`orchestrator.effort` (`fable` / `medium`, or `opus` / `xhigh`). Copy them
+exactly; a hook denies a Fable coordinator the user did not pick.
 
 ```
 Agent(
   subagent_type="feature-ladder:coordinator",
-  model="<orchestrator.model from the intake: opus | fable>",
-  effort="<orchestrator.effort from the intake: xhigh | medium>",
+  model="<orchestrator.model from the intake: fable | opus>",
+  effort="<orchestrator.effort from the intake: medium | xhigh>",
   name="feature-coordinator",
   prompt="Feature request from the user: <request text>
 
@@ -247,7 +275,7 @@ Implement only this feature and its tests. Stay within the budget: it is the who
 )
 ```
 
-When the coordinator returns, relay its report as-is, then one line pointing at
+When the coordinator returns (either way), relay its report as-is, then one line pointing at
 `.feature-ladder/runs/<slug>/FEATURE-REPORT.md` and one line listing what is labelled `review: pending`
 (merged PRs, deploys, data steps) for the user to look at afterwards; if a
 merge was refused by GitHub, say which PR and why. Last, run

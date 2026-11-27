@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 PLUGIN = Path(__file__).resolve().parents[1]
 ROUTER = PLUGIN / "skills" / "complexity-router" / "scripts"
@@ -157,11 +158,24 @@ class SmallFirestoreWrite(unittest.TestCase):
     def decision_ids(self, mode="default"):
         return [d["id"] for d in intake.decide(dict(self.scan, fields=scoper_fields(self.scan)), mode)["decisions"]]
 
-    def test_orchestrator_is_asked_up_front_once_per_session(self):
-        dec = intake.decide(dict(self.scan, fields=scoper_fields(self.scan)))
+    def options(self, ready, app=False):
+        import external_worker
+        with mock.patch.object(external_worker, "available", return_value=(ready, "no OPENROUTER_API_KEY")):
+            dec = intake.decide(dict(self.scan, fields=scoper_fields(self.scan)), app=app)
         first = dec["decisions"][0]
         self.assertEqual(first["id"], "orchestrator")
-        self.assertEqual([o["label"] for o in first["options"]], ["Opus 5.5 xhigh", "Fable 5.2"])
+        return first["options"]
+
+    def test_glm_or_fable_is_the_question_and_opus_stands_in_without_openrouter(self):
+        self.assertEqual([o["label"] for o in self.options(True)], ["GLM 5.3", "Fable 5.2"])
+        opts = self.options(False)
+        self.assertEqual([o["label"] for o in opts], ["Opus 5.5 xhigh", "Fable 5.2"])
+        self.assertIn("GLM 5.3 unavailable here: no OPENROUTER_API_KEY", opts[0]["description"])
+        # The app: the conversation is the orchestrator, so it cannot be GLM.
+        self.assertEqual([o["label"] for o in self.options(True, app=True)], ["Opus 5.5 xhigh", "Fable 5.2"])
+
+    def test_orchestrator_is_asked_up_front_once_per_session(self):
+        self.assertEqual([o["label"] for o in self.options(True)], ["GLM 5.3", "Fable 5.2"])
         final = self.apply_cli({"decisions": {"orchestrator": "Fable 5.2", "session_agents": "Small (1-2 subagents)"}})
         o = final["orchestrator"]
         self.assertEqual((o["key"], o["model"], o["model_id"], o["source"]), ("fable", "fable", "claude-fable-5-2", "asked"))
@@ -169,15 +183,21 @@ class SmallFirestoreWrite(unittest.TestCase):
         self.assertNotIn("orchestrator", self.decision_ids())      # not asked again in this session
         session_budget.save(self.root, {"started": "x", "spawned": []})  # what `new` / SessionStart does
         self.assertEqual(self.decision_ids()[0], "orchestrator")   # a new session asks again
-        self.assertEqual(session_budget.orchestrator(self.root)["key"], "opus")
+        self.assertEqual(session_budget.orchestrator(self.root)["key"], "glm")
 
-    def test_opus_xhigh_is_the_answer_when_nothing_is_picked(self):
+    def test_glm_is_the_answer_when_nothing_is_picked(self):
         self.assertNotIn("orchestrator", self.decision_ids("auto"))  # --auto asks nothing
         final = self.apply_cli({"decisions": {"session_agents": "Small"}})
         o = final["orchestrator"]
-        self.assertEqual((o["key"], o["model"], o["effort"], o["source"]), ("opus", "opus", "xhigh", "default"))
+        self.assertEqual((o["key"], o["model_id"], o["runner"], o["source"]),
+                         ("glm", "z-ai/glm-5.3", "openrouter", "default"))
         self.assertFalse(session_budget.orchestrator(self.root)["chosen"])  # nothing stored: still asked later
         self.assertEqual(self.decision_ids()[0], "orchestrator")
+        # Answering GLM 5.3 (or the Opus stand-in) is stored like any answer; opus stays a valid switch.
+        final = self.apply_cli({"decisions": {"orchestrator": "GLM 5.3 (Recommended)"}})
+        self.assertEqual((final["orchestrator"]["key"], final["orchestrator"]["source"]), ("glm", "asked"))
+        final = self.apply_cli({"orchestrator": "opus"})
+        self.assertEqual((final["orchestrator"]["key"], final["orchestrator"]["runner"]), ("opus", "subagent"))
 
     def test_orchestrator_switch_is_for_one_run_and_bad_values_are_refused(self):
         final = self.apply_cli({"orchestrator": "fable", "decisions": {"session_agents": "Small"}})

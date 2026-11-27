@@ -1,5 +1,5 @@
 ---
-description: Research what a requested feature wants from this codebase, without building it and without asking questions. Reuses the intake scan and the Sonnet scout's proposal, the router and the skill selector, then writes and prints a short research brief - what the feature touches, a qualitative cost label per agent (never a number) and what to expect. No Opus, no Fable, at most one Haiku evidence-collector call; memory is read by a script. Usage - /feature-ladder:research <description>
+description: Research what a requested feature wants from this codebase, without building it and without asking questions. Reuses the intake scan and the Sonnet scout's proposal, the router and the skill selector, then writes and prints a short research brief - what the feature touches, a qualitative cost label per agent (never a number) and what to expect. No Opus, no Fable, at most one evidence-collector call (Inkling through OpenRouter, Haiku when OpenRouter is unavailable); memory is read by a script. Usage - /feature-ladder:research <description>
 argument-hint: <feature description>
 ---
 
@@ -43,11 +43,22 @@ selector, so there is nothing to do by hand. To look at the routing alone:
 
 Only if the request names an external library or API that the repo does not
 already use (check the proposal's `new_dependency` field and the repo's
-manifests), dispatch ONE collector and save its short answer to
-`.feature-ladder/intake/<slug>-evidence.md`:
+manifests), run ONE collector (T1: Inkling through OpenRouter) and save its
+short answer to `.feature-ladder/intake/<slug>-evidence.md`. Write the card to
+`.feature-ladder/cards/<slug>-E1.md`:
+```
+TASK E1: <library or API>
+Library or API: <name>. Request: <request text>
+Return at most 8 short bullets: the current API surface the request needs, install or auth steps, and one pitfall. Cite sources. No code changes.
+```
+and run
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/external_worker.py" run --card .feature-ladder/cards/<slug>-E1.md --id E1 --rung evidence-collector --timeout 540
+```
+Exit 3 (OpenRouter unavailable, nothing ran) falls back to Haiku:
 ```
 Agent(subagent_type="feature-ladder:evidence-collector", model="haiku", effort="medium", name="research-evidence",
-      prompt="Library or API: <name>. Request: <request text>\nReturn at most 8 short bullets: the current API surface the request needs, install or auth steps, and one pitfall. Cite sources. No code changes.")
+      prompt="<the same card>")
 ```
 Otherwise dispatch nothing else.
 

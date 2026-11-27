@@ -43,7 +43,9 @@ Output: JSON {rung, agent, model, effort, provider, score, size, design_first,
 
   provider      "glm" for T0 and small T2 (runs on GLM 5.3 Flash through
                 OpenRouter when it is set up, else on the Claude rung named),
-                "claude" for everything else.
+                "inkling" for T1 (the evidence collector runs on Thinking
+                Machines' Inkling through OpenRouter when it is set up, else on
+                Haiku medium), "claude" for everything else.
   design_first  true when a hard flag or an Opus rung without an agreed design
                 means ONE design step (domain-expert) comes before the worker.
                 A hard flag never changes the size or adds any other step.
@@ -102,7 +104,7 @@ NON_CODE_KINDS = {
     "docs":     ("mechanic",           "haiku", "low",    "T0 Haiku Low - docs draft"),
     "fixture":  ("mechanic",           "haiku", "low",    "T0 Haiku Low - fixtures"),
     "check":    ("mechanic",           "haiku", "low",    "T0 Haiku Low - execute defined checks"),
-    "research": ("evidence-collector", "haiku", "medium", "T1 Haiku Medium - collect sources / prepare evidence"),
+    "research": ("evidence-collector", "haiku", "medium", "T1 Inkling / Haiku Medium - collect sources / prepare evidence"),
     "analysis": ("domain-expert",      "opus",  "medium", "T4 Opus Medium - domain analysis (use domain-expert-high only if novelty=3)"),
 }
 
@@ -200,6 +202,8 @@ def route(task: dict) -> dict:
 def provider_for(agent, effort, total):
     if agent == "mechanic":
         return "glm"
+    if agent == "evidence-collector":
+        return "inkling"
     if agent == "implementer" and effort == "medium" and total <= GLM_MAX_SCORE:
         return "glm"
     return "claude"
@@ -271,7 +275,8 @@ def table():
     for lo, hi, agent, model, effort, label in BANDS:
         hi_s = "+" if hi >= 10**6 else str(hi)
         print(f"  {lo:>2}-{hi_s:<3} {label:<58} -> {agent} ({model}/{effort})")
-    print(f"Provider: glm for mechanic and implementer/medium with score <= {GLM_MAX_SCORE}; claude otherwise")
+    print(f"Provider: glm for mechanic and implementer/medium with score <= {GLM_MAX_SCORE}; "
+          "inkling for the T1 evidence collector; claude otherwise")
     print("Hard flags (one design step first, nothing else): " + "; ".join(HARD_FLAGS.values()))
     print("Opus rungs additionally require design_agreed=true (else one design step first).")
 

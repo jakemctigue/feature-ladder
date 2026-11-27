@@ -105,7 +105,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "ed349776a8ecc9476b13d2fe7eed56eddbe051c9324a3f34e1f4ee271b9ca755"
+          "content": "d3eab795712adb6aab864ec5cd4e984bdff7093f11314683380804ca44c81e6c"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/brainstorm.py",
@@ -116,7 +116,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "798ef3c0a57d05d3848ba922377ca074316980d2016139ff627feeb4800536a2"
+          "content": "751508dcb0229e5e3386281251ec8f9feb55041ae5469b26f17408d23260c21f"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/brief.py",
@@ -127,7 +127,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "15c5273922d3201855772175340d7a8eba9bd7f6af9f3c0799837288683e7614"
+          "content": "73bec6b2650eadcfb4d8900b181d35771230f154d4f187a6d50a86b085009f12"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/intake.py",
@@ -138,7 +138,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "b147ea3a242597986825a49dbf845c6283c7015f34b7042bf9887d80b9d17520"
+          "content": "872958506ebf1d209596886d6b808face81ebdf5a9acc18f73045a3c84356a10"
         }
       ],
       "name": "plugins/feature-ladder/skills/complexity-router/scripts/route.py",
@@ -200,11 +200,22 @@
       "type": "file"
     },
     {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/external_coordinator.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1d30a02412ae113c5bdfeda130753827093babaafa18dff1a7497b03e9b4ae26"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/external_coordinator.py",
+      "type": "file"
+    },
+    {
       "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/external_worker.py",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "f217cb0cb4fbbd9f99e04516bf277890b0d532602e5d7800007dc8375de273f6"
+          "content": "6b45da5602f7adea3ac237790b95f2b92a84ccdb1bd440fbb36a460c2d05064d"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/external_worker.py",
@@ -233,6 +244,17 @@
       "type": "file"
     },
     {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/openclaude_runner.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6d02ae08f3efbd5ef6a9b232d301dd06d354fe505fd45f5571aa07c903e95b56"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/openclaude_runner.py",
+      "type": "file"
+    },
+    {
       "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/pr_checkpoint.py",
       "hashes": [
         {
@@ -248,7 +270,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "a5264660e040367ebf2a49915b664f733118a0d39dc22ae2727fcba64108036d"
+          "content": "64e8c985f622e12e431d415049fccfc4293f6ed7539310eb3e385a9bf7203585"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/session_budget.py",
@@ -306,7 +328,7 @@
       ],
       "name": "feature-ladder",
       "type": "application",
-      "version": "1.21.0"
+      "version": "1.22.0"
     },
     "tools": {
       "components": [
