@@ -215,7 +215,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "ab0136cf6371f3740dcd57a7099241d592badbfcf3ca2fba736ee646db8258cf"
+          "content": "5b202966ac485306a4b897d3acc7cf6e4c631ba2c8713b21c71c11761c85c6f3"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/external_coordinator.py",
@@ -270,7 +270,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "8db8e01fab2773b4861a5164f3b1c691a91c4dbeca510a6b55fdd70c9225a9fb"
+          "content": "85b7bb91e1d5787e466c991de5ba3ebc2f2cd9b4e7f6e2e10205833407eacf3b"
         }
       ],
       "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/openclaude_runner.py",

@@ -96,6 +96,8 @@ DISALLOWED = ["Agent", "Task", "Skill", "NotebookEdit"]  # a worker never starts
 STRIP_PREFIXES = ("CLAUDE", "ANTHROPIC", "OPENAI_", "OPENGATEWAY", "GEMINI_", "GITHUB_COPILOT")
 KEEP = {"CLAUDE_CONFIG_DIR"}  # harmless; OpenClaude ignores it
 BASH_TIMEOUT_MS = "1800000"
+# The key's usage counter trails a request by up to a minute: zero is "not yet", not "free".
+NOT_YET = "OpenRouter's usage counter had not moved yet (session_summary.py prices these threads)"
 TEAM_MEMORY = """
 # Memory (this repository's Hindsight recall, filtered to this task)
 
@@ -425,7 +427,8 @@ def fanout(argv):
         except OSError:
             pass
     codes = {out[i["id"]]["returned"] for i in items}
-    cost = "cost unknown" if charged is None else f"OpenRouter charged ${charged:.4f} for all of them"
+    cost = ("cost unknown" if charged is None else NOT_YET if charged == 0 and ran
+            else f"OpenRouter charged ${charged:.4f} for all of them")
     print(f"openclaude fanout: {len(ran)} of {len(items)} cards ran on OpenRouter through OpenClaude, "
           f"{secs}s, {cost}")
     if codes == {0}:
@@ -567,7 +570,8 @@ def team(args):
     except OSError as e:
         print(f"openclaude_runner: evidence not written: {e}", file=sys.stderr)
     ew.record_ledger(root, tid, "team", bare_model(model), result, "openclaude", key=f"openclaude-{tid}")
-    cost = "cost unknown" if charged is None else f"OpenRouter charged ${charged:.4f} for the lead and its agents"
+    cost = ("cost unknown" if charged is None else NOT_YET if charged == 0 and turns
+            else f"OpenRouter charged ${charged:.4f} for the lead and its agents")
     print(f"\nopenclaude team: lead {bare_model(model)}, {len(spawned)} of {n} agents started, "
           f"{result.get('num_turns', '?')} turns, {secs}s, {cost}")
     return code

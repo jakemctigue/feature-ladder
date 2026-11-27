@@ -335,6 +335,8 @@ def run(args):
                      key="external-coordinator")
     inp, out = _tokens(result)
     cost = ("cost unknown" if own is None else
+            "OpenRouter's usage counter had not moved yet (session_summary.py prices this thread from its tokens)"
+            if charged == 0 and (inp or out) else
             f"OpenRouter charged about ${own:.4f} for the coordinator (${charged:.4f} on the key in all, "
             "external workers included)")
     print(f"\nexternal coordinator: {model} via OpenRouter, {result.get('num_turns', '?')} turns, {secs}s, "
