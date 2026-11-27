@@ -43,6 +43,12 @@ Manager or the environment). Do not change any other setting.
 
 Which cards go to OpenRouter: the router's `provider: glm` cards - every
 `mechanic` card and `implementer` cards at medium effort with a score of 6 or
-less (T0 and small T2). Everything else runs on Claude: Sonnet medium is the
-default implementation rung. Without the CLI or a key, `glm` cards run as
-Claude subagents and the card says why.
+less (T0 and small T2) - and its `provider: inkling` cards, the T1 evidence
+collector, on Thinking Machines' Inkling (`thinkingmachines/inkling`; the
+`evidence-collector` model, kept in the jev preset too). Everything else runs
+on Claude: Sonnet medium is the default implementation rung. Without the CLI
+or a key, these cards run as Claude subagents (Haiku for T1) and the card says
+why. The GLM 5.3 orchestrator uses the same key:
+`python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/external_coordinator.py" check --probe`
+checks it, and an `"orchestrator"` block in `providers.json` may change its
+model or limits.

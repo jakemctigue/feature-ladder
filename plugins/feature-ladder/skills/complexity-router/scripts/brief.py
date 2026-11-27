@@ -41,7 +41,7 @@ import route as router  # noqa: E402
 from intake import _load, ladder_state, pop_opt  # noqa: E402  (shared with intake.py, not copied)
 
 LABELS = ["low token cost", "medium token cost", "high token cost"]
-MODEL_NAMES = {"haiku": "Haiku", "sonnet": "Sonnet", "opus": "Opus", "fable": "Fable"}
+MODEL_NAMES = {"haiku": "Haiku", "sonnet": "Sonnet", "opus": "Opus", "fable": "Fable", "glm": "GLM"}
 CLAUDE, OPENROUTER = "Claude plan", "OpenRouter credits"
 ASSUMED = {"ambiguity": 1, "blast_radius": 1}
 
@@ -78,10 +78,17 @@ def _rank(model, effort, glm):
 
 
 def orchestrator_rung(orchestrator=None):
-    """'Opus xhigh' or 'Fable medium': model and effort, no version (this
-    section carries no digits)."""
-    o = orchestrator or {}
+    """'GLM (OpenRouter)', 'Fable medium' or 'Opus xhigh': model and effort, no
+    version (this section carries no digits). No pick means GLM, the default."""
+    o = orchestrator or {"model": "glm", "runner": "openrouter"}
+    if o.get("runner") == "openrouter":
+        return f"{MODEL_NAMES.get(o.get('model'), 'GLM')} (OpenRouter)"
     return f"{MODEL_NAMES.get(o.get('model'), 'Opus')} {o.get('effort') or 'xhigh'}"
+
+
+def orchestrator_bills(orchestrator=None):
+    o = orchestrator or {"runner": "openrouter"}
+    return OPENROUTER if o.get("runner") == "openrouter" else CLAUDE
 
 
 def silk_model(route, no_bs=False):
@@ -113,11 +120,13 @@ def silk_model(route, no_bs=False):
 def cost_rows(route, budget, reviewer=False, evidence=False, orchestrator=None, no_bs=False):
     """[(agent, rung text, label, billing)] for the predicted plan. No numbers."""
     size = route.get("size", "S")
-    glm = route.get("provider") == "glm"
+    glm = route.get("provider") in ("glm", "inkling")
     rows = [("scout", "Sonnet medium", LABELS[1], CLAUDE)]
     if evidence:
-        rows.append(("evidence collector (one call, external library)", "Haiku medium", LABELS[0], CLAUDE))
-    rows.append(("coordinator", orchestrator_rung(orchestrator), LABELS[2], CLAUDE))
+        rows.append(("evidence collector (one call, external library)", "Inkling (Haiku if OpenRouter is off)",
+                     LABELS[0], OPENROUTER))
+    orch_label = LABELS[1] if (orchestrator or {"runner": "openrouter"}).get("runner") == "openrouter" else LABELS[2]
+    rows.append(("coordinator", orchestrator_rung(orchestrator), orch_label, orchestrator_bills(orchestrator)))
     if route.get("design_first"):
         rows.append(("design step", "Opus medium", LABELS[2], CLAUDE))
     model, effort = route.get("model"), route.get("effort")
@@ -128,7 +137,8 @@ def cost_rows(route, budget, reviewer=False, evidence=False, orchestrator=None, 
     if silk:
         rung = SILK_LABELS.get(silk, ("", "Silk Compute"))[1]
     else:
-        rung = "GLM Flash" if glm else f"{MODEL_NAMES.get(model, str(model).title())} {effort}"
+        rung = ("Inkling" if route.get("provider") == "inkling" else "GLM Flash") if glm else \
+            f"{MODEL_NAMES.get(model, str(model).title())} {effort}"
     rows.append((f"worker ({route.get('agent')})", rung, LABELS[rank], OPENROUTER if glm else CLAUDE))
     if int((budget or {}).get("workers", 1) or 1) > 1:
         rows.append(("integrator (only if two or more agents write code)", "Fable medium", LABELS[2], CLAUDE))

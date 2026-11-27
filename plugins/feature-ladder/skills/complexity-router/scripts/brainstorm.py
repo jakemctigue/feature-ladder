@@ -23,14 +23,16 @@ exactly as it does for intake.py.
           ("detected", with the evidence). --save writes it to
           .feature-ladder/brainstorm/<slug>-scan.json.
 
-  decide  SHEET.json [--mode default|auto] [--max N]
+  decide  SHEET.json [--mode default|auto] [--max N] [--app]
           Picks the questions. Unlike intake.py, which asks only what changes
           the model, EVERY applicable detail that is not high confidence is
           asked, application first, in batches of four, with no cap (--max N
           sets one). First come the once-per-session questions (orchestrator,
           subagent budget), so no feature run asks them again. What to build
           is asked at the end, once the app is defined (the hand-off
-          question). `auto` asks nothing.
+          question). `auto` asks nothing. --app: the Claude app (the
+          orchestrator question offers the app's own choices: there the
+          conversation itself coordinates).
 
   apply   SHEET.json [ANSWERS.json] [--out FILE]
           Merges {"answers": {"<detail id>": "<chosen label or the user's
@@ -397,6 +399,8 @@ scoped or built: you estimate, the user confirms. Change no code.
 
 6. Run:
      python3 "SCRIPT" decide <sheet_file> --mode <the Decide mode from your prompt: default | auto>
+   (add --app when you are the Claude app conversation rather than the
+   plugin's scout).
 
 7. Return the sheet path, then the decide output verbatim, then
    `Retained: none - brainstorm only`.
@@ -727,7 +731,7 @@ def _options(d):
 
 
 # ------------------------------------------------------------------- decide --
-def decide(sheet, mode="default", max_q=None):
+def decide(sheet, mode="default", max_q=None, app=False):
     dims = sheet["dimensions"]
     questions, open_text, assumed, not_applicable = [], [], [], []
     for dim_id, d in _ordered(dims):
@@ -750,7 +754,7 @@ def decide(sheet, mode="default", max_q=None):
 
     decisions = []
     if mode != "auto":   # what to build is asked at the end: progress()["handoff"]["question"]
-        decisions = intake.session_decisions(sheet.get("repo_root"), "M", mode)
+        decisions = intake.session_decisions(sheet.get("repo_root"), "M", mode, app)
     return {
         "mode": mode,
         "request": sheet.get("request"),
@@ -1339,7 +1343,9 @@ def main(argv):
         if cmd == "decide":
             mode, max_q = opt("--mode", "default"), opt("--max")
             max_q = int(max_q) if max_q else None
-            print(json.dumps(decide(load_sheet(rest[0]), mode, max_q), indent=2))
+            app = "--app" in rest
+            rest = [a for a in rest if a != "--app"]
+            print(json.dumps(decide(load_sheet(rest[0]), mode, max_q, app), indent=2))
             return 0
         if cmd == "apply":
             out, mode = opt("--out"), opt("--mode", "default")

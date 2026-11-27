@@ -160,7 +160,9 @@ class Brief(unittest.TestCase):
         f = fields()
         for orch, want in (({"key": "fable", "label": "Fable 5.2", "model": "fable", "effort": "medium"}, "Fable medium"),
                            ({"key": "opus", "label": "Opus 5.5 xhigh", "model": "opus", "effort": "xhigh"}, "Opus xhigh"),
-                           (None, "Opus xhigh")):
+                           ({"key": "glm", "label": "GLM 5.3", "model": "glm", "effort": "medium",
+                             "runner": "openrouter"}, "GLM (OpenRouter)"),
+                           (None, "GLM (OpenRouter)")):
             md = brief.make_brief(data(fields=f, route=router.route(f), orchestrator=orch, open_decisions=[],
                                        decisions={"orchestrator": "Fable 5.2", "session_agents": "Small"}))
             cost = sections(md)["2"]

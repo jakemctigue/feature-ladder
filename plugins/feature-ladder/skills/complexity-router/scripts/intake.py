@@ -13,7 +13,7 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           candidate files and the repo's test command. The scoper agent then
           reads the candidate code and corrects the values.
 
-  decide  PROPOSAL.json [--mode default|auto] [--max N]
+  decide  PROPOSAL.json [--mode default|auto] [--max N] [--app]
           Picks the questions to ask. A field is asked when its confidence is
           not high AND flipping it would change the rung (model/effort/agent)
           the router picks or add or remove the design step. Open design decisions the scoper listed (choices a
@@ -21,6 +21,9 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           never has to stop for them later. Prints the predicted route,
           the questions (ready for AskUserQuestion: 2-4 options, each with the
           value it maps to) and what was assumed without asking.
+          --app: the Claude app, where the conversation itself orchestrates,
+          so the orchestrator question offers Opus 5.5 xhigh or Fable 5.2
+          (it cannot hand coordination to GLM 5.3).
 
   apply   PROPOSAL.json ANSWERS.json [--out FILE]
           Merges the user's answers ({"field": value, ..., "decisions":
@@ -35,9 +38,12 @@ Three deterministic steps (the scoper agent fills the judgment in between):
           `secrets` (names the feature needs, never values). A
           `session_agents` decision sets the session's subagent budget.
           An `orchestrator` decision (asked up front, once per session:
-          "Opus 5.5 xhigh" or "Fable 5.2") sets the model the coordinator
-          runs on; the answers' "orchestrator": "fable" | "opus" (the
-          --orchestrator switch) does the same for this run without asking.
+          "GLM 5.3" or "Fable 5.2"; "Opus 5.5 xhigh" stands in for GLM when
+          OpenRouter is not set up, and in the app) sets the model the
+          coordinator runs on; the answers' "orchestrator": "glm" | "fable" |
+          "opus" (the --orchestrator switch) does the same for this run
+          without asking. `orchestrator.runner` says how the coordinator runs:
+          "openrouter" (external_coordinator.py) or "subagent".
 
   card    [--no-bs] '<task json>'
           Route one task AND select its skills in one call. The JSON takes
@@ -706,7 +712,35 @@ def _options(name, f):
     return out[:4]
 
 
-def session_decisions(repo_root_path, rec="S", mode="default"):
+def orchestrator_options(repo_root_path=None, app=False):
+    """The orchestrator question's options. Claude Code: GLM 5.3 (through
+    OpenRouter) or Fable 5.2; when GLM cannot run here (no claude CLI or no
+    OpenRouter key), Opus 5.5 xhigh takes its place and its description says
+    why. The app: Opus or Fable (the conversation is the orchestrator)."""
+    keys = list(session_budget.ASKED_APP if app else session_budget.ASKED)
+    why = None
+    if not app and "glm" in keys:
+        try:
+            import external_worker as ew
+            cfg = ew.load_config(str(repo_root_path or os.getcwd()), no_bs=False)
+            ready, why = ew.available(cfg, str(repo_root_path or os.getcwd()))
+        except Exception as e:  # noqa: BLE001 - the question must never fail because of this
+            ready, why = False, str(e)[:120]
+        if ready:
+            why = None
+        else:
+            keys[keys.index("glm")] = session_budget.FALLBACK_ORCHESTRATOR
+    out = []
+    for k in keys:
+        o = session_budget.ORCHESTRATORS[k]
+        desc = o["description"]
+        if why and k == session_budget.FALLBACK_ORCHESTRATOR:
+            desc = f"{desc} (GLM 5.3 unavailable here: {why})"
+        out.append({"label": o["label"], "description": desc[:200]})
+    return out
+
+
+def session_decisions(repo_root_path, rec="S", mode="default", app=False):
     """The questions asked once per coding session, in asking order: which
     model orchestrates, then how many subagents the session may spawn. Empty
     once answered, and with --auto. Shared with brainstorm.py, which asks them
@@ -720,8 +754,7 @@ def session_decisions(repo_root_path, rec="S", mode="default"):
     if not sess.get("orchestrator", {}).get("chosen"):
         out.append({"id": "orchestrator", "header": "Orchestrator",
                     "question": "Which model should orchestrate this coding session (run the coordinator)?",
-                    "options": [{"label": o["label"], "description": o["description"]}
-                                for o in (session_budget.ORCHESTRATORS[k] for k in ("opus", "fable"))]})
+                    "options": orchestrator_options(repo_root_path, app)})
     if sess.get("budget") == "unset":
         opts = [{"label": f"{session_budget.SIZE_LABELS[k]}" + (" (Recommended)" if k == rec else ""),
                  "description": {"S": "Enough for one or two small features",
@@ -736,7 +769,7 @@ def session_decisions(repo_root_path, rec="S", mode="default"):
     return out
 
 
-def decide(prop, mode="default", max_q=8):
+def decide(prop, mode="default", max_q=8, app=False):
     if mode not in ("default", "auto"):
         raise ValueError(f"--mode must be default or auto, not {mode!r}")
     prop = _normalised(prop)
@@ -808,7 +841,7 @@ def decide(prop, mode="default", max_q=8):
                                          {"label": "Stop", "description": "Do not start; I will commit them myself"}]})
 
     # The once-per-session questions come first: orchestrator, then the budget.
-    decisions[0:0] = session_decisions(prop.get("repo_root"), base.get("size", "S"), mode)
+    decisions[0:0] = session_decisions(prop.get("repo_root"), base.get("size", "S"), mode, app)
 
     # No outside-repo policy question since v1.11: every step the feature needs
     # (deploys, data steps, the merge) runs and is logged by irreversible.py
@@ -902,7 +935,7 @@ def apply(prop, answers):
     switches = sorted({str(x).strip().lstrip("-").replace("-", "_") for x in answers.get("switches") or []}
                       & {"second_opinion", "escalate", "ultra", "no_bs"})
     # The --orchestrator switch wins for this run; then the up-front answer;
-    # then what the session already holds; then Opus xhigh. Never Fable unasked.
+    # then what the session already holds; then GLM 5.3. Never Fable unasked.
     orch_pick = answers.get("orchestrator")
     orch_asked = None if orch_pick else decisions.get("orchestrator")
     orch = session_budget.orchestrator(state_root(prop.get("repo_root")), orch_pick or orch_asked)
@@ -1153,9 +1186,11 @@ def main(argv):
         if cmd == "decide":
             mode = opt("--mode", "default")
             max_q = int(opt("--max", "8"))
+            app = "--app" in rest
+            rest = [a for a in rest if a != "--app"]
             if not rest:
                 raise ValueError("decide needs the proposal file")
-            print(json.dumps(decide(_load(rest[0]), mode, max_q), indent=2))
+            print(json.dumps(decide(_load(rest[0]), mode, max_q, app), indent=2))
             return 0
         if cmd == "apply":
             out = opt("--out")

@@ -16,7 +16,7 @@ Claude Code plugin and uses the same scripts and rules.
 | Rung | Role | Model / effort | Job |
 |---|---|---|---|
 | T0 | mechanic | GLM 5.3 Flash (OpenRouter; DeepSeek V4.1 Flash Fast on Silk with `--no-bs`), else haiku / low | Mechanical patches, docs drafts, fixtures; at most one per feature |
-| T1 | evidence-collector | haiku / medium | Collect current sources, extract claims with citations |
+| T1 | evidence-collector | Inkling (`thinkingmachines/inkling`, OpenRouter, read only), else haiku / medium | Collect current sources, extract claims with citations |
 | T2 | implementer | GLM 5.3 Flash for score <= 6, else **sonnet / medium** (with `--no-bs`: DeepSeek V4.1 Flash for <= 6, Kimi K3.1 Pro for 7-14, on Silk) | Bounded coding and its tests: the default rung |
 | T3 | implementer | sonnet / high | Bounded coding, harder |
 | T4 | senior-implementer | opus / medium | Difficult implementation under an agreed design |
@@ -25,7 +25,10 @@ Claude Code plugin and uses the same scripts and rules.
 
 **The orchestrator is the user's pick, asked up front.** You, the
 conversation, coordinate; the user chooses once per session whether the
-orchestrator is Opus 5.5 at xhigh effort or Fable 5.2 (section 2).
+orchestrator is Opus 5.5 at xhigh effort or Fable 5.2 (section 2). In Claude
+Code the plugin coordinates on GLM 5.3 through OpenRouter by default; this
+app cannot hand the conversation to another model, so it keeps Opus or Fable
+(`--app` on `decide` asks it that way).
 
 The router never picks Fable. A Fable subagent (second opinion, deep
 verification) runs only when the user asks for one by name, with one
@@ -46,15 +49,15 @@ once, at the end of a long session, and only when the user schedules them
 
 ## 1. Fetch the scripts (once per conversation)
 
-If `.feature-ladder/v1.21.0/` does not exist in the working directory, run:
+If `.feature-ladder/v1.22.0/` does not exist in the working directory, run:
 
 ```bash
-FL=.feature-ladder/v1.21.0
-B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.21.0/plugins/feature-ladder/skills
+FL=.feature-ladder/v1.22.0
+B=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.22.0/plugins/feature-ladder/skills
 for f in complexity-router/scripts/route.py complexity-router/scripts/intake.py complexity-router/scripts/brainstorm.py orchestration-ladder/scripts/pr_checkpoint.py orchestration-ladder/scripts/irreversible.py orchestration-ladder/scripts/with_secrets.py orchestration-ladder/scripts/verify.py orchestration-ladder/scripts/confidence.py orchestration-ladder/scripts/external_worker.py orchestration-ladder/scripts/session_budget.py skill-selector/scripts/select_skills.py skill-selector/skill-rules.json hindsight-memory/scripts/resolve_bank.py hindsight-memory/scripts/memory_gate.py hindsight-memory/scripts/recall.py cross-model-review/scripts/codex_review.py worker-contract/SKILL.md orchestration-ladder/scripts/ladder_state.py; do
   mkdir -p "$FL/$(dirname "$f")" && curl -fsSL "$B/$f" -o "$FL/$f" || break
 done
-H=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.21.0/plugins/feature-ladder/hooks/scripts
+H=https://raw.githubusercontent.com/jakemctigue/feature-ladder/v1.22.0/plugins/feature-ladder/hooks/scripts
 for f in ledger.py guard_irreversible.py; do
   curl -fsSL "$H/$f" -o "$FL/orchestration-ladder/scripts/$f" || break
 done
@@ -68,11 +71,11 @@ The second loop puts the token ledger (and the run finder it imports) beside
 workers.
 
 Then, once per conversation (a conversation is one coding session), run
-`python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/session_budget.py new`
+`python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/session_budget.py new`
 so the session's subagent budget is asked again.
 
 If that does not print `FETCH_OK`, try
-`git clone --depth 1 --branch v1.21.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
+`git clone --depth 1 --branch v1.22.0 https://github.com/jakemctigue/feature-ladder .feature-ladder/repo`
 and use `.feature-ladder/repo/plugins/feature-ladder/skills` as the base path.
 If both fail, tell the user the scripts could not be downloaded and stop; do not
 route by judgment. Never edit the downloaded files.
@@ -83,10 +86,10 @@ Before delegating anything, settle the facts for the whole job and ask the user
 only what is uncertain and matters. After that, do not stop to ask again.
 
 1. If the work is in a folder or repo here, run
-   `python3 .feature-ladder/v1.21.0/complexity-router/scripts/intake.py scan "<request>" --cwd <folder> > .feature-ladder/proposal.json`.
+   `python3 .feature-ladder/v1.22.0/complexity-router/scripts/intake.py scan "<request>" --cwd <folder> > .feature-ladder/proposal.json`.
    Otherwise start from `{"request": "...", "slug": "...", "fields": {}, "open_decisions": []}`.
 2. Recall, with no model:
-   `python3 .feature-ladder/v1.21.0/hindsight-memory/scripts/recall.py --query "<request>" --paths <the scan's candidate files> --out .feature-ladder/recall.json`
+   `python3 .feature-ladder/v1.22.0/hindsight-memory/scripts/recall.py --query "<request>" --paths <the scan's candidate files> --out .feature-ladder/recall.json`
    (see "Memory" below; it prints only the facts that bear on the request).
    A recorded decision or convention answers its question: confidence
    `high`, evidence `memory: [kind] ...`. Keep its `memory` line for the card.
@@ -95,7 +98,7 @@ only what is uncertain and matters. After that, do not stop to ask again.
    `fields`, and list up to 4 `open_decisions` (choices a worker would
    otherwise guess; each with `id`, `header`, `question`, 2-4 `options`,
    recommended first).
-4. `python3 .feature-ladder/v1.21.0/complexity-router/scripts/intake.py decide .feature-ladder/proposal.json`
+4. `python3 .feature-ladder/v1.22.0/complexity-router/scripts/intake.py decide --app .feature-ladder/proposal.json`
    lists the questions: on the first feature of the conversation, which
    model orchestrates (`orchestrator`: Opus 5.5 xhigh or Fable 5.2; always
    ask it, never pick Fable for the user) and how many subagents the whole
@@ -120,14 +123,16 @@ no review. 3 of 4 session subagents left. Running now."
 conversation. If you are not the model the user picked (`orchestrator.label`;
 Opus needs effort xhigh), say so once, in one line, with what to switch the
 model picker to, and carry on coordinating as you are unless they switch.
-Never start a Fable subagent to coordinate.
+Never start a Fable subagent to coordinate. If `orchestrator.key` is `glm`
+(a session the plugin started in this repository), say once that GLM 5.3
+coordinates only in Claude Code and carry on as you are.
 
 ## 2a. Brainstorm first (only when the user asks: `--brainstorm`, or "brainstorm this first")
 
 For a whole app, or a large piece of one. Every application and architecture
 detail is gathered at the very front, with as many questions as it takes;
 only then is the app narrowed into features, each built as its own run. `B`
-is `python3 .feature-ladder/v1.21.0/complexity-router/scripts/brainstorm.py`.
+is `python3 .feature-ladder/v1.22.0/complexity-router/scripts/brainstorm.py`.
 Without the switch, skip this section, except to continue a concluded
 brainstorm (`--from-brainstorm [app-slug] [feature-id]`, or "build the next
 feature of the app"): then go straight to 5.
@@ -137,7 +142,7 @@ feature of the app"): then go straight to 5.
    then go to 5.
 2. `B guide` and follow what it prints. You are the scout: scan, recall,
    settle every detail (and add any this app needs that the sheet lacks),
-   draft the features, `B decide`. Start no subagent for this.
+   draft the features, `B decide --app`. Start no subagent for this.
 3. Ask everything `decide` lists, however many questions that is:
    `decisions` (orchestrator, session subagents), every item of `questions`, then
    `open_text` in the user's own words. If the user said to just go, ask
@@ -179,7 +184,7 @@ Treat them as binding unless the user says otherwise.
 
 **The session budget is a hard stop.** This app has no hooks, so before
 starting ANY subagent run
-`python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/session_budget.py charge --agent <role> --model <model>`.
+`python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/session_budget.py charge --agent <role> --model <model>`.
 Exit 4 means the budget is spent (or the spawn is one a feature never makes):
 do not start it; finish with what you have and say what is left. You, the
 conversation, are the coordinator and are not counted.
@@ -203,7 +208,7 @@ budget is where the cost is controlled. For S the whole job is: one
 Build each card and pick its skills in one call:
 
 ```bash
-python3 .feature-ladder/v1.21.0/complexity-router/scripts/intake.py card '{"id":"T1", <router fields from the intake>, "paths":["<files in scope>"], "text":"<goal + description>"}'
+python3 .feature-ladder/v1.22.0/complexity-router/scripts/intake.py card '{"id":"T1", <router fields from the intake>, "paths":["<files in scope>"], "text":"<goal + description>"}'
 ```
 
 It prints the route (`agent`, `model`, `effort`, `size`) and a short
@@ -218,7 +223,7 @@ design step and nothing else; they never change the size. Opus
 rungs require `design_agreed: true`.
 
 Verify with no model: after the worker returns, run
-`python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/verify.py run --id T1 --check "<cmd>" --scope <files> --changed <files the worker listed>`.
+`python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/verify.py run --id T1 --check "<cmd>" --scope <files> --changed <files the worker listed>`.
 Exit 0 accepts; exit 1 re-dispatches once with the failure (a second failure
 goes one band up once, then report `partial`); exit 2 means the worker
 touched files outside scope, so bounce the packet to it.
@@ -227,7 +232,7 @@ touched files outside scope, so bounce the packet to it.
 recall to `.feature-ladder/recall.json`; paste its `memory` line verbatim as
 the card's `Memory:` line (for a shard, run `recall.py` again with the
 shard's title and files and `--reuse .feature-ladder/recall.json`). Then run
-`python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/confidence.py card --action "<card title>" --paths <scope files> --size <S|M|L> --memories .feature-ladder/recall.json`.
+`python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/confidence.py card --action "<card title>" --paths <scope files> --size <S|M|L> --memories .feature-ladder/recall.json`.
 It scores every memory's sentiment and relevance into one number: exit 0
 `proceed`; exit 5 `reshard` - split the card into the shards it names by
 independent file sets and run it once more per shard (once per feature,
@@ -238,7 +243,7 @@ advice about size, never a stop.
 deploys, publishing, messages or payments sent to outside services). It adds
 risk points and never stops the run: run what the feature needs, when it
 needs it. Classify each such command first,
-`python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/irreversible.py classify "<command>"`,
+`python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/irreversible.py classify "<command>"`,
 and record its tier in the report: `mundane` runs and is listed; `risky`
 (overwrites or deletes production data) and `never` (the former never-list:
 merging, force-pushing, deleting a project, database or backups) run and are
@@ -267,7 +272,7 @@ failure uses the normal re-dispatch/escalation path.
 
 **Secrets.** The intake's `secrets.names` lists the Google Secret Manager
 secrets the feature reads (names only). A command that needs one is run as
-`python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`,
+`python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/with_secrets.py --secret NAME[=ENV_VAR] -- <command>`,
 which fetches the value with the user's gcloud sign-in and masks it in the
 output. Never print, echo, log, commit or quote a secret value.
 
@@ -277,8 +282,9 @@ this machine, or a `--no-bs` card below, whatever its `provider`), write the Tas
 in the shell instead of starting a subagent: it launches a child `claude -p`
 on GLM 5.3 Flash through OpenRouter (key from Google Secret Manager or
 `OPENROUTER_API_KEY`), checks the session budget itself, and prints the
-Evidence Packet. Exit 3: OpenRouter unavailable, start the routed Claude
-subagent instead. Exit 4: the session budget is spent. Otherwise
+Evidence Packet. A T1 evidence card (`provider` `inkling`) runs the same way
+on Inkling with read-only tools. Exit 3: OpenRouter unavailable, start the
+routed Claude subagent instead (Haiku medium for T1). Exit 4: the session budget is spent. Otherwise
 (`runner.kind` `subagent`) start the routed Claude subagent; the runner's
 `note` says why the cheap tier was not used. `{"openrouter": {"preset": "jev"}}` in
 `~/.claude/feature-ladder/providers.json` sends these cards to
@@ -293,7 +299,7 @@ DeepSeek V4.1 Flash 1017, and implementer/medium cards scoring 7-14 (Sonnet
 medium otherwise) on Kimi K3.1 Pro. T3 and up stay on Claude. Take the switch
 out of the request text, add `"switches": ["no_bs"]` to the answers in step 4
 of section 2, and build each of that feature's cards with
-`python3 .feature-ladder/v1.21.0/complexity-router/scripts/intake.py card --no-bs '<task json>'`.
+`python3 .feature-ladder/v1.22.0/complexity-router/scripts/intake.py card --no-bs '<task json>'`.
 This app has no hooks and often no `run.json`, so the flag is what carries the
 switch: the route's `runner` names the Silk model and its `command` already
 ends in `--no-bs`. Run that command as printed, exactly like a GLM card, also
@@ -307,7 +313,7 @@ runner is `subagent` and its `note` says why. The switch lasts for that
 feature only: leave `--no-bs` off the next feature's cards unless the user
 asks again, and never set `FEATURE_LADDER_NO_BS` for the session or put Silk in
 `providers.json` (a `"silk"` block there may only change a tier's model).
-`python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/external_worker.py check --no-bs --probe`
+`python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/external_worker.py check --no-bs --probe`
 shows the Silk setup, the balance and each model's probe. Cost per card is the
 approximate drop in the Silk balance.
 
@@ -316,7 +322,7 @@ approximate drop in the Silk balance.
 `intake.py card` already did this. To see the choice by itself:
 
 ```bash
-python3 .feature-ladder/v1.21.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
+python3 .feature-ladder/v1.22.0/skill-selector/scripts/select_skills.py --inject --out .feature-ladder/cards/<task-id>-skills.md '{"role":"<agent>","kind":"<kind>","paths":["<files in scope>"],"text":"<goal + description>","flags":{<router booleans>}}'
 ```
 
 It chooses at most three skills (within a per-role size budget) by rules, writes their
@@ -356,7 +362,7 @@ has `.feature-ladder/skill-rules.json`, those rules are merged in automatically.
   Silk to Sonnet medium to Sonnet high); after that report the feature `partial`.
 
 Acceptance: the "done when" checks are re-run without a model:
-`python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/verify.py run --id <task> --check "<cmd>" ... --scope <paths> ... --changed <files the worker claims>`
+`python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/verify.py run --id <task> --check "<cmd>" ... --scope <paths> ... --changed <files the worker claims>`
 runs them exactly as written, saves the evidence under
 `.feature-ladder/evidence/`, and flags files changed outside scope or a wrong
 claim (exit 0 green, 1 a check failed, 2 scope or claim mismatch). No
@@ -400,13 +406,13 @@ subagent re-checks the work.
 When the user says the session is done, or asks for a review:
 - **Review**, only if asked: run the Codex review once over the whole
   session's diff
-  (`python3 .feature-ladder/v1.21.0/cross-model-review/scripts/codex_review.py review --base <session base> --flags auto`,
+  (`python3 .feature-ladder/v1.22.0/cross-model-review/scripts/codex_review.py review --base <session base> --flags auto`,
   official Codex CLI signed in on this machine; `<session base>` is
   `session_base_sha` in `.feature-ladder/run.json`) and report the findings; each
   confirmed bug becomes its own feature request. A Fable second opinion only
   if the user asks for one.
 - **Memory**: anything still queued, with `memory_gate.py flush` (see Memory).
-- `python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/session_budget.py close`.
+- `python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/session_budget.py close`.
 
 ## Memory (Hindsight), in every mode
 
@@ -428,12 +434,12 @@ If it prints `mcp_fallback` instead (no key here, or no network to
 Hindsight) and this session has Hindsight tools from a connector:
 
 1. If the connector is multi-bank (`list_banks` exists): run
-   `python3 .feature-ladder/v1.21.0/hindsight-memory/scripts/resolve_bank.py --candidates`
+   `python3 .feature-ladder/v1.22.0/hindsight-memory/scripts/resolve_bank.py --candidates`
    (if it reports `"is_git": false`, use the connector's default bank and go
    to 3), call `list_banks` with `query` set to the project name (and the
    repo name if it differs), save the results to `.feature-ladder/banks.json`
    as `{"banks": [...]}`, and run
-   `python3 .feature-ladder/v1.21.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
+   `python3 .feature-ladder/v1.22.0/hindsight-memory/scripts/resolve_bank.py --choose .feature-ladder/banks.json`.
    `action: create` means the bank does not exist yet: skip recall (there is
    nothing to find); it is created by the first write below with
    `create_bank` (`bank_id`, a `name` of `owner/repo`, a `mission` describing
@@ -450,12 +456,12 @@ why (the `memory` line says it), and do not invent recalled context.
 
 **Writes.** None during a feature. After each feature, queue the worker's
 memory candidates that a future task could act on:
-`python3 .feature-ladder/v1.21.0/orchestration-ladder/scripts/session_budget.py remember --line "[kind] fact" ...`
+`python3 .feature-ladder/v1.22.0/orchestration-ladder/scripts/session_budget.py remember --line "[kind] fact" ...`
 (kind: decision, convention, pitfall, interface, test-strategy; name the
 path, identifier or command). The gate refuses summaries, narration, vague
 or duplicate lines; drop those, do not rewrite them. Then write the queue
 right away, because a conversation has no end the scripts can see:
-`python3 .feature-ladder/v1.21.0/hindsight-memory/scripts/memory_gate.py flush`
+`python3 .feature-ladder/v1.22.0/hindsight-memory/scripts/memory_gate.py flush`
 (no model). If it fails (no key or no network) and a connector is present,
 run `memory_gate.py flush --emit` and make one `retain` per entry of
 `retain_calls`, with exactly those arguments (`context: feature-ladder`, tags
