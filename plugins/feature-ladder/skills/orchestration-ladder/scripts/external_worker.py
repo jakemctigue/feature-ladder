@@ -111,13 +111,16 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import ladder_state  # noqa: E402
+import model_catalog  # noqa: E402
 
-# T1, the evidence collector: Thinking Machines' Inkling (the full model, 41B
-# active of 975B; 1M context, tool use) through OpenRouter. Read-only, web
-# allowed; Haiku medium when OpenRouter cannot take the card (exit 3).
-INKLING = "thinkingmachines/inkling"
+# T1, the evidence collector: Thinking Machines' Inkling family through
+# OpenRouter (1M context, tool use). Read-only, web allowed; Haiku medium when
+# OpenRouter cannot take the card (exit 3). Which Inkling, and which GLM each
+# coding rung gets, follows the budget level (model_catalog.LEVELS).
+INKLING = model_catalog.INKLING
 DEFAULTS = {
     "workers": "auto",
+    "budget": model_catalog.DEFAULT_LEVEL,  # low | standard | high: the best model per rung the level affords
     "openrouter": {
         "name": "OpenRouter",
         "slug": "openrouter",
@@ -125,25 +128,21 @@ DEFAULTS = {
         "base_url": "https://openrouter.ai/api",
         "key_env": "OPENROUTER_API_KEY",
         "key_secret": "OPENROUTER_API_KEY",
-        "models": {
-            "mechanic": "z-ai/glm-5.3-flash:nitro",
-            "implementer": "z-ai/glm-5.3-flash:nitro",
-            "implementer-high": "z-ai/glm-5.3",
-            "evidence-collector": INKLING,
-        },
+        "models": model_catalog.models_for(model_catalog.DEFAULT_LEVEL),
         "context_1m": True,
         "max_turns": 40,
         "timeout": 1500,  # longer than a foreground tool call: the coordinator runs this in the background
     },
 }
-# Presets for the cheap tier. "glm" is the default; "jev" hands each request to
-# TypeSafe's Jev Router, which picks the model and effort per request (variable
-# price; the ledger shows what each card cost).
+# Presets for the cheap tier. "glm" is the default: the budget level's table
+# (model_catalog.LEVELS). "jev" hands each coding request to TypeSafe's Jev
+# Router, which picks the model and effort per request (variable price; the
+# ledger shows what each card cost); its evidence collector follows the level.
 PRESETS = {
-    "glm": {"mechanic": "z-ai/glm-5.3-flash:nitro", "implementer": "z-ai/glm-5.3-flash:nitro",
-            "implementer-high": "z-ai/glm-5.3", "evidence-collector": INKLING},
+    "glm": model_catalog.models_for(model_catalog.DEFAULT_LEVEL),
     "jev": {"mechanic": "typesafe/jev-router", "implementer": "typesafe/jev-router",
-            "implementer-high": "typesafe/jev-router", "evidence-collector": INKLING},
+            "implementer-high": "typesafe/jev-router",
+            "evidence-collector": model_catalog.models_for(model_catalog.DEFAULT_LEVEL)["evidence-collector"]},
 }
 # --no-bs: Silk Compute (https://silkcompute.com/docs/claude-code), an
 # Anthropic-compatible endpoint serving abliterated open-weight models. Used only
@@ -210,6 +209,10 @@ UNAVAILABLE = re.compile(r"\b(401|402|403)\b|no auth credentials|invalid (x-)?ap
 # the model's fallback, or to its Claude rung.
 BUSY = re.compile(r"\b(429|503|529)\b|under[_ ]capacity|concurrent[_ ]request[_ ]limit|rate[_ ]limit|"
                   r"model is busy|overloaded", re.I)
+# The provider no longer serves this model id (renamed, retired, no endpoint):
+# like busy, the card moves to the next-best model with nothing lost.
+GONE = re.compile(r"no endpoints found|not a valid model|model[_ ]not[_ ]found|no such model|"
+                  r"model .{0,80}(does not exist|is not available|was not found)", re.I)
 # Account-wide: another model would hit the same limit, so wait and retry the same one first.
 CONCURRENT = re.compile(r"concurrent[_ ]request[_ ]limit", re.I)
 RETRY_AFTER = re.compile(r"retry[-_ ]after\D{0,4}(\d+)", re.I)
@@ -257,6 +260,7 @@ def no_bs_requested(cwd):
 
 def load_config(cwd, no_bs=None):
     cfg = json.loads(json.dumps(DEFAULTS))
+    cfg["openrouter"]["models"] = {}  # until the level is known: what is left here is what the user pinned
     for f in (Path.home() / ".claude" / "feature-ladder" / "providers.json",
               repo_root(cwd) / ".feature-ladder" / "providers.json"):
         if f.is_file():
@@ -264,9 +268,18 @@ def load_config(cwd, no_bs=None):
                 cfg = _merge(cfg, json.loads(f.read_text(encoding="utf-8-sig")))
             except ValueError as e:
                 print(f"external_worker: ignoring {f}: {e}", file=sys.stderr)
+    # The budget level picks the best model each rung can afford; the jev preset
+    # replaces the coding rungs, and a model the user named for a rung wins over both.
+    cfg["budget"] = model_catalog.level_name(cfg.get("budget"))
+    pinned = {k: v for k, v in (cfg["openrouter"].get("models") or {}).items() if v}
+    models = model_catalog.models_for(cfg["budget"])
     preset = str(cfg["openrouter"].get("preset") or "").lower()
-    if preset in PRESETS:
-        cfg["openrouter"]["models"] = dict(PRESETS[preset])
+    if preset == "jev":
+        models.update({k: v for k, v in PRESETS["jev"].items() if k != "evidence-collector"})
+    cfg["openrouter"]["models"] = dict(models, **pinned)
+    cfg["openrouter"]["pinned"] = sorted(pinned)
+    cfg["openrouter"]["fallbacks"] = dict(model_catalog.fallbacks_for(cfg["openrouter"]["models"]),
+                                          **(cfg["openrouter"].get("fallbacks") or {}))
     cfg["no_bs"] = bool(no_bs_requested(cwd) if no_bs is None else no_bs)
     if cfg["no_bs"]:
         # The whole provider block becomes Silk's (only the run limits carry over);
@@ -507,6 +520,7 @@ def contract_text():
             + OUTPUT_CONTRACT)
 
 
+ADHOC = "adhoc"  # the ledger of threads that ran outside any feature run
 OUTPUT_CONTRACT = """Output contract (reply with this and nothing else):
 TASK <id> - <status: done | blocked | partial>
 Changed: <file list with line ranges>
@@ -546,30 +560,91 @@ def memory_line(root, scope, title=""):
     try:
         import confidence
         mems = confidence.parse_memories(f.read_text(encoding="utf-8-sig"))
-        paths = [p.strip() for p in re.split(r"[,\s]+", scope or "") if p.strip()]
+        paths = scope_paths(scope)
         picked, _ = confidence.select_relevant(mems, title, paths, root=root, cap=MEMORY_SNIPPETS)
     except Exception:  # noqa: BLE001 - a bad recall file is "no memory", never a failed card
         return [], 0
     return [f"[{m['kind']}] {m['text']}" for m in picked], len(picked)
 
 
-def prepare_card(card, root, task_id, max_turns, timeout, budget=None, web=False):
-    """The queue card the external worker is handed: the coordinator's card with
-    a Memory: line from the saved recall when it has none, a Bounds: line and the
-    output contract inline (cheap models weigh the card over the system prompt)."""
+RECALL_FRESH = 6 * 3600  # outside a run, a saved recall older than this is made again
+RECALL_SCRIPTS = HERE.parents[1] / "hindsight-memory" / "scripts"
+
+
+def _live_recall(cwd, title, paths):
+    """One Hindsight recall through recall.py (the only way the ladder reads memory:
+    this repository's bank, project-tagged, 1000 tokens at most, saved for the cards
+    that follow). Returns why there is no memory, or None. No model is called."""
+    for d in (RECALL_SCRIPTS, HERE):
+        if (d / "recall.py").is_file():
+            sys.path.insert(0, str(d))
+            break
+    else:
+        return "recall.py is not installed here"
+    import recall  # noqa: E402
+    out = recall.run({"--query": title or "this task", "--paths": list(paths or []), "--cwd": str(cwd)})
+    return out.get("reason")
+
+
+def ensure_recall(root, cwd, title, paths):
+    """Every card conforms to the Hindsight recall: when the feature has no saved
+    recall yet (a card started by hand, an OpenClaude fanout or team outside a
+    coordinator's loop), recall once now. Returns why there is no memory, or None.
+    FEATURE_LADDER_RECALL=off skips the call. Never raises."""
+    try:
+        f = recall_file(root)
+        if f is not None:
+            run = ladder_state.read_json(ladder_state.state_dir(root) / "run.json")
+            in_run = isinstance(run, dict) and run.get("active")
+            if in_run or time.time() - f.stat().st_mtime < RECALL_FRESH:
+                return None
+        if os.environ.get("FEATURE_LADDER_RECALL", "").strip().lower() in ("off", "0", "no", "false"):
+            return "recall is off (FEATURE_LADDER_RECALL)"
+        return _live_recall(cwd, title, paths)
+    except Exception as e:  # noqa: BLE001 - memory never stops a card
+        return f"recall failed ({type(e).__name__})"
+
+
+def card_title(card):
+    return re.sub(r"^TASK\s+\S+:\s*", "", next((ln for ln in card.splitlines() if ln.strip()), "")).strip()
+
+
+def scope_paths(scope):
+    return [p.strip() for p in re.split(r"[,\s]+", scope or "") if p.strip()]
+
+
+def with_memory(card, root, cwd=None, why=None):
+    """(card, added): the card with a Memory: line from the feature's recall when it
+    has none of its own. With `cwd`, a missing recall is made first (ensure_recall),
+    and a card that still gets no memory says why (`why`: the reason a caller
+    already has, from the one recall it made for several cards)."""
     card = card.rstrip()
-    added = []
     mem = _card_line(card, "Memory")
-    if mem is None or not mem or mem.lower() in ("none", "n/a", "-"):
-        title = re.sub(r"^TASK\s+\S+:\s*", "", (card.splitlines() or [""])[0])
-        snippets, relevant = memory_line(root, _card_line(card, "Scope"), title)
-        if snippets:
-            text = "Memory: " + " | ".join(snippets)
-            card = re.sub(r"^Memory:.*$", lambda _: text, card, count=1, flags=re.M) if mem is not None else card + "\n" + text
-            added.append("memory")
-        elif mem is None:
-            card += "\nMemory: none"
-            added.append("memory")
+    if not (mem is None or not mem or mem.lower() in ("none", "n/a", "-")):
+        return card, False
+    title, scope = card_title(card), _card_line(card, "Scope")
+    why = why or (ensure_recall(root, cwd, title, scope_paths(scope)) if cwd else None)
+    snippets, _ = memory_line(root, scope, title)
+    if snippets:
+        text = "Memory: " + " | ".join(snippets)
+    elif mem is None or why:
+        text = f"Memory: none ({why})" if why else "Memory: none"
+    else:
+        return card, False
+    if mem is not None:
+        return re.sub(r"^Memory:.*$", lambda _: text, card, count=1, flags=re.M), True
+    return card + "\n" + text, True
+
+
+def prepare_card(card, root, task_id, max_turns, timeout, budget=None, web=False, cwd=None, why=None):
+    """The queue card the external worker is handed: the coordinator's card with
+    a Memory: line from the saved recall when it has none (recalled now when
+    there is no saved recall and `cwd` is given), a Bounds: line and the
+    output contract inline (cheap models weigh the card over the system prompt)."""
+    added = []
+    card, got = with_memory(card, root, cwd, why)
+    if got:
+        added.append("memory")
     if _card_line(card, "Bounds") is None:
         b = (f"Bounds: at most {max_turns} turns and {timeout}s; read only, no edits; no subagents; web allowed "
              "(WebFetch/WebSearch when this session offers them, else `curl -sL <url>` through Bash)"
@@ -591,9 +666,9 @@ def record_ledger(root, task_id, rung, model, result, provider="openrouter", slu
     try:
         run = ladder_state.read_json(ladder_state.state_dir(root) / "run.json")
         if not isinstance(run, dict):
-            if not slug:
-                return
-            run = {}
+            # No run on record (a card, fanout or team started by hand): the thread still
+            # goes on a ledger, so the session summary can price it.
+            run, slug = {}, slug or ADHOC
         if slug:  # the caller read it before the run finished (finish may close run.json)
             run = dict(run, slug=slug)
         usage = result.get("usage") or {}
@@ -607,6 +682,10 @@ def record_ledger(root, task_id, rung, model, result, provider="openrouter", slu
                  "cost_usd": result.get("openrouter_cost_usd")}
         if result.get("openrouter_cost_shared"):
             entry["cost_shared"] = True  # other external cards ran on the key at the same time
+        if result.get("cost_group"):
+            entry["cost_group"] = result["cost_group"]  # the row that carries the charge these cards share
+        if result.get("seconds") is not None:
+            entry["seconds"] = result["seconds"]
         entry["total"] = entry["input"] + entry["cache_read"] + entry["cache_write"] + entry["output"]
         out = ladder_state.state_dir(root) / "runs" / (run.get("slug") or "no-slug") / "usage.jsonl"
         with ladder_state.locked(root, "ledger"):
@@ -651,6 +730,28 @@ def usage_usd(cfg, key):
         return None
 
 
+BASELINE = "openrouter-usage.json"
+
+
+def note_usage_baseline(root, usage, provider="openrouter"):
+    """Remember what the key had used when this session's first external thread
+    started, so the session summary can say what the key was really charged in
+    all (the counter trails each request, so one thread's difference is not
+    reliable; the difference over a whole session is). Best effort."""
+    if usage is None or provider != "openrouter":
+        return
+    try:
+        d = ladder_state.state_dir(root)
+        sess = ladder_state.read_json(d / "session.json")
+        started = sess.get("started") if isinstance(sess, dict) else None
+        cur = ladder_state.read_json(d / BASELINE)
+        if isinstance(cur, dict) and cur.get("session_started") == started and cur.get("usage_usd") is not None:
+            return
+        ladder_state.write_json(d / BASELINE, {"session_started": started, "usage_usd": usage, "at": now()})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def busy_before_work(child_exit, stdout, stderr):
     """The provider turned the child away as busy (429/503) before it did any work:
     the card can move to the fallback model or its Claude rung with nothing lost."""
@@ -670,7 +771,8 @@ def busy_before_work(child_exit, stdout, stderr):
         out_tokens = 0
     failed = child_exit != 0 or bool(res.get("is_error"))
     # Output tokens mean the model answered, maybe with an edit: never retry that elsewhere.
-    return failed and turns <= 1 and out_tokens == 0 and bool(BUSY.search(f"{said}\n{stderr}"))
+    return failed and turns <= 1 and out_tokens == 0 and bool(BUSY.search(f"{said}\n{stderr}")
+                                                              or GONE.search(f"{said}\n{stderr}"))
 
 
 def retry_wait(stdout, stderr, n):
@@ -820,7 +922,7 @@ def run(args):
         budget = None
     read_only = rung in READ_ONLY_RUNGS
     card, added = prepare_card(Path(card_path).read_text(encoding="utf-8-sig"), root, task_id,
-                               max_turns, timeout, budget, web=read_only)
+                               max_turns, timeout, budget, web=read_only, cwd=cwd)
     # The contract goes in a file: an npm-installed `claude.cmd` passes its arguments
     # through cmd.exe, which cuts a multi-line argument at the first newline.
     fd, contract_file = tempfile.mkstemp(prefix="fl-contract-", suffix=".md")
@@ -833,6 +935,7 @@ def run(args):
            "--disallowedTools", DISALLOWED_READ_ONLY if read_only else DISALLOWED,
            "--append-system-prompt-file", contract_file]
     usage_before = usage_usd(cfg, key)
+    note_usage_baseline(root, usage_before, cfg["openrouter"].get("slug") or "openrouter")
     marker = ladder_state.state_dir(root) / f"external-{safe}.lock"  # "this card is running", for the cost note
     t0 = time.time()
     shared = _others_ran(root, safe, t0, timeout + 120)
@@ -928,11 +1031,15 @@ def run(args):
         ladder_state.write_json(ladder_state.state_dir(root) / "evidence" / f"{safe}-external.json", record)
     except OSError as e:
         print(f"external_worker: evidence not written: {e}", file=sys.stderr)
+    result["seconds"] = secs
     record_ledger(root, task_id, rung, used, result, cfg["openrouter"].get("slug") or "openrouter")
     u = result.get("usage") or {}
     toks = int(u.get("input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0)
     if charged is None:
         cost_txt = "cost unknown"
+    elif charged == 0 and toks and cfg["openrouter"].get("meter") != "balance":
+        # The key's usage counter trails a request by up to a minute: zero here is "not yet", not "free".
+        cost_txt = f"{pname}'s usage counter had not moved yet (session_summary.py prices this thread from its tokens)"
     elif cfg["openrouter"].get("meter") == "balance":
         cost_txt = (f"{pname} balance dropped about ${charged:.4f} (approximate: every card on the account "
                     "shares one balance)")
@@ -950,7 +1057,8 @@ def check(args):
     cfg = load_config(os.getcwd(), no_bs=True if "--no-bs" in args else None)
     p = cfg["openrouter"]
     status = {"workers": cfg["workers"], "provider": p.get("name") or "OpenRouter",
-              "preset": p.get("preset") or "glm", "no_bs": cfg["no_bs"],
+              "preset": p.get("preset") or "glm", "budget": cfg.get("budget"), "pinned": p.get("pinned") or [],
+              "no_bs": cfg["no_bs"],
               "claude_cli": claude_bin() is not None, "models": p["models"]}
     if p.get("fallbacks"):
         status["fallbacks"] = p["fallbacks"]

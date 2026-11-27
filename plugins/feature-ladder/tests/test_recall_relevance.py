@@ -78,6 +78,8 @@ class Repo(unittest.TestCase):
         for p in (mock.patch.object(resolve_bank, "CACHE", self.home / "banks.json"),
                   mock.patch.object(resolve_bank, "Mcp", lambda *a, **k: self.mcp),
                   mock.patch.object(Path, "home", lambda: self.home),
+                  # a key saved in this machine's Windows user environment must not leak in
+                  mock.patch.object(resolve_bank, "_windows_user_env", lambda name: None),
                   mock.patch.dict(os.environ, {}, clear=False)):
             p.start()
             self.addCleanup(p.stop)

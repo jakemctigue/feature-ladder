@@ -65,16 +65,32 @@ wrote and what it rejected. Nothing is summarised or reworded. Exit 3 means
 Hindsight was unreachable from the script: run it again with `--dry-run` and
 make one `retain` call per `would_write` line exactly as printed (the hook
 applies the same gate); if that is not possible either, stop here and leave
-the queue for the next wrap. Once the queue is written (or empty):
+the queue for the next wrap.
+
+## 4. Report, then close
+
+Once the queue is written (or empty), run this and show its output verbatim:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/session_summary.py"
+```
+
+It prints the session's features, subagents used of the budget, one row per
+thread (this conversation, each orchestrator, every worker, design and
+integration step) with the model, where it was billed and what it cost, the
+total per provider, what is left on the OpenRouter account and on this key,
+and the Hindsight status (bank, memories stored, written this session;
+Hindsight Cloud has no balance endpoint, and the summary says where the
+balance is shown). The cost of every thread and both balance lines are part of
+every session summary: never drop them, and never retype the numbers.
+
+Then one short block of your own: review outcome (or "no review scheduled"),
+memories written, and the token table from
+`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ledger.py" report`
+for the last run.
+
+Last, end the session (the next one is asked its budget again):
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/session_budget.py" close
 ```
-
-## 4. Report
-
-One short block: features in the session (from the run ledgers), subagents
-used of the budget, review outcome (or "no review scheduled"), memories
-written, and the token table from
-`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ledger.py" report`
-for the last run.

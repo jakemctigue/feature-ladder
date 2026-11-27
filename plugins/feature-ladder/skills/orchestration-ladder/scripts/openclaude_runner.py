@@ -79,6 +79,7 @@ sys.path.insert(0, str(HERE))
 import external_coordinator as ec  # noqa: E402
 import external_worker as ew  # noqa: E402
 import ladder_state  # noqa: E402
+import model_catalog  # noqa: E402
 
 PACKAGE = "@gitlawb/openclaude"
 INSTALL = f"npm install -g {PACKAGE}"
@@ -95,6 +96,15 @@ DISALLOWED = ["Agent", "Task", "Skill", "NotebookEdit"]  # a worker never starts
 STRIP_PREFIXES = ("CLAUDE", "ANTHROPIC", "OPENAI_", "OPENGATEWAY", "GEMINI_", "GITHUB_COPILOT")
 KEEP = {"CLAUDE_CONFIG_DIR"}  # harmless; OpenClaude ignores it
 BASH_TIMEOUT_MS = "1800000"
+TEAM_MEMORY = """
+# Memory (this repository's Hindsight recall, filtered to this task)
+
+{memory}
+
+Every Task Card you write carries a `Memory:` line: copy the facts above that
+name that card's files or its concern, verbatim, or write `Memory: none`.
+Never paraphrase a fact and never add one that is not listed here.
+"""
 TEAM_NOTE = """
 # You lead a team of OpenRouter agents
 
@@ -235,7 +245,7 @@ def run_card(oc, cfg, root, cwd, item, max_turns, timeout, key):
     except Exception:  # noqa: BLE001
         budget = None
     card, added = ew.prepare_card(Path(item["card"]).read_text(encoding="utf-8-sig"), root, task_id,
-                                  max_turns, timeout, budget, web=read_only)
+                                  max_turns, timeout, budget, web=read_only, why=item.get("no_memory"))
     system_file = ec._write_temp(role_text(rung), f"fl-oc-{rung}-")
     tools = TOOLS_READ_ONLY if read_only else TOOLS
     disallowed = DISALLOWED + (["Edit", "Write", "MultiEdit"] if read_only else ["WebFetch", "WebSearch"])
@@ -351,7 +361,14 @@ def fanout(argv):
             continue
         i["charged"] = True
         runnable.append(i)
+    if runnable:  # one recall for the whole fanout (when the feature has none saved), before the cards start
+        texts = [Path(i["card"]).read_text(encoding="utf-8-sig") for i in runnable]
+        why = ew.ensure_recall(root, cwd, " / ".join(ew.card_title(t) for t in texts)[:300],
+                               [p for t in texts for p in ew.scope_paths(ew._card_line(t, "Scope"))])
+        for i in runnable:
+            i["no_memory"] = why  # a card that gets no memory says why
     before = ew.usage_usd(cfg, key)
+    ew.note_usage_baseline(root, before)
     t0 = time.time()
     if runnable:
         with ThreadPoolExecutor(max_workers=max(1, min(parallel, len(runnable)))) as pool:
@@ -379,23 +396,34 @@ def fanout(argv):
                   + (f", {toks:,} input tokens" if toks else ""))
         print()
     ladder_state.ensure_gitignore(root)
-    for i in ran:
+    # One charge covers every card: each card's share is in proportion to what its
+    # tokens cost at the model's listed price (evenly when no price is known).
+    group = f"openclaude-fanout-{int(t0)}"
+    estimates = [model_catalog.estimate_usd(i["model"], out[i["id"]].get("usage") or {}) for i in ran]
+    shares = model_catalog.share(charged, estimates)
+    for i, mine in zip(ran, shares):
         r = out[i["id"]]
         result = r.pop("_result")
-        result["openrouter_cost_usd"] = charged if len(ran) == 1 else None
+        result["openrouter_cost_usd"] = mine
+        result["seconds"] = r.get("seconds")
         if len(ran) > 1:
             result["openrouter_cost_shared"] = True
+            result["cost_group"] = group
         try:
             ladder_state.write_json(ladder_state.state_dir(root) / "evidence" / f"{ew._safe_id(i['id'])}-openclaude.json",
-                                    dict(r, key_source=source, openrouter_cost_usd=result["openrouter_cost_usd"]))
+                                    dict(r, key_source=source, openrouter_share_usd=result["openrouter_cost_usd"],
+                                         openrouter_cost_usd=charged if len(ran) == 1 else None))
         except OSError as e:
             print(f"openclaude_runner: evidence not written: {e}", file=sys.stderr)
         ew.record_ledger(root, i["id"], i["agent"], bare_model(i["model"]), result, "openclaude",
                          key=f"openclaude-{ew._safe_id(i['id'])}")
-    if len(ran) > 1 and charged is not None:  # one row carries the shared charge, so the ledger totals add up
-        ew.record_ledger(root, "fanout", "fanout", ", ".join(sorted({bare_model(i["model"]) for i in ran})),
-                         {"num_turns": 0, "openrouter_cost_usd": charged}, "openclaude",
-                         key=f"openclaude-fanout-{int(t0)}")
+    if len(ran) > 1 and charged is not None:  # the whole charge, for the coordinator's own-share sum
+        try:
+            ladder_state.write_json(ladder_state.state_dir(root) / "evidence" / f"fanout-{int(t0)}-openclaude.json",
+                                    {"role": "fanout", "cards": [i["id"] for i in ran], "seconds": secs,
+                                     "openrouter_cost_usd": charged, "shares": dict(zip([i["id"] for i in ran], shares))})
+        except OSError:
+            pass
     codes = {out[i["id"]]["returned"] for i in items}
     cost = "cost unknown" if charged is None else f"OpenRouter charged ${charged:.4f} for all of them"
     print(f"openclaude fanout: {len(ran)} of {len(items)} cards ran on OpenRouter through OpenClaude, "
@@ -427,6 +455,20 @@ def team_agents(cfg):
         models[f"fl-{rung}"] = {"model": bare_model(model)}
         routing[rung] = f"fl-{rung}"
     return agents, {"agentModels": models, "agentRouting": routing}
+
+
+def team_memory(root, cwd, prompt):
+    """The lead's memory block: the feature's recall (made now when there is none),
+    filtered to the files and words of the team's task. The lead copies from it
+    onto each card, so every agent it starts conforms to the same recall."""
+    import confidence  # noqa: E402
+    title = ew.card_title(prompt)[:300]
+    paths = list(dict.fromkeys(confidence.FILE_TOKEN.findall(prompt)))[:40]
+    why = ew.ensure_recall(root, cwd, title, paths)
+    facts, _ = ew.memory_line(root, " ".join(paths), title)
+    if facts:
+        return "\n".join(f"- {f}" for f in facts)
+    return f"Memory: none ({why})" if why else "Memory: none (nothing stored about this task)"
 
 
 def _hook_command(state_file, cwd):
@@ -467,14 +509,16 @@ def team(args):
     settings["hooks"] = {"PreToolUse": [{"matcher": "Agent|Task", "hooks": [
         {"type": "command", "command": _hook_command(state, cwd), "timeout": 30}]}]}
     settings_file = ec._write_temp(json.dumps(settings), "fl-oc-settings-")
-    system_file = ec._write_temp(TEAM_NOTE.format(n=n, rungs=", ".join(agents) or "general-purpose"), "fl-oc-lead-")
+    prompt = Path(prompt_file).read_text(encoding="utf-8-sig")
+    system_file = ec._write_temp(TEAM_NOTE.format(n=n, rungs=", ".join(agents) or "general-purpose")
+                                 + TEAM_MEMORY.format(memory=team_memory(root, cwd, prompt)), "fl-oc-lead-")
     cmd = oc + ["-p", "--model", bare_model(model), "--output-format", "json", "--max-turns", str(max_turns),
                 "--permission-mode", "acceptEdits", "--tools", ",".join(LEAD_TOOLS),
                 "--allowedTools", ",".join(LEAD_TOOLS), "--settings", settings_file,
                 "--agents", json.dumps(agents), "--append-system-prompt-file", system_file,
                 "--strict-mcp-config", "--no-session-persistence"]
-    prompt = Path(prompt_file).read_text(encoding="utf-8-sig")
     before = ew.usage_usd(cfg, key)
+    ew.note_usage_baseline(root, before)
     try:
         try:
             child_exit, stdout, stderr = ew._spawn(cmd, cwd, child_env(cfg, key, model), prompt, timeout)
@@ -508,6 +552,7 @@ def team(args):
     after = ew.usage_usd(cfg, key)
     charged = round(after - before, 4) if before is not None and after is not None and after >= before else None
     result["openrouter_cost_usd"] = charged
+    result["seconds"] = secs
     print(report)
     tid = f"team-{int(t0)}"
     record = {"role": "team", "lead_model": model, "agents_max": n, "spawned": spawned,

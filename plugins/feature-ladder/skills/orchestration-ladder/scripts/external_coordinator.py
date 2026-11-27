@@ -224,15 +224,19 @@ def _tokens(result):
 
 
 def _workers_cost_since(root, since):
-    """What the external workers this coordinator ran were charged on the same key
-    (their evidence files), so the coordinator's own share can be told apart."""
+    """What the OpenRouter workers this coordinator ran were charged on the same key
+    (their evidence files: external_worker.py cards, and OpenClaude fanouts and
+    teams, whose shared charge is in one `fanout-*` or `team-*` file), so the
+    coordinator's own share can be told apart."""
     total = 0.0
-    for f in (ladder_state.state_dir(root) / "evidence").glob("*-external.json"):
-        try:
-            if f.stat().st_mtime >= since:
-                total += float((ladder_state.read_json(f) or {}).get("openrouter_cost_usd") or 0)
-        except (OSError, TypeError, ValueError):
-            continue
+    folder = ladder_state.state_dir(root) / "evidence"
+    for pattern in ("*-external.json", "*-openclaude.json"):
+        for f in folder.glob(pattern):
+            try:
+                if f.stat().st_mtime >= since:
+                    total += float((ladder_state.read_json(f) or {}).get("openrouter_cost_usd") or 0)
+            except (OSError, TypeError, ValueError):
+                continue
     return total
 
 
@@ -276,6 +280,7 @@ def run(args):
            "--append-system-prompt-file", system_file]
     prompt = Path(prompt_file).read_text(encoding="utf-8-sig")
     before = ew.usage_usd(cfg, key)
+    ew.note_usage_baseline(root, before)
     t0 = time.time()
     try:
         try:
@@ -312,6 +317,7 @@ def run(args):
     charged = round(after - before, 4) if before is not None and after is not None and after >= before else None
     own = round(max(0.0, charged - _workers_cost_since(root, t0)), 4) if charged is not None else None
     result["openrouter_cost_usd"] = own
+    result["seconds"] = secs
     print(report)  # first: nothing below may lose a report that was paid for
     record = {"role": "coordinator", "model": model, "provider": "OpenRouter", "key_source": source,
               "seconds": secs, "exit": child_exit, "timed_out": timed_out, "returned": code,
@@ -389,8 +395,13 @@ def dispatch(args):
     cmd = [exe, "-p", "--model", model, "--effort", effort, "--output-format", "json", "--max-turns", str(max_turns),
            "--permission-mode", "acceptEdits", "--allowedTools", ",".join(allowed),
            "--disallowedTools", ",".join(disallowed), "--append-system-prompt-file", system_file]
-    card = Path(card_path).read_text(encoding="utf-8-sig")
     root = ew.repo_root(cwd)
+    # A Claude rung reads the same filtered Hindsight recall as an OpenRouter card:
+    # a Task Card without a Memory: line gets one (the integrator's prompt is not a card).
+    card, memory_added = Path(card_path).read_text(encoding="utf-8-sig"), False
+    if card.lstrip().startswith("TASK"):
+        card, memory_added = ew.with_memory(card, root, cwd)
+        card += "\n"
     t0 = time.time()
     try:
         try:
@@ -433,13 +444,15 @@ def dispatch(args):
               "seconds": secs, "exit": child_exit, "timed_out": timed_out, "returned": code,
               "num_turns": result.get("num_turns"), "usage": result.get("usage"),
               "claude_code_estimate_usd": result.get("total_cost_usd"), "session_id": result.get("session_id"),
-              "stderr_tail": (stderr or "")[-1500:], "card": card, "packet": packet}
+              "stderr_tail": (stderr or "")[-1500:], "card_added": ["memory"] if memory_added else [],
+              "card": card, "packet": packet}
     try:
         ladder_state.ensure_gitignore(root)
         ladder_state.write_json(ladder_state.state_dir(root) / "evidence" / f"{safe}-plan.json", record)
     except OSError as e:
         print(f"external_coordinator: evidence not written: {e}", file=sys.stderr)
     result["openrouter_cost_usd"] = None  # the Claude plan: no dollar figure
+    result["seconds"] = secs
     ew.record_ledger(root, task_id, agent, model, result, "claude plan", key=f"plan-{safe}")
     inp, out = _tokens(result)
     print(f"\nplan worker: {agent} on {model}/{effort} (your Claude sign-in), {result.get('num_turns', '?')} turns, "

@@ -27,6 +27,11 @@ import ladder_state  # noqa: E402
 import openclaude_runner as ocr  # noqa: E402
 import session_budget  # noqa: E402
 
+# These tests start no real recall: a card run here must not reach this machine's Hindsight,
+# and a budget level set in this machine's environment must not change the models under test.
+os.environ["FEATURE_LADDER_RECALL"] = "off"
+os.environ.pop("FEATURE_LADDER_BUDGET", None)
+
 KEY = "sk-or-test-key-1234567890"
 
 
@@ -144,7 +149,7 @@ class Fanout(Base):
         self.assertEqual(rc, 0, out)
         by_id = {c["stdin"].split()[1].rstrip(":"): c for c in self.calls}
         model = {t: c["cmd"][c["cmd"].index("--model") + 1] for t, c in by_id.items()}
-        self.assertEqual(model, {"T1": ew.INKLING, "T2": "z-ai/glm-5.3", "T3": "z-ai/glm-5.3",
+        self.assertEqual(model, {"T1": "thinkingmachines/inkling-2-small", "T2": "z-ai/glm-5.3", "T3": "z-ai/glm-5.3",
                                  "T4": "moonshotai/kimi-k3"})
         t1 = by_id["T1"]["cmd"]
         self.assertIn("WebFetch", t1[t1.index("--tools") + 1])  # read only, web allowed
@@ -233,7 +238,7 @@ class Team(Base):
         self.assertNotIn("Agent", agents["implementer"]["tools"])
         settings = json.loads(self.calls[0]["files"]["--settings"])
         self.assertEqual(settings["agentRouting"]["evidence-collector"], "fl-evidence-collector")
-        self.assertEqual(settings["agentModels"]["fl-evidence-collector"]["model"], ew.INKLING)
+        self.assertEqual(settings["agentModels"]["fl-evidence-collector"]["model"], "thinkingmachines/inkling-2-small")
         self.assertEqual(settings["agentModels"]["fl-implementer"]["model"], "z-ai/glm-5.3-flash:nitro")
         hook = settings["hooks"]["PreToolUse"][0]
         self.assertEqual(hook["matcher"], "Agent|Task")

@@ -44,7 +44,7 @@ Manager or the environment). Do not change any other setting.
 Which cards go to OpenRouter: the router's `provider: glm` cards - every
 `mechanic` card and `implementer` cards at medium effort with a score of 6 or
 less (T0 and small T2) - and its `provider: inkling` cards, the T1 evidence
-collector, on Thinking Machines' Inkling (`thinkingmachines/inkling`; the
+collector, on Thinking Machines' Inkling family (the budget level picks which: Inkling 2 Small by default, `"budget": "high"` in providers.json for the full Inkling; the
 `evidence-collector` model, kept in the jev preset too). Everything else runs
 on Claude: Sonnet medium is the default implementation rung. Without the CLI
 or a key, these cards run as Claude subagents (Haiku for T1) and the card says

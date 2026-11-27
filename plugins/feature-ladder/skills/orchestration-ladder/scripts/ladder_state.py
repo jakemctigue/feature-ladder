@@ -44,6 +44,7 @@ DIR = ".feature-ladder"
 # Every file or folder a run writes. One list, so no script's copy can fall behind.
 GITIGNORE = ("intake/", "brainstorm/", "reviews/", "adversarial/", "checkpoints/", "cards/", "evidence/", "runs/",
              "run.json", "session.json", "session-memory*.md", "memory-gate.json", "memory-ledger.jsonl",
+             "openrouter-usage.json", "recall.json", "openclaude/",
              "*.lock", "*.tmp")
 LOCK_STALE_SECONDS = 30
 
