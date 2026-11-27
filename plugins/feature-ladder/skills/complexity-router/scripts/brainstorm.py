@@ -389,6 +389,22 @@ scoped or built: you estimate, the user confirms. Change no code.
    not guessed. Ask nothing about how to build a feature (that is the
    feature run's job), only what the app is and how it is put together.
 
+4b. Unconventional pass (the `unconventional-thinking` skill; every
+   brainstorm, before anything is asked). For each detail that is not high,
+   in the skill's own order: name the default (your recommendation), invert
+   the one assumption it rests on, then look for a real structural
+   alternative in a natural system, another field, or a newer technique. If
+   one holds up for THIS app, add it to that detail's "options" as
+     {{"label": "<= 46 chars", "description": "where the idea comes from,
+       what it buys and what it risks", "unconventional": true}}
+   One per detail at most, never first (it is not the recommendation; the
+   script labels it "Unconventional: ..." and shows it last). A forced
+   metaphor is worse than nothing: most details get none, but look at every
+   architecture detail and at the application details that shape the data
+   model. If the skill's files are on this machine
+   (~/.claude/skills/unconventional-thinking/SKILL.md and its references/),
+   read them first; otherwise the three questions above are the pass.
+
 5. Draft "features": the app split into the smallest features that can each be
    built and tested on their own, in build order, foundation first. Each:
      {{"id": "kebab-id", "title": "...", "request": "<the whole request one
@@ -673,7 +689,8 @@ def normalise(sheet, base=None):
         d["question"] = d.get("question") or f"{d['header']}?"
         d["evidence"] = [str(e) for e in (d.get("evidence") if isinstance(d.get("evidence"), list)
                                            else [d.get("evidence")]) if e]
-        d["options"] = [o for o in (d.get("options") or []) if (o if isinstance(o, str) else (o or {}).get("label"))]
+        d["options"] = unconventional_last(
+            [o for o in (d.get("options") or []) if (o if isinstance(o, str) else (o or {}).get("label"))])
         value = norm(d.get("value")) if d.get("value") not in (None, "", [], {}) else None
         if isinstance(d.get("value"), list):
             value = ", ".join(norm(v) for v in d["value"] if v) or None
@@ -715,12 +732,42 @@ def _ordered(dims):
     return [(k, dims[k]) for k in ids]
 
 
+UNCONVENTIONAL = "Unconventional: "   # the label prefix of the unconventional-thinking pass's option
+
+
+def is_unconventional(o):
+    return isinstance(o, dict) and (bool(o.get("unconventional")) or
+                                    str(o.get("label") or "").lower().startswith(UNCONVENTIONAL.lower().strip()))
+
+
+def unconventional_last(options):
+    """The options with the unconventional one (the guide's step 4b; one per
+    detail, a second is dropped) labelled as such and moved to the end: it is
+    never the recommendation, and it keeps its place among the four options a
+    question can show (the last conventional one gives way)."""
+    plain = [o for o in options if not is_unconventional(o)]
+    odd = [o for o in options if is_unconventional(o)][:1]
+    if not odd:
+        return plain
+    o = dict(odd[0], unconventional=True)
+    label = norm(o.get("label"))
+    if not label.lower().startswith(UNCONVENTIONAL.lower().strip()):
+        label = UNCONVENTIONAL + label
+    o["label"] = label
+    if not plain:      # nothing conventional to compare it with: it cannot stand alone as the recommendation
+        return []
+    return plain[:3] + [o]
+
+
 def _options(d):
     """2-4 options for AskUserQuestion, the recommendation first."""
     opts = []
     for o in d["options"][:4]:
         label, desc = (o, "") if isinstance(o, str) else (o.get("label"), o.get("description", ""))
-        opts.append({"label": _clip(_strip_rec(label), 80), "description": _clip(desc, 200)})
+        opt = {"label": _clip(_strip_rec(label), 80), "description": _clip(desc, 200)}
+        if is_unconventional(o):
+            opt["unconventional"] = True
+        opts.append(opt)
     if not opts and d["value"]:
         opts.append({"label": _clip(d["value"], 80), "description": _clip("; ".join(d["evidence"][:2]), 200)})
     if len(opts) == 1:
@@ -760,7 +807,9 @@ def decide(sheet, mode="default", max_q=None, app=False):
         "request": sheet.get("request"),
         "counts": {"details": len(dims), "asked": len(questions) + len(open_text),
                    "settled": len(assumed), "not_applicable": len(not_applicable),
-                   "features_drafted": len(sheet.get("features") or [])},
+                   "features_drafted": len(sheet.get("features") or []),
+                   # questions that carry an option from the unconventional-thinking pass (step 4b)
+                   "unconventional": sum(1 for q in questions if any(o.get("unconventional") for o in q["options"]))},
         "decisions": decisions,
         "questions": questions,
         "open_text": open_text,

@@ -33,6 +33,11 @@ import external_worker as ew  # noqa: E402
 import intake  # noqa: E402
 import session_budget  # noqa: E402
 
+# These tests start no real recall: a card run here must not reach this machine's Hindsight,
+# and a budget level set in this machine's environment must not change the models under test.
+os.environ["FEATURE_LADDER_RECALL"] = "off"
+os.environ.pop("FEATURE_LADDER_BUDGET", None)
+
 KIMI = "kimi-k3.1-pro-uncensored"
 DS = "deepseek-v4.1-flash-1017-uncensored"
 DS_FAST = "deepseek-v4.1-flash-1017-fast-uncensored"

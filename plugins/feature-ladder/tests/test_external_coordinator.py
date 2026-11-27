@@ -28,6 +28,11 @@ import ladder_state  # noqa: E402
 import route as router  # noqa: E402
 import session_budget  # noqa: E402
 
+# These tests start no real recall: a card run here must not reach this machine's Hindsight,
+# and a budget level set in this machine's environment must not change the models under test.
+os.environ["FEATURE_LADDER_RECALL"] = "off"
+os.environ.pop("FEATURE_LADDER_BUDGET", None)
+
 KEY = "sk-or-test-key-1234567890"
 
 
@@ -242,10 +247,10 @@ class InklingT1(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cfg = ew.load_config(d, no_bs=False)
             self.assertTrue(ew.takes(cfg, r))
-            self.assertEqual(ew.model_for(cfg, "evidence-collector"), "thinkingmachines/inkling")
+            self.assertEqual(ew.model_for(cfg, "evidence-collector"), "thinkingmachines/inkling-2-small")  # standard level
             jev = json.loads(json.dumps(cfg))
             jev["openrouter"]["models"] = dict(ew.PRESETS["jev"])
-            self.assertEqual(ew.model_for(jev, "evidence-collector"), "thinkingmachines/inkling")
+            self.assertEqual(ew.model_for(jev, "evidence-collector"), "thinkingmachines/inkling-2-small")
             silk = ew.load_config(d, no_bs=True)
             self.assertFalse(ew.takes(silk, r))                   # no Silk model for T1: Haiku
             self.assertIsNone(ew.model_for(silk, "evidence-collector"))

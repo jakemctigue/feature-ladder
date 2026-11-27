@@ -145,7 +145,7 @@ the session budget by a PreToolUse hook (`gate`). Both bill OpenRouter only;
 exit 3 when OpenClaude or the key is missing (run the cards one by one).
 
 Cards with `provider: inkling` (T1, the evidence collector) run the same way
-on Thinking Machines' Inkling (`thinkingmachines/inkling`) with read-only
+on Thinking Machines' Inkling family (the budget level picks which; Inkling 2 Small by default) with read-only
 tools (`--rung evidence-collector`; web through WebFetch where offered, else
 `curl`), and on Haiku medium when OpenRouter cannot take them. Silk has no T1
 model, so under `--no-bs` they stay on Haiku.

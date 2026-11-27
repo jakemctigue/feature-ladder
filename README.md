@@ -362,10 +362,12 @@ the start of a conversation it downloads `route.py`, `intake.py`, `brainstorm.py
 `pr_checkpoint.py`, `irreversible.py`, `with_secrets.py`, `verify.py`,
 `confidence.py`, `external_worker.py`, `session_budget.py`, `select_skills.py`,
 `skill-rules.json`, `resolve_bank.py`, `memory_gate.py`, `recall.py`, `codex_review.py`,
-`ladder_state.py` (the state helper the others import), `ledger.py` and
+`ladder_state.py` (the state helper the others import), `model_catalog.py`
+(the budget-level model table and prices), `session_summary.py` (the cost of
+every thread and the balances), `ledger.py` and
 `guard_irreversible.py` (the token ledger for external workers) and
 `worker-contract/SKILL.md` (the contract GLM workers get) from this repo,
-pinned to a release tag (currently `v1.22.0`), so the app and Claude Code
+pinned to a release tag (currently `v1.23.0`), so the app and Claude Code
 always run identical logic. The app session needs code execution and network
 access to GitHub. `--no-bs` works there too: put it on a feature request and
 that feature's cards are built with `intake.py card --no-bs`, so the cheap tier
@@ -426,7 +428,11 @@ cases, what is out of scope, what success looks like) and 18 about the
 architecture (platform, stack, frontend, backend, data store, sign-in,
 hosting, secrets, background work, files, monitoring, testing, CI, scale,
 security, layout, libraries, rollout), plus any the app needs that the sheet
-lacks; the sheet is a floor, not a ceiling. `brainstorm.py scan` settles what
+lacks; the sheet is a floor, not a ceiling. Before anything is asked, the
+scout runs an `unconventional-thinking` pass over every detail it is not sure
+of (name the default, invert the assumption it rests on, look for a real
+structural alternative); where one holds up it becomes one more option on that
+question, labelled `Unconventional: ...`, asked last and never recommended. `brainstorm.py scan` settles what
 the repo's manifests and files already settle, with no model, and the scout
 recalls what memory (an earlier brainstorm's architecture included) already
 decided. Then you are asked, in batches of four and with no cap: every detail
@@ -621,17 +627,57 @@ what was added are stored in `.feature-ladder/evidence/<id>-external.json`.
 
 | Setting | Cheap cards run on |
 |---|---|
-| `/feature-ladder:workers glm` (default) | `z-ai/glm-5.3-flash:nitro` |
+| `/feature-ladder:workers glm` (default) | the budget level's models (below) |
 | `/feature-ladder:workers jev` | `typesafe/jev-router` (picks a model and effort per request; variable price) |
 | `/feature-ladder:workers claude` | Haiku / Sonnet-medium subagents |
 
-T1 evidence cards (`provider: inkling`) run on `thinkingmachines/inkling`
-(Thinking Machines' Inkling, the full model) with read-only tools: no edits,
-web pages through WebFetch where the session offers it, else `curl` through
-Bash. Without OpenRouter they run on Haiku medium. Everything else (Sonnet
-medium by default, Opus, Fable) stays on Claude. External workers count
-against the session budget like any other. Usage lands in the ledger with
-what OpenRouter actually charged.
+T1 evidence cards (`provider: inkling`) run on Thinking Machines' Inkling
+family with read-only tools: no edits, web pages through WebFetch where the
+session offers it, else `curl` through Bash. Without OpenRouter they run on
+Haiku medium. Everything else (Sonnet medium by default, Opus, Fable) stays
+on Claude. External workers count against the session budget like any other.
+
+**Budget level: the best model each rung can afford.** `"budget"` in
+`~/.claude/feature-ladder/providers.json` (or `FEATURE_LADDER_BUDGET` for one
+command) is `low`, `standard` (the default) or `high`. The table is fixed in
+`model_catalog.py`, so the same card always gets the same model:
+
+| Level | Mechanic (T0) | Implementer (T2, score <= 6) | `implementer-high` | Evidence collector (T1) |
+|---|---|---|---|---|
+| `low` | Inkling 2 Mini | GLM 5.3 Flash | GLM 5.3 | Inkling 2 Mini |
+| `standard` | GLM 5.3 Flash | GLM 5.3 Flash | GLM 5.3 | Inkling 2 Small |
+| `high` | GLM 5.3 Flash | GLM 5.3 | Kimi K3.1 Pro | Inkling |
+
+The orchestrator is GLM 5.3 at every level. A model you name under
+`"openrouter": {"models": {"<rung>": "<id>"}}` wins for that rung, and so does
+`FEATURE_LADDER_WORKER_MODEL`. Each model has a next-best one: a card whose
+model OpenRouter no longer serves, or that is busy before doing any work,
+moves to it once (Kimi K3.1 Pro to GLM 5.3 to GLM 5.3 Flash; Inkling to
+Inkling 2 Small to Inkling 2 Mini), then to its Claude rung.
+`python3 skills/orchestration-ladder/scripts/model_catalog.py check` compares
+the active level with OpenRouter's live catalogue (listed, tool use, price).
+
+The table comes from the benchmark (`scripts/bench/ladder_bench.py run
+--compare`, 2026-11-26, two runs per task and model): every candidate passed
+every card of its rung, so on bounded cards the cheapest passing model is the
+best one a level can buy, and a higher level buys headroom for harder cards.
+Cost per card at list price: mechanic Inkling 2 Mini $0.004, GLM 5.3 Flash
+$0.007, GLM 5.3 $0.010; implementer GLM 5.3 Flash $0.008, GLM 5.3 $0.011,
+Inkling 2 Small $0.015, Kimi K3.1 Pro $0.040; evidence collector Inkling 2
+Mini $0.003, Inkling 2 Small $0.010, Inkling $0.047. The cards are small and
+bounded, which is what these rungs get; they do not show which model copes
+best with a hard card, so run the benchmark again before changing a row.
+
+**Every card conforms to the Hindsight recall.** Whatever starts a card (the
+OpenRouter worker, a Claude rung the GLM orchestrator dispatches with
+`external_coordinator.py dispatch`, an OpenClaude fanout, the lead of an
+OpenClaude team), a card with no `Memory:` line gets one from the feature's
+saved recall, filtered to that card's files. When there is no saved recall
+(a card started by hand, a fanout or team outside a coordinator's loop), the
+runner recalls once through `recall.py` first, and a card that still has no
+memory says why (`Memory: none (Hindsight is off: ...)`). A team lead is
+handed the filtered facts and copies them onto the cards it writes.
+`FEATURE_LADDER_RECALL=off` skips that recall for one command.
 
 ### The GLM 5.3 orchestrator
 
@@ -1011,8 +1057,9 @@ cards, the Claude app), with no model in the loop:
 
 A different model family catches different mistakes, but paying for it on
 every small feature is what burned the budget. `/feature-ladder:wrap` is the
-end-of-session step: it flushes the memory queue, closes the session budget
-and prints the ledger. Reviews run only there, once, over the whole session's
+end-of-session step: it flushes the memory queue, prints the session summary
+(the cost of every thread, the OpenRouter balance, the Hindsight status) and
+the ledger, and closes the session budget. Reviews run only there, once, over the whole session's
 diff, and only when asked:
 
 - **`--review`:** Codex, read-only sandbox, through the official Codex CLI and
@@ -1046,6 +1093,42 @@ acceptance, and `/feature-ladder:feature` prints the complete table after the
 coordinator has finished, so the coordinator's own cost is included. The
 ledger is what the router bands, skill budgets and rung choices get tuned
 against; without it those are guesses.
+
+### Session summary: the cost of every thread, and what is left
+
+`session_summary.py` (no model) prints one row per thread: this conversation,
+each orchestrator, every worker card, design and integration step, with its
+model, where it was billed and what it cost. `/feature-ladder:feature` prints
+it for the run it just finished (`--slug`), and `/feature-ladder:wrap` prints
+it for the whole session before closing it.
+
+- **OpenRouter threads** show the thread's tokens at the model's listed
+  price, marked `est.`. OpenRouter's usage counter trails a request by up to
+  a minute, so the difference around one thread can be zero or hold the
+  thread before it; that difference (marked `key`) is used only for a thread
+  that reported no tokens, such as an OpenClaude agent, and an OpenClaude
+  fanout's one charge is split between its cards. Under the table is what
+  the key was really charged since the session's first OpenRouter thread:
+  that total is exact.
+- **Claude plan threads** are not charged per token; the figure in brackets
+  is what the same tokens would cost at Anthropic's list prices.
+- **OpenRouter balance**: credits left on the account (bought minus used)
+  and what is left of this key's own limit.
+- **Hindsight**: Hindsight Cloud has no balance endpoint, so the summary
+  shows what its API does tell (the key works, this repository's bank, how
+  many memories it holds, how many this session wrote) and says that the
+  prepaid credit balance is on Hindsight Cloud's Billing page.
+
+### Benchmark
+
+`python3 plugins/feature-ladder/scripts/bench/ladder_bench.py run` runs five
+fixed Task Cards (two mechanic, two implementer, one read-only evidence card)
+through the real worker path, each in a fresh temporary repository, and
+grades each with its own check command, never with a model. Without options
+it uses the active budget level's models; `--compare` runs each rung's
+candidate models side by side. It prints pass or fail, turns, time, tokens
+and cost per run, and a summary per model. It spends OpenRouter credits
+(about a cent a card) and no Claude plan tokens.
 
 ---
 
@@ -1104,13 +1187,14 @@ plugins/feature-ladder/
   .mcp.json                            Hindsight HTTP MCP server (env-driven)
   agents/                              14 agents (13 rungs + scoper)
   commands/                            feature, wrap, scope, route, skills, recall, codex-review, workers
-  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, confidence.py, with_secrets.py, verify.py, session_budget.py, external_worker.py, external_coordinator.py, openclaude_runner.py, ladder_state.py (one state folder, atomic writes, lock)
+  skills/orchestration-ladder/         protocol + handoff contracts + pr_checkpoint.py, irreversible.py, confidence.py, with_secrets.py, verify.py, session_budget.py, external_worker.py, external_coordinator.py, openclaude_runner.py, model_catalog.py (budget levels, prices, balance), session_summary.py, ladder_state.py (one state folder, atomic writes, lock)
   skills/complexity-router/            route.py + intake.py + brief.py + brainstorm.py
   skills/skill-selector/               select_skills.py + skill-rules.json
   skills/worker-contract/              the short contract every worker preloads instead of the full protocol
   skills/hindsight-memory/             memory rules + resolve_bank.py + memory_gate.py
   skills/cross-model-review/           codex_review.py (Codex review + adversarial tests)
   scripts/evidence/                    generate_evidence.py (SBOM + SARIF), ci_log_classifier.py
+  scripts/bench/                       ladder_bench.py (fixed cards through the real worker path)
   tests/                               unittest suite; fixtures/ holds the golden corpora
   hooks/                               bank resolution and memory gate, session budget and spawn rules, retain gate, token ledger, outside-repo audit log
   hindsight/                           self-host env, start script, round-trip test
@@ -1168,7 +1252,8 @@ Run the whole suite with
 
 | Version | What changed |
 |---|---|
-| **v1.22.0** | GLM 5.3 coordinates. The orchestrator question offers GLM 5.3 (the full model, `z-ai/glm-5.3`, through OpenRouter) or Fable 5.2, and GLM 5.3 is the answer when nothing is picked; Opus 5.5 xhigh stays as `--orchestrator opus`, takes GLM's place in the question when OpenRouter is not set up, and is the automatic fallback when OpenRouter refuses. New `external_coordinator.py`: `run` starts the coordinator as a child `claude -p` on OpenRouter with no Agent tool (hooks and scripts as before), `dispatch` runs the Claude rungs it routes to on your own Claude sign-in under the same budget and spawn rules, `check --probe` checks the setup. T1, the evidence collector, runs on Thinking Machines' Inkling (`thinkingmachines/inkling`) through OpenRouter (router provider `inkling`, read-only tools, web through WebFetch or `curl`), Haiku medium when OpenRouter is off; `--researcher` and `/feature-ladder:research` use it. The Claude app keeps Opus or Fable for its own coordination (`intake.py decide --app`) and gets Inkling for T1. New `openclaude_runner.py`: Claude starts many OpenRouter agents at once through OpenClaude (`oc`): `fanout` runs several cards in parallel, one OpenClaude agent each, and `team` gives a GLM 5.3 lead an Agent tool whose agents are routed to their own OpenRouter models, both under the session budget (a PreToolUse hook gates the team) |
+| **v1.23.0** | Recall on every card, budget levels, and a summary that prices every thread. A card with no `Memory:` line now gets the filtered Hindsight recall on every path, not only the OpenRouter worker: a Claude rung dispatched by the GLM orchestrator, an OpenClaude fanout, and the lead of an OpenClaude team (which copies the facts onto its cards); with no saved recall the runner recalls once through `recall.py`, and a card with no memory says why. New `model_catalog.py`: a `budget` level (`low`, `standard`, `high`) picks the best model each rung can afford, a named model still wins, and a card whose model OpenRouter no longer serves moves to the next-best one. At `standard` the T1 evidence collector moves from Inkling to Inkling 2 Small (same pass rate on the benchmark at about a fifth of the cost); `high` keeps Inkling. New `session_summary.py`, printed by `feature` and `wrap`: one row per thread with what it cost, the OpenRouter balance, and the Hindsight status. New `ladder_bench.py`: five fixed cards through the real worker path. `--brainstorm` runs an `unconventional-thinking` pass on every open detail and asks its one alternative last, labelled, never as the recommendation. Fixed: the coordinator's own cost share counted OpenClaude cards as its own; three memory tests read a Hindsight key saved in the Windows user environment. |
+| v1.22.0 | GLM 5.3 coordinates. The orchestrator question offers GLM 5.3 (the full model, `z-ai/glm-5.3`, through OpenRouter) or Fable 5.2, and GLM 5.3 is the answer when nothing is picked; Opus 5.5 xhigh stays as `--orchestrator opus`, takes GLM's place in the question when OpenRouter is not set up, and is the automatic fallback when OpenRouter refuses. New `external_coordinator.py`: `run` starts the coordinator as a child `claude -p` on OpenRouter with no Agent tool (hooks and scripts as before), `dispatch` runs the Claude rungs it routes to on your own Claude sign-in under the same budget and spawn rules, `check --probe` checks the setup. T1, the evidence collector, runs on Thinking Machines' Inkling (`thinkingmachines/inkling`) through OpenRouter (router provider `inkling`, read-only tools, web through WebFetch or `curl`), Haiku medium when OpenRouter is off; `--researcher` and `/feature-ladder:research` use it. The Claude app keeps Opus or Fable for its own coordination (`intake.py decide --app`) and gets Inkling for T1. New `openclaude_runner.py`: Claude starts many OpenRouter agents at once through OpenClaude (`oc`): `fanout` runs several cards in parallel, one OpenClaude agent each, and `team` gives a GLM 5.3 lead an Agent tool whose agents are routed to their own OpenRouter models, both under the session budget (a PreToolUse hook gates the team) |
 | v1.21.0 | From brainstorm to feature, with the architecture in memory. `--brainstorm` asks as many questions as it takes: no cap on the first round (it was 40), the sheet's 30 details are a floor the scout adds to, and follow-up rounds (`brainstorm.py followup`, `refine`; at most three, all before anything is built) settle details still open and the ones your answers called for. `brainstorm.py remember` stores the settled architecture in Hindsight as one `` `arch:<detail>` `` decision per detail, outside the per-session cap and tagged `architecture`, before the first feature runs. `recall.py` and `confidence.select_relevant` give each later feature the architecture decisions in its area (up to four, newest per detail, apart from the five usual facts), so the relevance filter no longer drops them for requests that share no word with them. A defined app ends with one hand-off question (it replaces the up-front "what to build" question): implement every feature now, the first only, or not now; "now" takes the same path as `/feature-ladder:feature --from-brainstorm [app-slug] [feature-id]`, which (also in the app skill) builds a concluded brainstorm's queue with no request text and no questions; `brainstorm.py next --app/--feature/--build` is the hand-off. `memory_gate.py flush --emit` now prints the exact `retain_calls` for the app's connector. Fix: a memory naming a file in a dot-folder that exists (`.github/workflows/ci.yml`, `.claude/...`) was dropped as stale by v1.20.0's recall filter. |
 | v1.20.0 | Hindsight in every mode, and only relevant facts. `recall.py` is the one read for feature runs, `--brainstorm` (the scout now recalls), `--researcher`, `/feature-ladder:research`, `/feature-ladder:recall` and the app: it recalls once (the coordinator reuses the scout's), keeps only facts that name the work's files or two distinctive words of the request, drops duplicates and memories whose paths are gone, and prints at most five as the `Memory:` line, so no model reads the raw recall. Recall uses `tags_match: any_strict` (plain `all` also returned every untagged memory in the bank) over `project:<repo>` and `project:<folder>`, so clones in differently named folders share memory. `confidence.py` counts only relevant memories, and GLM cards no longer get unrelated memories as filler or Hindsight tools. The key is read from the environment, `.env` files or the Windows user variables, and session start says plainly when memory is off; a cached "no bank yet" is re-checked. Queued memories are written by a detached script when a session ends or starts (never during a run), not only at `wrap`. Another Hindsight server of yours is left alone outside a run. |
 | v1.19.0 | `--brainstorm` on `feature` and in the app skill: every application and architecture detail of the whole app (30 on the sheet, plus any the scout adds) is settled at the very front in one round of questions, then the app is split into a feature queue in build order and each feature runs as a normal atomic run with only its own details on its cards. `brainstorm.py` (scan, decide, apply, features, next, done, context) costs no model tokens; the phase adds no agent beyond the Sonnet scout, and the session subagent budget still stops the queue. Also: a recall the hook later refuses no longer uses up one of the run's three (`memory_gate.commit_recall`), and `abort` frees the run's saved intake for reuse. Optional Rust build of the outside-repo audit hook (`hooks/guard-rs`, `build_guard.sh`): same decisions and `run.json` bytes as the Python hook, about 185 ms down to 60 ms per Bash call on Windows, and it hands every call back to Python once the Python reference changes |

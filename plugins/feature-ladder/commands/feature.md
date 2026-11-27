@@ -72,6 +72,18 @@ With `--from-brainstorm`, go straight to 6.
    `questions` as given (`header`, `question`, options; the recommended
    option first), then `open_text` as one plain numbered message the user
    answers in their own words. There is no cap on questions.
+   **Unconventional thinking is part of every brainstorm's questions.** The
+   scout's guide (step 4b) already ran the `unconventional-thinking` pass, so
+   an option labelled `Unconventional: ...` is that pass's alternative: ask it
+   as given, last, never as the recommendation. `counts.unconventional` says
+   how many questions carry one. When the `unconventional-thinking` skill is
+   installed in this session, invoke it once (Skill tool) on the architecture
+   questions that carry none before you ask: where it finds a real structural
+   alternative, add it to that question as one more option (label
+   `Unconventional: <= 46 chars`, the source idea and its tradeoff in the
+   description; four options at most, so it replaces the last one when there
+   are four). If it finds none, ask the question as it is. Never drop or
+   reorder the scout's options to make room for more than one.
 4. **Confirm.** Write `{"answers": {"<detail>": "<the chosen label, or the user's words>"}, "decisions": {"<id>": "<chosen label>"}}`
    (with `--auto` and no session budget yet: `"decisions": {"session_agents": "Small"}`)
    to `.feature-ladder/brainstorm/<slug>-answers.json` and run
@@ -283,5 +295,12 @@ merge was refused by GitHub, say which PR and why. Last, run
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ledger.py" report
 ```
 and show its table: it now includes the coordinator's own tokens, which the report written
-during the run could not. End with one line:
+during the run could not. Then run
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/session_summary.py" --slug <slug>
+```
+and show its output verbatim: one row per thread of this feature (the
+orchestrator and every worker) with what it cost, then what is left on the
+OpenRouter account and the Hindsight status. Never leave it out and never
+retype its numbers. End with one line:
 "Subagents left this session: <left from session_budget.py status>. At the end of the session run `/feature-ladder:wrap` (add `--review` for one Codex pass over everything)."
