@@ -214,6 +214,24 @@ this session, and a print-mode session is never woken by a background
 notification. On exit 3 from an external runner, dispatch the same card with
 `external_coordinator.py dispatch` on its Claude rung instead.
 
+# Many OpenRouter agents at once (OpenClaude)
+
+When two or more cards go to an OpenRouter runner (the GLM tier, Inkling) and
+their Scopes do not overlap, run them together in one command instead of one
+`external_worker.py run` each:
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/openclaude_runner.py fanout --card .feature-ladder/cards/T1.md --id T1 --rung implementer --card .feature-ladder/cards/T2.md --id T2 --rung mechanic
+```
+Each card runs on its own OpenClaude agent (the `oc` CLI) on its rung's
+OpenRouter model, at the same time, after one session budget slot each. Add
+`--model <id>` after a card to put it on another OpenRouter model; cost is not
+the limit, the budget is. The packets come back in the order given. Exit 0
+every packet; 1 a card failed (its packet is `partial`); 4 a card was refused
+by the budget (final); 3 OpenClaude is not installed or OpenRouter refused the
+key: run each card with its printed runner, or on its Claude rung. Background
+it as you would an external worker (the GLM 5.3 orchestrator runs it in the
+foreground). A single card keeps using its printed runner.
+
 # Run to completion
 
 The user answered every question at intake. Never stop to ask.

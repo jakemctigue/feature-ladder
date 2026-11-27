@@ -244,6 +244,17 @@
       "type": "file"
     },
     {
+      "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/openclaude_runner.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6d02ae08f3efbd5ef6a9b232d301dd06d354fe505fd45f5571aa07c903e95b56"
+        }
+      ],
+      "name": "plugins/feature-ladder/skills/orchestration-ladder/scripts/openclaude_runner.py",
+      "type": "file"
+    },
+    {
       "bom-ref": "file:plugins/feature-ladder/skills/orchestration-ladder/scripts/pr_checkpoint.py",
       "hashes": [
         {

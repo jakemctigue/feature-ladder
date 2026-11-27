@@ -133,6 +133,17 @@ subagent runner and says why. `/feature-ladder:workers jev` switches the
 cheap tier to `typesafe/jev-router`; `claude` turns it off. Configuration:
 `~/.claude/feature-ladder/providers.json`.
 
+Several OpenRouter cards whose Scopes do not overlap run together through
+OpenClaude (`oc`, npm `@gitlawb/openclaude`), a Claude Code fork on any
+OpenAI-compatible endpoint: `scripts/openclaude_runner.py fanout --card A --id
+T1 --rung implementer --card B --id T2 --rung mechanic` starts one OpenClaude
+agent per card at the same time, each on its rung's OpenRouter model (or
+`--model`), one session budget slot each, and prints the packets in order.
+`openclaude_runner.py team --prompt-file F --agents N` is one OpenClaude lead
+(GLM 5.3) whose Agent tool starts up to N OpenRouter agents, held to N and to
+the session budget by a PreToolUse hook (`gate`). Both bill OpenRouter only;
+exit 3 when OpenClaude or the key is missing (run the cards one by one).
+
 Cards with `provider: inkling` (T1, the evidence collector) run the same way
 on Thinking Machines' Inkling (`thinkingmachines/inkling`) with read-only
 tools (`--rung evidence-collector`; web through WebFetch where offered, else

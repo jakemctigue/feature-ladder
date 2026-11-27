@@ -51,4 +51,7 @@ or a key, these cards run as Claude subagents (Haiku for T1) and the card says
 why. The GLM 5.3 orchestrator uses the same key:
 `python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/external_coordinator.py" check --probe`
 checks it, and an `"orchestrator"` block in `providers.json` may change its
-model or limits.
+model or limits. Several OpenRouter agents at once go through OpenClaude
+(`npm install -g @gitlawb/openclaude`, the `oc` command):
+`python3 "${CLAUDE_PLUGIN_ROOT}/skills/orchestration-ladder/scripts/openclaude_runner.py" check --probe`
+checks it; without it each card runs on its own runner as before.
