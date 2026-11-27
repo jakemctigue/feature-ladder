@@ -135,9 +135,10 @@ class Coordinator(Base):
 
 class PlanEnv(unittest.TestCase):
     def test_dispatch_gets_the_users_sign_in_back(self):
+        cfg = ew.load_config(os.getcwd(), no_bs=False)  # before the environment is cleared (Windows needs USERPROFILE)
         user = {"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5-5", "PATH": os.environ.get("PATH", "")}
         with mock.patch.dict(os.environ, user, clear=True):
-            child = ec.coordinator_env(ew.load_config(os.getcwd(), no_bs=False), KEY, "z-ai/glm-5.3")
+            child = ec.coordinator_env(cfg, KEY, "z-ai/glm-5.3")
         with mock.patch.dict(os.environ, child, clear=True):
             env = ec.plan_env()
         for k in ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
